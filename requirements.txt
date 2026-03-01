@@ -1,0 +1,12 @@
+# Image Processing
+opencv-python
+pytesseract
+numpy
+
+# Hardware Control (PCA9685 & Servos)
+adafruit-circuitpython-servokit
+RPi.GPIO
+lgpio
+
+# Utilities
+pyserial
