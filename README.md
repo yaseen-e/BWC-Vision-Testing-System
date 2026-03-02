@@ -4,9 +4,11 @@
 This system is an automated testing platform for Bradford White Corporation (BWC). It utilizes a Raspberry Pi 5 to perform Optical Character Recognition (OCR) on water heater displays and physically actuates user interface buttons via a 7-servo array.
 
 ## Team 14 Members
-* [Your Name]
-* [Partner Name]
-* [Partner Name]
+* Levi Brame
+* Yaseen Elaraby
+* Adam Henke
+* Lukas Roberts
+* Blake Schram
 
 ## Hardware Stack
 * **Controller:** Raspberry Pi 5 (8GB)
