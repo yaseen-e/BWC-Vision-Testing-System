@@ -7,10 +7,8 @@ Captures camera frames, isolates the display region, and extracts mode/temperatu
 
 from __future__ import annotations
 
-from datetime import datetime
 from dataclasses import dataclass
 from difflib import get_close_matches
-from pathlib import Path
 import re
 from typing import Any, Optional
 
@@ -185,22 +183,16 @@ def parse_temperature_text(raw_temp: str) -> Optional[float]:
 
 def read_display(
 	frame: np.ndarray,
-	capture_dir: Optional[str] = None,
-	capture_id: Optional[str] = None,
 ) -> OCRReadout:
 	"""
 	Read both display mode and temperature from one frame.
 
 	Args:
 		frame: BGR image from camera.
-		capture_dir: Optional folder for saved camera captures.
-		capture_id: Optional ID used in saved image filenames.
 
 	Returns:
 		OCRReadout with mode text + temperature float.
 	"""
-	_save_capture(capture_dir, frame, capture_id)
-
 	mask = _display_mask(frame)
 	display_contour = _find_display_contour(mask)
 
@@ -241,8 +233,6 @@ def capture_frame() -> Optional[np.ndarray]:
 
 
 def capture_and_read_display(
-	capture_dir: Optional[str] = None,
-	capture_id: Optional[str] = None,
 ) -> OCRReadout:
 	"""One-call helper used by main: capture frame then run OCR pipeline."""
 	frame = capture_frame()
@@ -257,32 +247,7 @@ def capture_and_read_display(
 
 	return read_display(
 		frame,
-		capture_dir=capture_dir,
-		capture_id=capture_id,
 	)
-
-
-def _save_capture(capture_dir: Optional[str], frame: np.ndarray, capture_id: Optional[str]) -> None:
-	"""Write one raw camera frame per OCR attempt when output is requested."""
-	if not capture_dir:
-		return
-
-	output_dir = Path(capture_dir)
-	output_dir.mkdir(parents=True, exist_ok=True)
-	file_stem = _safe_capture_stem(capture_id)
-	cv2.imwrite(str(output_dir / f"{file_stem}.jpg"), frame)
-
-
-def _safe_capture_stem(capture_id: Optional[str]) -> str:
-	"""Normalize optional IDs into filename-safe stems."""
-	if not capture_id:
-		return datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-
-	cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", capture_id).strip("._")
-	if cleaned:
-		return cleaned
-
-	return datetime.now().strftime("%Y%m%d_%H%M%S_%f")
 
 
 def warm_up() -> None:

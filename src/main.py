@@ -5,14 +5,12 @@ Team 14 - Senior Project
 Coordinates startup, command handling, actuation, OCR reads, reporting, and shutdown.
 """
 
-from datetime import datetime
 from pathlib import Path
-import subprocess
-import sys
 import time
 import traceback
 from enum import Enum, auto
 
+import data_manager
 from motion import servo_driver
 from vision import vision_engine
 
@@ -20,7 +18,6 @@ from vision import vision_engine
 # Capture storage layout (repo-relative): data/captures
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CAPTURE_DIR = PROJECT_ROOT / "data" / "captures"
-CLEANUP_SCRIPT = PROJECT_ROOT / "utilities" / "rotate_capture_cleanup.py"
 CLEANUP_RETENTION_DAYS = 14
 
 
@@ -45,35 +42,18 @@ class SystemState(Enum):
     SHUTDOWN = auto()
 
 
-def _build_capture_id(command_text: str) -> str:
-    """Create a stable, filename-safe ID for one OCR attempt."""
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    command_tag = "".join(char if char.isalnum() else "_" for char in command_text.lower()).strip("_")
-    if not command_tag:
-        command_tag = "read"
-    return f"{timestamp}_{command_tag}"
-
-
 def _run_capture_cleanup() -> None:
-    """Run retention cleanup in apply mode; failures do not stop system startup."""
-    if not CLEANUP_SCRIPT.exists():
-        print(f"[WARNING] Cleanup script not found: {CLEANUP_SCRIPT}")
-        return
-
-    command = [
-        sys.executable,
-        str(CLEANUP_SCRIPT),
-        "--retention-days",
-        str(CLEANUP_RETENTION_DAYS),
-        "--apply",
-    ]
+    """Run retention cleanup during startup; failures do not stop system startup."""
+    CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
 
     try:
-        result = subprocess.run(command, check=False, capture_output=True, text=True)
-        if result.returncode == 0:
-            print(f"[INFO] Capture cleanup applied (retention={CLEANUP_RETENTION_DAYS} days).")
-        else:
-            print("[WARNING] Capture cleanup failed; continuing startup.")
+        data_manager.cleanup_captures(
+            captures_dir=CAPTURE_DIR,
+            retention_days=CLEANUP_RETENTION_DAYS,
+            apply_changes=True,
+            allowed_root=CAPTURE_DIR,
+        )
+        print(f"[INFO] Capture cleanup applied (retention={CLEANUP_RETENTION_DAYS} days).")
     except Exception as exc:
         print(f"[WARNING] Capture cleanup error: {exc}")
 
@@ -95,7 +75,6 @@ def main():
                 
                 case SystemState.STARTUP:
                     print("[INFO] Homing servos, warming up camera...")
-                    CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
                     _run_capture_cleanup()
                     # Bring hardware to a known state before first command.
                     servo_driver.initialize()
@@ -136,11 +115,19 @@ def main():
                 case SystemState.READ_DISPLAY:
                     print("[ACTION] Reading UI display...")
                     # Read both mode and temperature from one capture.
-                    capture_id = _build_capture_id(last_command)
-                    readout = vision_engine.capture_and_read_display(
-                        capture_dir=str(CAPTURE_DIR),
-                        capture_id=capture_id,
-                    )
+                    capture_id = data_manager.build_capture_id(last_command)
+                    frame = vision_engine.capture_frame()
+                    if frame is None:
+                        readout = vision_engine.OCRReadout(
+                            display_found=False,
+                            mode="UNKNOWN",
+                            mode_raw="",
+                            temperature_f=None,
+                            temperature_raw="",
+                        )
+                    else:
+                        data_manager.save_capture_frame(CAPTURE_DIR, frame, capture_id)
+                        readout = vision_engine.read_display(frame)
                     if not readout.display_found:
                         ocr_result = "DISPLAY_NOT_FOUND"
                     else:
