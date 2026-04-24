@@ -4,12 +4,19 @@ Team 14 - Senior Project
 ./src/main.py - Main Event Loop
 """
 
+from datetime import datetime
+from pathlib import Path
 import time
 import traceback
 from enum import Enum, auto
 
 from motion import servo_driver
 from vision import vision_engine
+
+
+# Capture storage layout (repo-relative): data/captures
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+CAPTURE_DIR = PROJECT_ROOT / "data" / "captures"
 
 
 # Small waits per loop reduce CPU usage while keeping response time fast.
@@ -32,6 +39,15 @@ class SystemState(Enum):
     ERROR = auto()
     SHUTDOWN = auto()
 
+
+def _build_capture_id(command_text: str) -> str:
+    """Create a stable, filename-safe ID for one OCR attempt."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    command_tag = "".join(char if char.isalnum() else "_" for char in command_text.lower()).strip("_")
+    if not command_tag:
+        command_tag = "read"
+    return f"{timestamp}_{command_tag}"
+
 def main():
     """Main Event Loop (The Orchestrator)"""
     
@@ -50,6 +66,7 @@ def main():
                 
                 case SystemState.STARTUP:
                     print("[INFO] Homing servos, warming up camera...")
+                    CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
                     # Bring hardware to a known state before first command.
                     servo_driver.initialize()
                     servo_driver.home_all()
@@ -89,7 +106,11 @@ def main():
                 case SystemState.READ_DISPLAY:
                     print("[ACTION] Reading UI display...")
                     # Read both mode and temperature from one capture.
-                    readout = vision_engine.capture_and_read_display()
+                    capture_id = _build_capture_id(last_command)
+                    readout = vision_engine.capture_and_read_display(
+                        capture_dir=str(CAPTURE_DIR),
+                        capture_id=capture_id,
+                    )
                     if not readout.display_found:
                         ocr_result = "DISPLAY_NOT_FOUND"
                     else:
