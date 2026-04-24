@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from difflib import get_close_matches
 from pathlib import Path
 import re
-from typing import Optional
+from typing import Any, Optional
 
 import cv2
 import numpy as np
@@ -25,6 +25,10 @@ KNOWN_MODES = [
 	"MODE: ELECTRIC",
 	"MODE: VACATION",
 ]
+
+
+# Camera object is created lazily so non-Pi environments still run.
+_CAMERA: Optional[Any] = None
 
 
 @dataclass(frozen=True)
@@ -142,25 +146,39 @@ def _read_mode(mode_roi: np.ndarray) -> tuple[str, str]:
 	"""Run OCR on mode text and map it to the nearest known mode."""
 	config = "--psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ: "
 	raw = pytesseract.image_to_string(mode_roi, config=config).strip().upper()
-	if not raw:
-		return "", "UNKNOWN"
-
-	match = get_close_matches(raw, KNOWN_MODES, n=1, cutoff=0.5)
-	final_mode = match[0] if match else "UNKNOWN"
-	return raw, final_mode
+	return raw, parse_mode_text(raw)
 
 
 def _read_temperature(temp_roi: np.ndarray) -> tuple[str, Optional[float]]:
 	"""Run OCR on numeric text and parse a float when possible."""
 	config = "--psm 8 -c tessedit_char_whitelist=0123456789."
 	raw = pytesseract.image_to_string(temp_roi, config=config).strip()
-	if not raw:
-		return "", None
+	return raw, parse_temperature_text(raw)
+
+
+def parse_mode_text(raw_mode: str) -> str:
+	"""Map free-form OCR text to the closest expected mode string."""
+	if not raw_mode:
+		return "UNKNOWN"
+
+	normalized = raw_mode.strip().upper()
+	if not normalized:
+		return "UNKNOWN"
+
+	# Keep cutoff high so unrelated text does not map to a real mode.
+	match = get_close_matches(normalized, KNOWN_MODES, n=1, cutoff=0.75)
+	return match[0] if match else "UNKNOWN"
+
+
+def parse_temperature_text(raw_temp: str) -> Optional[float]:
+	"""Extract numeric temperature from OCR text when available."""
+	if not raw_temp:
+		return None
 
 	# Replace common OCR confusion before numeric parsing.
-	normalized = raw.replace("O", "0").replace("o", "0")
+	normalized = raw_temp.replace("O", "0").replace("o", "0")
 	match = re.search(r"\d+(?:\.\d+)?", normalized)
-	return raw, float(match.group()) if match else None
+	return float(match.group()) if match else None
 
 
 def read_display(frame: np.ndarray, debug_dir: Optional[str] = None) -> OCRReadout:
@@ -215,6 +233,30 @@ def read_display(frame: np.ndarray, debug_dir: Optional[str] = None) -> OCRReado
 	)
 
 
+def capture_frame() -> Optional[np.ndarray]:
+	"""Capture one camera frame (returns None when camera is unavailable)."""
+	camera = _get_camera()
+	if camera is None:
+		return None
+
+	return camera.capture_array()
+
+
+def capture_and_read_display(debug_dir: Optional[str] = None) -> OCRReadout:
+	"""One-call helper used by main: capture frame then run OCR pipeline."""
+	frame = capture_frame()
+	if frame is None:
+		return OCRReadout(
+			display_found=False,
+			mode="UNKNOWN",
+			mode_raw="",
+			temperature_f=None,
+			temperature_raw="",
+		)
+
+	return read_display(frame, debug_dir=debug_dir)
+
+
 def _save_debug(debug_dir: Optional[str], **images: np.ndarray) -> None:
 	"""Write intermediate images only when debug output is requested."""
 	if not debug_dir:
@@ -228,9 +270,42 @@ def _save_debug(debug_dir: Optional[str], **images: np.ndarray) -> None:
 
 def warm_up() -> None:
 	"""Hook for camera warmup work (kept for main loop integration)."""
-	return
+	_get_camera()
+
+
+def _get_camera() -> Optional[Any]:
+	"""Initialize camera on first use, but stay safe on non-Pi systems."""
+	global _CAMERA
+	if _CAMERA is not None:
+		return _CAMERA
+
+	try:
+		from picamera2 import Picamera2  # type: ignore
+	except Exception:
+		return None
+
+	try:
+		camera = Picamera2()
+		config = camera.create_preview_configuration(main={"size": (1280, 720)})
+		camera.configure(config)
+		camera.start()
+		camera.set_controls({"AfMode": 2})
+		_CAMERA = camera
+	except Exception:
+		return None
+
+	return _CAMERA
 
 
 def shutdown() -> None:
 	"""Hook for camera cleanup work (kept for main loop integration)."""
-	return
+	global _CAMERA
+	if _CAMERA is None:
+		return
+
+	try:
+		_CAMERA.stop()
+	except Exception:
+		pass
+
+	_CAMERA = None
