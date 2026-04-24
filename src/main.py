@@ -2,6 +2,7 @@
 Bradford White Corporation (BWC) Water Heater Vision Testing System
 Team 14 - Senior Project
 ./src/main.py - Main Event Loop
+Coordinates startup, command handling, actuation, OCR reads, reporting, and shutdown.
 """
 
 from datetime import datetime

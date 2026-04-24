@@ -2,6 +2,7 @@
 Bradford White Corporation (BWC) Water Heater Vision Testing System
 Team 14 - Senior Project
 ./src/vision/vision_engine.py - Vision/OCR Engine
+Captures camera frames, isolates the display region, and extracts mode/temperature via OCR.
 """
 
 from __future__ import annotations
