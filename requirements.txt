@@ -2,6 +2,7 @@
 opencv-python
 pytesseract
 numpy
+picamera2
 
 # Hardware Control (PCA9685 & Servos)
 adafruit-circuitpython-servokit
