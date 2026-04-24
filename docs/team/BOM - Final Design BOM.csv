@@ -1,0 +1,55 @@
+PRODUCT NAME,,CONTACT INFO,,,,,,
+APPROVED BY,,,,,,,,
+DATE OF APPROVAL,,,,,,,,
+PART COUNT,76,,,,,,,
+TOTAL COST,$753.81,,,,,,,
+,,,,,,,,
+Mechanical Items,,,,,,,,
+PART #,PART NAME,DESCRIPTION,Link,SUPPLIER,MANUFACTURER,Qt.,UNIT COST,TOTAL PART COST
+B13DLM V2,AGFRC 4.5KG Micro Servo,Used to actuate the buttons.,Purchase Link,AGFRC,AGFRC,7,$19.99,$139.93
+MMR-A-C,Magnets,Used to secure device to the heater.,Purchase Link,K&J Magnetics,K&J Magnetics,16,$2.75,$44.00
+2336,Brass M2.5 Standoffs for Pi HATs - Black Plated - Pack of 2,Used to mount Pi HAT to Pi.,Purchase Link,Adafruit,Adafruit,2,$0.75,$1.50
+YR-SHK-3M-BK4,Fabric Straps,"Used to mount device (4"" x 108"")",Purchase Link,Myuren,Myuren,1,$11.95,$11.95
+9657K276,Compression Springs,Used for sliders (12 pack),Purchase Link,McMaster-Carr,McMaster-Carr,1,$12.74,$12.74
+1603A2,Surface Hinges,Used for access panels,Purchase Link,McMaster-Carr,McMaster-Carr,4,$1.33,$5.32
+1575A65,Piano Hinge with Holes,"Aluminum, 2"" Overall Width, 0.245"" Knuckle Diameter",Purchase Link,McMaster-Carr,McMaster-Carr,4,$6.41,$25.64
+3641N16,Gasket Tape,"1"" Wide Tape, 40ft Long",Purchase Link,McMaster-Carr,McMaster-Carr,1,$40.81,$40.81
+92005A037,Steel Pan Head Phillips Screw,"M2 x 0.4 mm Thread, 16 mm Long (100 Pack)",Purchase Link,McMaster-Carr,McMaster-Carr,1,$6.13,$6.13
+90272A145,Zinc-Plated Steel Pan Head Phillips Screw,"6-32 Thread, 5/16"" Long (100 Pack)",Purchase Link,McMaster-Carr,McMaster-Carr,1,$2.51,$2.51
+90272A335,Zinc-Plated Steel Pan Head Phillips Screw,"6-32 Thread, 9/16"" Long (100 Pack)",Purchase Link,McMaster-Carr,McMaster-Carr,1,$10.37,$10.37
+90272A151,Zinc-Plated Steel Pan Head Phillips Screw,"6-32 Thread, 3/4"" Long (100 Pack)",Purchase Link,McMaster-Carr,McMaster-Carr,1,$3.37,$3.37
+91305A102,JIS Zinc-Plated Steel Flat Head Screws,"M2 x 0.4 mm Thread Size, 3 mm Long (25 Pack)",Purchase Link,McMaster-Carr,McMaster-Carr,1,$7.40,$7.40
+91771A106,Passivated 18-8 Stainless Steel Phillips Flat Head Screw,"82 Degree Countersink, 4-40 Thread Size, 1/4"" Long (100 Pack)",Purchase Link,McMaster-Carr,McMaster-Carr,1,$5.40,$5.40
+91251A096,Black-Oxide Alloy Steel Socket Head Screw,"3-48 Thread Size, 1/2"" Long (100 Pack)",Purchase Link,McMaster-Carr,McMaster-Carr,1,$11.59,$11.59
+92855A310,Thumb Nut Screw,"Hex Drive, M3 x 0.5 mm Thread, 10 mm Long (25 Pack)",Purchase Link,McMaster-Carr,McMaster-Carr,1,$2.51,$2.51
+90631A007,Low-Strength Steel Nylon-Insert Locknut,"Zinc-Plated, 6-32 Thread Size (100 Pack)",Purchase Link,McMaster-Carr,McMaster-Carr,1,$4.00,$4.00
+98044A212,Copper General Purpose Washer,"M3 Screw Size, 3.2 mm ID, 7.0 mm OD (25 Pack)",Purchase Link,McMaster-Carr,McMaster-Carr,1,$11.61,$11.61
+4946A622,Flex-Grip Locking Grommets,"5/8"" Hole Diameter and 1/32"" to 1/16"" Material Thickness, Black",Purchase Link,McMaster-Carr,McMaster-Carr,1,$7.40,$7.40
+B0DXT3DF5W,Grommets ,Used for mounting Pi.,Purchase Link,Amazon,uxcell ,8,$0.19,$1.52
+TBD,Aluminum Sheet Metal,5052 Aluminum Sheet Metal Fabrication.,,TBD,TBD,1,Need Quote,
+TBD,Aluminum Details,Aluminum material for fabrication of non-purchased parts,,TBD,TBD,1,Need Quote,
+PLA-CF,PLA 3D Print Filament,1kg spool - 820 cubic cm,Purchase Link,Bambu,Bambu,1,$31.99,$31.99
+,,,,,MECHANICAL PARTS,58, SUB TOTAL,$387.69
+Electrical Items,,,,,,,,
+PART #,PART NAME,DESCRIPTION,Link,SUPPLIER,MANUFACTURER,Qt.,UNIT COST,TOTAL PART COST
+SC1112,Raspberry Pi 5 (8GB),"The ""brain"" for controlling the device.",Purchase Link,Amazon,Raspberry Pi,1,$150.00,$150.00
+Camera Module 3,RPi Camera Module 3,Camera module for capturing display.,Purchase Link,Amazon,Raspberry Pi,1,$70.00,$70.00
+Wonrabai Official CSI FPC Flexible Cable,Pi 5 Camera Cable (Mini),Used to connect camera to Pi.,Purchase Link,Amazon,Wonrabai,1,$9.00,$9.00
+2327,Adafruit 16-Channel PWM / Servo HAT for Raspberry Pi - Mini Kit,"Drives the servos, freeing up the CPU.",Purchase Link,Adafruit,Adafruit,1,$17.50,$17.50
+605926258667,Cooling Fan,Used for cooling the enclosure.,Purchase Link,PiShop,PiShop,1,$5.95,$5.95
+LRS-50-5,LRS-50-5 Power Supply,Power distribution.,Purchase Link,Amazon,MEAN WELL,1,$14.36,$14.36
+70355K98,9ft Power Cord,To supply 120V to power supply.,Purchase Link,McMaster-Carr,McMaster-Carr,1,$11.08,$11.08
+41339-NBWOP-2,USB-C Pigtail Cables,To supply power to the Pi from power supply.,Purchase Link,Amazon,TAODAN,1,$6.99,$6.99
+B0DDWW91LT,18 AWG MTW Wire,To supply power to the servo driver from power supply.,Purchase Link,Amazon,NAOEVO,1,$23.99,$23.99
+810115180517,5ft Cat 6 Ethernet Cable,Connect from Host PC to Pi.,Purchase Link,Amazon,Cable Matters,1,$7.49,$7.49
+2223,GPIO Stacking Header,Allows access to other pins with Pi HAT on the PI.,Purchase Link,Adafruit,Adafruit,2,$2.95,$5.90
+619659193409,64GB MicroSD Card,To load Pi OS onto the Raspberry Pi.,Purchase Link,Amazon,SanDisk,1,$23.99,$23.99
+XSL-GaN-27W,Raspberry Pi 5 Power Supply,To power the Pi when not used in testing device.,Purchase Link,Amazon,iUniker,1,$12.99,$12.99
+221-413,WAGO 3 Wire Lever Connector,To splice wires.,Purchase Link,Grainger,WAGO,4,$1.72,$6.88
+,,,,,ELECTRICAL PARTS,18, SUB TOTAL,$366.12
+,,,,,TOTAL PARTS,76,TOTAL,$753.81
+,,,,,,,,
+,,,,,ELECTRICAL PARTS,18, SUB TOTAL,$366.12
+,,,,,MECHANICAL PARTS,58,SUB TOTAL,$387.69
+,,,,,CONTINGENCY,0,SUB TOTAL,$500.00
+,,,,,TOTAL PARTS,76,TOTAL,"$1,253.81"
