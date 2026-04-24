@@ -6,6 +6,8 @@ Team 14 - Senior Project
 
 from datetime import datetime
 from pathlib import Path
+import subprocess
+import sys
 import time
 import traceback
 from enum import Enum, auto
@@ -17,6 +19,8 @@ from vision import vision_engine
 # Capture storage layout (repo-relative): data/captures
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CAPTURE_DIR = PROJECT_ROOT / "data" / "captures"
+CLEANUP_SCRIPT = PROJECT_ROOT / "utilities" / "rotate_capture_cleanup.py"
+CLEANUP_RETENTION_DAYS = 14
 
 
 # Small waits per loop reduce CPU usage while keeping response time fast.
@@ -48,6 +52,30 @@ def _build_capture_id(command_text: str) -> str:
         command_tag = "read"
     return f"{timestamp}_{command_tag}"
 
+
+def _run_capture_cleanup() -> None:
+    """Run retention cleanup in apply mode; failures do not stop system startup."""
+    if not CLEANUP_SCRIPT.exists():
+        print(f"[WARNING] Cleanup script not found: {CLEANUP_SCRIPT}")
+        return
+
+    command = [
+        sys.executable,
+        str(CLEANUP_SCRIPT),
+        "--retention-days",
+        str(CLEANUP_RETENTION_DAYS),
+        "--apply",
+    ]
+
+    try:
+        result = subprocess.run(command, check=False, capture_output=True, text=True)
+        if result.returncode == 0:
+            print(f"[INFO] Capture cleanup applied (retention={CLEANUP_RETENTION_DAYS} days).")
+        else:
+            print("[WARNING] Capture cleanup failed; continuing startup.")
+    except Exception as exc:
+        print(f"[WARNING] Capture cleanup error: {exc}")
+
 def main():
     """Main Event Loop (The Orchestrator)"""
     
@@ -67,6 +95,7 @@ def main():
                 case SystemState.STARTUP:
                     print("[INFO] Homing servos, warming up camera...")
                     CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
+                    _run_capture_cleanup()
                     # Bring hardware to a known state before first command.
                     servo_driver.initialize()
                     servo_driver.home_all()
