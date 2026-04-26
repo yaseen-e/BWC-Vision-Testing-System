@@ -4,10 +4,5 @@ pytesseract
 numpy
 picamera2
 
-# Hardware Control (PCA9685 & Servos)
-adafruit-circuitpython-servokit
-RPi.GPIO; sys_platform == "linux"
-lgpio; sys_platform == "linux"
-
 # Utilities
 pyserial

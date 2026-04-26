@@ -21,15 +21,15 @@ CAPTURE_DIR = PROJECT_ROOT / "data" / "captures"
 CLEANUP_RETENTION_DAYS = 14
 
 
-# Small waits per loop reduce CPU usage while keeping response time fast.
+# Whole-second waits keep the state machine readable and avoid rushing through tasks.
 STATE_SLEEP_SECONDS = {
-    "STARTUP": 0.20,
-    "WAIT_FOR_COMMAND": 0.25,
-    "PRESS_BUTTON": 0.20,
-    "READ_DISPLAY": 0.20,
-    "REPORT_TO_LABVIEW": 0.20,
-    "ERROR": 0.20,
-    "SHUTDOWN": 0.10,
+    "STARTUP": 2,
+    "WAIT_FOR_COMMAND": 1,
+    "PRESS_BUTTON": 2,
+    "READ_DISPLAY": 3,
+    "REPORT_TO_LABVIEW": 1,
+    "ERROR": 1,
+    "SHUTDOWN": 2,
 }
 
 class SystemState(Enum):
