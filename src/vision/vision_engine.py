@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from difflib import get_close_matches
 import re
 from typing import Any, Optional
+import sys
 
 import cv2
 import numpy as np
@@ -456,13 +457,15 @@ def _get_camera() -> Optional[Any]:
 
 	try:
 		from picamera2 import Picamera2  # type: ignore
-	except Exception:
+	except Exception as e:
+		print(f"[CAMERA_DEBUG] Failed to import Picamera2: {type(e).__name__}: {e}", file=sys.stderr)
 		return None
 
 	try:
 		# Auto-detect available cameras
 		camera_info = Picamera2.global_camera_info()
 		if not camera_info:
+			print("[CAMERA_DEBUG] No cameras detected by Picamera2.global_camera_info()", file=sys.stderr)
 			return None
 		
 		# Use the first available camera
@@ -473,7 +476,8 @@ def _get_camera() -> Optional[Any]:
 		camera.start()
 		camera.set_controls({"AfMode": 2})
 		_CAMERA = camera
-	except Exception:
+	except Exception as e:
+		print(f"[CAMERA_DEBUG] Camera initialization failed: {type(e).__name__}: {e}", file=sys.stderr)
 		return None
 
 	return _CAMERA
