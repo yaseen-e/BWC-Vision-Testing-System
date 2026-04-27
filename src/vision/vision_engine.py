@@ -32,6 +32,19 @@ _CAMERA: Optional[Any] = None
 _CAMERA_NUM = 0
 
 
+def get_camera_inventory() -> list[dict[str, Any]]:
+	"""Return the libcamera-visible camera list for startup diagnostics."""
+	try:
+		from picamera2 import Picamera2  # type: ignore
+	except Exception:
+		return []
+
+	try:
+		return Picamera2.global_camera_info()
+	except Exception:
+		return []
+
+
 @dataclass(frozen=True)
 class OCRReadout:
 	"""Single OCR result payload for upstream logic (main/network)."""
@@ -258,15 +271,7 @@ def warm_up() -> None:
 
 def is_camera_available() -> bool:
 	"""Return True when the Pi camera can be initialized successfully."""
-	try:
-		from picamera2 import Picamera2  # type: ignore
-	except Exception:
-		return False
-
-	try:
-		return len(Picamera2.global_camera_info()) > _CAMERA_NUM
-	except Exception:
-		return False
+	return len(get_camera_inventory()) > _CAMERA_NUM
 
 
 def _get_camera() -> Optional[Any]:
