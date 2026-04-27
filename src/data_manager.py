@@ -47,7 +47,9 @@ def save_capture_frame(capture_dir: Path, frame: np.ndarray, capture_id: Optiona
     capture_dir.mkdir(parents=True, exist_ok=True)
     file_stem = _safe_capture_stem(capture_id)
     output_path = capture_dir / f"{file_stem}.jpg"
-    cv2.imwrite(str(output_path), frame)
+    if not cv2.imwrite(str(output_path), frame):
+        return None
+
     return output_path
 
 

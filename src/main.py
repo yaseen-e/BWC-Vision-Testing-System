@@ -79,7 +79,10 @@ def main():
                     # Bring hardware to a known state before first command.
                     servo_driver.initialize()
                     servo_driver.home_all()
-                    vision_engine.warm_up()
+                    if vision_engine.is_camera_available():
+                        print("[INFO] Camera detected.")
+                    else:
+                        print("[WARNING] Camera NOT found.")
                     current_state = SystemState.WAIT_FOR_COMMAND
                     time.sleep(STATE_SLEEP_SECONDS["STARTUP"])
                     
@@ -114,10 +117,11 @@ def main():
                     
                 case SystemState.READ_DISPLAY:
                     print("[ACTION] Reading UI display...")
-                    # Read both mode and temperature from one capture.
+                    # Capture first, then persist the raw image and run OCR on that same frame.
                     capture_id = data_manager.build_capture_id(last_command)
                     frame = vision_engine.capture_frame()
                     if frame is None:
+                        print("[WARNING] No camera frame available; skipping image save.")
                         readout = vision_engine.OCRReadout(
                             display_found=False,
                             mode="UNKNOWN",
@@ -126,7 +130,11 @@ def main():
                             temperature_raw="",
                         )
                     else:
-                        data_manager.save_capture_frame(CAPTURE_DIR, frame, capture_id)
+                        saved_path = data_manager.save_capture_frame(CAPTURE_DIR, frame, capture_id)
+                        if saved_path is None:
+                            print("[WARNING] Capture frame could not be saved.")
+                        else:
+                            print(f"[INFO] Saved capture frame: {saved_path}")
                         readout = vision_engine.read_display(frame)
                     if not readout.display_found:
                         ocr_result = "DISPLAY_NOT_FOUND"

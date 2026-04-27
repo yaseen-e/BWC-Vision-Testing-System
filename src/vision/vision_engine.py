@@ -255,6 +255,11 @@ def warm_up() -> None:
 	_get_camera()
 
 
+def is_camera_available() -> bool:
+	"""Return True when the Pi camera can be initialized successfully."""
+	return _get_camera() is not None
+
+
 def _get_camera() -> Optional[Any]:
 	"""Initialize camera on first use, but stay safe on non-Pi systems."""
 	global _CAMERA
