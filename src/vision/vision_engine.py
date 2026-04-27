@@ -37,7 +37,6 @@ _MODE_KEYWORDS = {
 
 # Camera object is created lazily so non-Pi environments still run.
 _CAMERA: Optional[Any] = None
-_CAMERA_NUM = 1
 
 
 @dataclass(frozen=True)
@@ -461,7 +460,14 @@ def _get_camera() -> Optional[Any]:
 		return None
 
 	try:
-		camera = Picamera2(camera_num=_CAMERA_NUM)
+		# Auto-detect available cameras
+		camera_info = Picamera2.global_camera_info()
+		if not camera_info:
+			return None
+		
+		# Use the first available camera
+		camera_num = camera_info[0]["Num"]
+		camera = Picamera2(camera_num=camera_num)
 		config = camera.create_preview_configuration(main={"size": (1280, 720)})
 		camera.configure(config)
 		camera.start()
