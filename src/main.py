@@ -6,8 +6,13 @@ Coordinates startup, command handling, actuation, OCR reads, reporting, and shut
 """
 
 from pathlib import Path
+import csv
+import select
+import sys
 import time
 import traceback
+import termios
+import tty
 from enum import Enum, auto
 
 import data_manager
@@ -18,6 +23,7 @@ from vision import vision_engine
 # Capture storage layout (repo-relative): data/captures
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CAPTURE_DIR = PROJECT_ROOT / "data" / "captures"
+TEST_REPORT_DIR = PROJECT_ROOT / "data" / "test_reports"
 CLEANUP_RETENTION_DAYS = 14
 
 
@@ -57,6 +63,48 @@ def _run_capture_cleanup() -> None:
     except Exception as exc:
         print(f"[WARNING] Capture cleanup error: {exc}")
 
+
+def _open_test_report() -> tuple[object, csv.DictWriter, Path]:
+    """Create a timestamped CSV report for this run and write header row."""
+    TEST_REPORT_DIR.mkdir(parents=True, exist_ok=True)
+    report_id = data_manager.build_capture_id("test_report")
+    report_path = TEST_REPORT_DIR / f"{report_id}.csv"
+    report_file = report_path.open("w", newline="", encoding="utf-8")
+    writer = csv.DictWriter(report_file, fieldnames=["step", "temperature", "mode"])
+    writer.writeheader()
+    report_file.flush()
+    return report_file, writer, report_path
+
+
+def _enable_single_key_mode() -> tuple[object | None, object | None]:
+    """Put terminal in cbreak mode so single key presses are readable."""
+    if not sys.stdin.isatty():
+        return None, None
+
+    fd = sys.stdin.fileno()
+    previous = termios.tcgetattr(fd)
+    tty.setcbreak(fd)
+    return fd, previous
+
+
+def _disable_single_key_mode(fd: object | None, previous: object | None) -> None:
+    """Restore terminal mode after single-key capture usage."""
+    if fd is None or previous is None:
+        return
+    termios.tcsetattr(fd, termios.TCSADRAIN, previous)
+
+
+def _space_pressed() -> bool:
+    """Return True when a space key is waiting on stdin."""
+    if not sys.stdin.isatty():
+        return False
+
+    ready, _, _ = select.select([sys.stdin], [], [], 0)
+    if not ready:
+        return False
+
+    return sys.stdin.read(1) == " "
+
 def main():
     """Main Event Loop (The Orchestrator)"""
     
@@ -66,18 +114,28 @@ def main():
     ocr_result = ""
     error_message = ""
     readout = None
+    step_counter = 0
+    report_file, report_writer, report_path = _open_test_report()
+    stdin_fd, previous_termios = _enable_single_key_mode()
     print("--- Starting BWC Water Heater Vision Testing System ---")
+    print(f"[INFO] Test report CSV: {report_path}")
 
     try:
         while True:
+            if current_state != SystemState.SHUTDOWN and _space_pressed():
+                print("[INFO] Space pressed. Entering SHUTDOWN state.")
+                current_state = SystemState.SHUTDOWN
+
             match current_state:
                 
                 case SystemState.STARTUP:
-                    print("[INFO] Homing servos, warming up camera...")
+                    print("[INFO] Cleaning up old captures.")
                     _run_capture_cleanup()
                     # Bring hardware to a known state before first command.
+                    print("[INFO] Initializing servos.")
                     servo_driver.initialize()
                     servo_driver.home_all()
+                    print("[INFO] Initializing vision engine.")
                     if vision_engine.is_camera_available():
                         print("[INFO] Camera detected.")
                     else:
@@ -142,6 +200,14 @@ def main():
                         f"RAW_MODE={readout.mode_raw};"
                         f"RAW_TEMP={readout.temperature_raw}"
                     )
+                    step_counter += 1
+                    report_writer.writerow(
+                        {
+                            "step": step_counter,
+                            "temperature": "" if readout.temperature_f is None else int(readout.temperature_f),
+                            "mode": readout.mode,
+                        }
+                    )
                     current_state = SystemState.REPORT_TO_LABVIEW
                     time.sleep(STATE_SLEEP_SECONDS["READ_DISPLAY"])
                     
@@ -159,10 +225,13 @@ def main():
                     
                 case SystemState.SHUTDOWN:
                     print("[INFO] LabVIEW requested shutdown. Parking servos, exiting.")
+                    report_file.flush()
+                    report_file.close()
                     # Leave system in safe state before exit.
                     servo_driver.home_all()
                     servo_driver.shutdown()
                     vision_engine.shutdown()
+                    _disable_single_key_mode(stdin_fd, previous_termios)
                     time.sleep(STATE_SLEEP_SECONDS["SHUTDOWN"])
                     break
     
@@ -173,6 +242,9 @@ def main():
         traceback.print_exc() # prints exact line number of crash\
 
         # Try to park hardware even after unexpected crash.
+        report_file.flush()
+        report_file.close()
+        _disable_single_key_mode(stdin_fd, previous_termios)
         servo_driver.home_all()
         servo_driver.shutdown()
         vision_engine.shutdown()
