@@ -29,6 +29,7 @@ KNOWN_MODES = [
 
 # Camera object is created lazily so non-Pi environments still run.
 _CAMERA: Optional[Any] = None
+_CAMERA_NUM = 0
 
 
 @dataclass(frozen=True)
@@ -257,7 +258,15 @@ def warm_up() -> None:
 
 def is_camera_available() -> bool:
 	"""Return True when the Pi camera can be initialized successfully."""
-	return _get_camera() is not None
+	try:
+		from picamera2 import Picamera2  # type: ignore
+	except Exception:
+		return False
+
+	try:
+		return len(Picamera2.global_camera_info()) > _CAMERA_NUM
+	except Exception:
+		return False
 
 
 def _get_camera() -> Optional[Any]:
@@ -272,7 +281,7 @@ def _get_camera() -> Optional[Any]:
 		return None
 
 	try:
-		camera = Picamera2()
+		camera = Picamera2(camera_num=_CAMERA_NUM)
 		config = camera.create_preview_configuration(main={"size": (1280, 720)})
 		camera.configure(config)
 		camera.start()
