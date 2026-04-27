@@ -47,7 +47,7 @@ class OCRReadout:
 	display_found: bool
 	mode: str
 	mode_raw: str
-	temperature_f: Optional[float]
+	temperature_f: Optional[int]
 	temperature_raw: str
 
 
@@ -167,13 +167,38 @@ def _fallback_mode_variants(frame: np.ndarray) -> list[np.ndarray]:
 def _extract_temp_roi(binary: np.ndarray) -> np.ndarray:
 	"""Crop the center section where numeric temperature appears."""
 	height, width = binary.shape
-	temp_roi = binary[int(height * 0.16):int(height * 0.48), int(width * 0.28):int(width * 0.63)]
+	temp_roi = binary[int(height * 0.12):int(height * 0.56), int(width * 0.22):int(width * 0.70)]
 	temp_roi = cv2.bitwise_not(temp_roi)
+	temp_roi = cv2.GaussianBlur(temp_roi, (3, 3), 0)
 
 	# Small close operation helps connect broken strokes in digits.
 	kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
 	temp_roi = cv2.morphologyEx(temp_roi, cv2.MORPH_CLOSE, kernel)
-	return cv2.resize(temp_roi, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
+	return cv2.resize(temp_roi, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
+
+
+def _extract_temp_variants(binary: np.ndarray) -> list[np.ndarray]:
+	"""Build a few cheap OCR variants for the temperature line."""
+	temp_roi = _extract_temp_roi(binary)
+	variants = [temp_roi]
+
+	_, otsu_inverse = cv2.threshold(temp_roi, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+	variants.append(otsu_inverse)
+	variants.append(cv2.morphologyEx(temp_roi, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))))
+	variants.append(cv2.dilate(temp_roi, cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2)), iterations=1))
+
+	return variants
+
+
+def _fallback_temp_variants(frame: np.ndarray) -> list[np.ndarray]:
+	"""Build conservative OCR variants when the display contour is not found."""
+	gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+	gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+	height, width = gray.shape
+	temp_roi = gray[int(height * 0.12):int(height * 0.58), int(width * 0.24):int(width * 0.78)]
+	temp_roi = cv2.GaussianBlur(temp_roi, (3, 3), 0)
+	_, otsu = cv2.threshold(temp_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+	return [temp_roi, otsu, cv2.bitwise_not(otsu)]
 
 
 def _read_mode(mode_roi: np.ndarray) -> tuple[str, str]:
@@ -202,9 +227,29 @@ def _read_mode_from_variants(variants: list[np.ndarray], config: str) -> tuple[s
 
 def _read_temperature(temp_roi: np.ndarray) -> tuple[str, Optional[float]]:
 	"""Run OCR on numeric text and parse a float when possible."""
-	config = "--psm 8 -c tessedit_char_whitelist=0123456789."
-	raw = pytesseract.image_to_string(temp_roi, config=config).strip()
-	return raw, parse_temperature_text(raw)
+	config = "--psm 7 -c tessedit_char_whitelist=0123456789Ool|SsbZ"
+	return _read_temperature_from_variants([temp_roi], config)
+
+
+def _read_temperature_from_variants(variants: list[np.ndarray], config: str) -> tuple[str, Optional[int]]:
+	"""OCR the temperature line using several cheap variants and keep the best integer."""
+	best_raw = ""
+	best_value: Optional[int] = None
+	best_score = -1.0
+
+	for variant in variants:
+		raw = pytesseract.image_to_string(variant, config=config).strip()
+		value = parse_temperature_text(raw)
+		if value is None:
+			continue
+
+		score = _score_temperature_candidate(raw, value)
+		if score > best_score:
+			best_raw = raw
+			best_value = value
+			best_score = score
+
+	return best_raw, best_value
 
 
 def parse_mode_text(raw_mode: str) -> str:
@@ -280,15 +325,43 @@ def _sequence_score(raw_mode: str, mode: str) -> float:
 	return value
 
 
-def parse_temperature_text(raw_temp: str) -> Optional[float]:
-	"""Extract numeric temperature from OCR text when available."""
+def parse_temperature_text(raw_temp: str) -> Optional[int]:
+	"""Extract an integer temperature from OCR text when available."""
 	if not raw_temp:
 		return None
 
 	# Replace common OCR confusion before numeric parsing.
-	normalized = raw_temp.replace("O", "0").replace("o", "0")
-	match = re.search(r"\d+(?:\.\d+)?", normalized)
-	return float(match.group()) if match else None
+	normalized = raw_temp.upper()
+	normalized = normalized.replace("O", "0").replace("I", "1").replace("L", "1")
+	normalized = normalized.replace("|", "1").replace("S", "5").replace("B", "8").replace("Z", "2")
+	matches = list(re.finditer(r"\d+", normalized))
+	if not matches:
+		return None
+
+	best_match = max(matches, key=lambda match: (len(match.group()), -match.start()))
+	value = int(best_match.group())
+	if value <= 0:
+		return None
+
+	return value
+
+
+def _score_temperature_candidate(raw_temp: str, temperature: int) -> float:
+	"""Score a candidate temperature by plausibility and OCR shape."""
+	score = 0.0
+	if 80 <= temperature <= 220:
+		score += 2.0
+	if 100 <= temperature <= 199:
+		score += 1.5
+	if len(str(temperature)) == 3:
+		score += 1.0
+	if 60 <= temperature <= 240:
+		score += 0.5
+	if "." in raw_temp:
+		score += 0.2
+	if any(char in raw_temp.upper() for char in ("O", "I", "L", "S", "B", "Z", "|")):
+		score += 0.1
+	return score
 
 
 def read_display(
@@ -325,8 +398,10 @@ def read_display(
 	mode_variants = _extract_mode_variants(binary)
 	mode_raw, mode = _read_mode_from_variants(mode_variants, "--psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ+ ")
 
-	temp_roi = _extract_temp_roi(binary)
-	temp_raw, temp_value = _read_temperature(temp_roi)
+	temp_raw, temp_value = _read_temperature_from_variants(
+		_extract_temp_variants(binary),
+		"--psm 7 -c tessedit_char_whitelist=0123456789Ool|SsbZ",
+	)
 
 	return OCRReadout(
 		display_found=True,

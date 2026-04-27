@@ -66,7 +66,6 @@ def main():
     ocr_result = ""
     error_message = ""
     readout = None
-    
     print("--- Starting BWC Water Heater Vision Testing System ---")
 
     try:
@@ -139,7 +138,7 @@ def main():
                     ocr_result = (
                         f"DISPLAY_FOUND={readout.display_found};"
                         f"MODE={readout.mode};"
-                        f"TEMP_F={readout.temperature_f};"
+                        f"TEMP={readout.temperature_f};"
                         f"RAW_MODE={readout.mode_raw};"
                         f"RAW_TEMP={readout.temperature_raw}"
                     )
