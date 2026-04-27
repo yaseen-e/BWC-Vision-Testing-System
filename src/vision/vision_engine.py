@@ -456,24 +456,31 @@ def _get_camera() -> Optional[Any]:
 
 	try:
 		from picamera2 import Picamera2  # type: ignore
-	except Exception:
+	except Exception as e:
+		print(f"[ERROR] Failed to import Picamera2: {e}")
 		return None
 
 	try:
 		# Auto-detect available cameras
 		camera_info = Picamera2.global_camera_info()
 		if not camera_info:
+			print("[ERROR] No cameras detected by Picamera2.global_camera_info()")
 			return None
 		
 		# Use the first available camera
 		camera_num = camera_info[0]["Num"]
+		print(f"[DEBUG] Attempting to initialize camera {camera_num}")
 		camera = Picamera2(camera_num=camera_num)
 		config = camera.create_preview_configuration(main={"size": (1280, 720)})
 		camera.configure(config)
 		camera.start()
 		camera.set_controls({"AfMode": 2})
+		print(f"[INFO] Camera {camera_num} initialized successfully")
 		_CAMERA = camera
-	except Exception:
+	except Exception as e:
+		print(f"[ERROR] Camera initialization failed: {type(e).__name__}: {e}")
+		import traceback
+		traceback.print_exc()
 		return None
 
 	return _CAMERA
