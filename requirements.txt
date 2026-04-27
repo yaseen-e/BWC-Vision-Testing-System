@@ -2,7 +2,9 @@
 opencv-python
 pytesseract
 numpy
-picamera2
 
 # Utilities
 pyserial
+
+# Pi camera support is provided by the Raspberry Pi OS packages.
+# Install with: sudo apt install python3-libcamera python3-picamera2

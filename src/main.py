@@ -79,9 +79,6 @@ def main():
                     # Bring hardware to a known state before first command.
                     servo_driver.initialize()
                     servo_driver.home_all()
-                    camera_inventory = vision_engine.get_camera_inventory()
-                    if camera_inventory:
-                        print(f"[INFO] Camera inventory: {camera_inventory}")
                     if vision_engine.is_camera_available():
                         print("[INFO] Camera detected.")
                     else:
