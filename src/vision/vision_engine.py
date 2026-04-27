@@ -19,12 +19,20 @@ import pytesseract
 
 # Expected mode strings from the display.
 KNOWN_MODES = [
-	"MODE: HYBRID",
-	"MODE: HYBRID PLUS",
-	"MODE: HEAT PUMP",
-	"MODE: ELECTRIC",
-	"MODE: VACATION",
+	"HYBRID",
+	"HYBRID PLUS",
+	"HEAT PUMP",
+	"ELECTRIC",
+	"VACATION",
 ]
+
+_MODE_KEYWORDS = {
+	"HYBRID PLUS": ("HYBRID", "PLUS"),
+	"HEAT PUMP": ("HEAT", "PUMP"),
+	"HYBRID": ("HYBRID",),
+	"ELECTRIC": ("ELECTRIC",),
+	"VACATION": ("VACATION",),
+}
 
 
 # Camera object is created lazily so non-Pi environments still run.
@@ -126,9 +134,34 @@ def _prepare_binary(warped: np.ndarray) -> np.ndarray:
 def _extract_mode_roi(binary: np.ndarray) -> np.ndarray:
 	"""Crop the top line where mode text appears."""
 	height, width = binary.shape
-	mode_roi = binary[int(height * 0.00):int(height * 0.14), int(width * 0.20):int(width * 0.80)]
+	mode_roi = binary[int(height * 0.00):int(height * 0.16), int(width * 0.12):int(width * 0.88)]
 	mode_roi = cv2.bitwise_not(mode_roi)
+	mode_roi = cv2.GaussianBlur(mode_roi, (3, 3), 0)
 	return cv2.resize(mode_roi, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
+
+
+def _extract_mode_variants(binary: np.ndarray) -> list[np.ndarray]:
+	"""Build a few cheap OCR variants for the mode line."""
+	mode_roi = _extract_mode_roi(binary)
+	variants = [mode_roi]
+
+	# Slightly different binarization paths help when the display is dim or skewed.
+	_, otsu_inverse = cv2.threshold(mode_roi, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+	variants.append(otsu_inverse)
+	variants.append(cv2.morphologyEx(mode_roi, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))))
+
+	return variants
+
+
+def _fallback_mode_variants(frame: np.ndarray) -> list[np.ndarray]:
+	"""Build conservative OCR variants when the display contour is not found."""
+	gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+	gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+	height, width = gray.shape
+	mode_roi = gray[int(height * 0.00):int(height * 0.18), int(width * 0.18):int(width * 0.82)]
+	mode_roi = cv2.GaussianBlur(mode_roi, (3, 3), 0)
+	_, otsu = cv2.threshold(mode_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+	return [mode_roi, otsu, cv2.bitwise_not(otsu)]
 
 
 def _extract_temp_roi(binary: np.ndarray) -> np.ndarray:
@@ -145,9 +178,26 @@ def _extract_temp_roi(binary: np.ndarray) -> np.ndarray:
 
 def _read_mode(mode_roi: np.ndarray) -> tuple[str, str]:
 	"""Run OCR on mode text and map it to the nearest known mode."""
-	config = "--psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ: "
-	raw = pytesseract.image_to_string(mode_roi, config=config).strip().upper()
-	return raw, parse_mode_text(raw)
+	config = "--psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ+ "
+	return _read_mode_from_variants([mode_roi], config)
+
+
+def _read_mode_from_variants(variants: list[np.ndarray], config: str) -> tuple[str, str]:
+	"""OCR the mode line using several cheap variants and keep the best text."""
+	best_raw = ""
+	best_mode = KNOWN_MODES[0]
+	best_score = -1.0
+
+	for variant in variants:
+		raw = pytesseract.image_to_string(variant, config=config).strip().upper()
+		mode = parse_mode_text(raw)
+		score = _sequence_score(raw, mode)
+		if score > best_score:
+			best_raw = raw
+			best_mode = mode
+			best_score = score
+
+	return best_raw, best_mode
 
 
 def _read_temperature(temp_roi: np.ndarray) -> tuple[str, Optional[float]]:
@@ -160,15 +210,74 @@ def _read_temperature(temp_roi: np.ndarray) -> tuple[str, Optional[float]]:
 def parse_mode_text(raw_mode: str) -> str:
 	"""Map free-form OCR text to the closest expected mode string."""
 	if not raw_mode:
-		return "UNKNOWN"
+		return KNOWN_MODES[0]
 
 	normalized = raw_mode.strip().upper()
 	if not normalized:
-		return "UNKNOWN"
+		return KNOWN_MODES[0]
 
-	# Keep cutoff high so unrelated text does not map to a real mode.
-	match = get_close_matches(normalized, KNOWN_MODES, n=1, cutoff=0.75)
-	return match[0] if match else "UNKNOWN"
+	# First try keyword hits because the display text is short and highly structured.
+	keyword_match = _score_mode_keywords(normalized)
+	if keyword_match is not None:
+		return keyword_match
+
+	# Fall back to fuzzy matching, then the closest string by ratio.
+	match = get_close_matches(normalized, KNOWN_MODES, n=1, cutoff=0.55)
+	if match:
+		return match[0]
+
+	return max(KNOWN_MODES, key=lambda mode: _sequence_score(normalized, mode))
+
+
+def _normalize_mode_text(raw_mode: str) -> str:
+	"""Normalize OCR text into uppercase words separated by single spaces."""
+	text = raw_mode.upper()
+	text = text.replace("+", " PLUS ")
+	text = re.sub(r"[^A-Z]+", " ", text)
+	return re.sub(r"\s+", " ", text).strip()
+
+
+def _score_mode_keywords(normalized: str) -> Optional[str]:
+	"""Pick the mode that best matches obvious keywords in the OCR text."""
+	words = set(normalized.split())
+	for mode, keywords in _MODE_KEYWORDS.items():
+		if all(keyword in words for keyword in keywords):
+			return mode
+
+	# Handle common OCR blends like HEATPUMP or HYBRIDPLUS.
+	compact = normalized.replace(" ", "")
+	if "HYBRIDPLUS" in compact:
+		return "HYBRID PLUS"
+	if "HEATPUMP" in compact:
+		return "HEAT PUMP"
+	if "VACATION" in compact:
+		return "VACATION"
+	if "ELECTRIC" in compact:
+		return "ELECTRIC"
+	if "HYBRID" in compact:
+		return "HYBRID"
+
+	return None
+
+
+def _sequence_score(raw_mode: str, mode: str) -> float:
+	"""Score a candidate mode by rough text similarity and keyword presence."""
+	compact_raw = _normalize_mode_text(raw_mode).replace(" ", "")
+	compact_mode = mode.replace(" ", "")
+	# difflib sequence similarity without importing another helper.
+	from difflib import SequenceMatcher
+	value = SequenceMatcher(None, compact_raw, compact_mode).ratio()
+	if mode == "HYBRID PLUS" and "PLUS" in raw_mode:
+		value += 0.08
+	if mode == "HEAT PUMP" and ("HEAT" in raw_mode or "PUMP" in raw_mode):
+		value += 0.08
+	if mode == "HYBRID" and "HYBRID" in raw_mode:
+		value += 0.04
+	if mode == "ELECTRIC" and "ELECTRIC" in raw_mode:
+		value += 0.08
+	if mode == "VACATION" and "VACATION" in raw_mode:
+		value += 0.08
+	return value
 
 
 def parse_temperature_text(raw_temp: str) -> Optional[float]:
@@ -198,10 +307,14 @@ def read_display(
 	display_contour = _find_display_contour(mask)
 
 	if display_contour is None:
+		fallback_raw, fallback_mode = _read_mode_from_variants(
+			_fallback_mode_variants(frame),
+			"--psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ+ ",
+		)
 		return OCRReadout(
 			display_found=False,
-			mode="UNKNOWN",
-			mode_raw="",
+			mode=fallback_mode,
+			mode_raw=fallback_raw,
 			temperature_f=None,
 			temperature_raw="",
 		)
@@ -209,8 +322,8 @@ def read_display(
 	warped = _four_point_transform(frame, display_contour.reshape(4, 2))
 	binary = _prepare_binary(warped)
 
-	mode_roi = _extract_mode_roi(binary)
-	mode_raw, mode = _read_mode(mode_roi)
+	mode_variants = _extract_mode_variants(binary)
+	mode_raw, mode = _read_mode_from_variants(mode_variants, "--psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ+ ")
 
 	temp_roi = _extract_temp_roi(binary)
 	temp_raw, temp_value = _read_temperature(temp_roi)

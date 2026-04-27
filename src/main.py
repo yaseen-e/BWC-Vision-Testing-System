@@ -136,15 +136,13 @@ def main():
                         else:
                             print(f"[INFO] Saved capture frame: {saved_path}")
                         readout = vision_engine.read_display(frame)
-                    if not readout.display_found:
-                        ocr_result = "DISPLAY_NOT_FOUND"
-                    else:
-                        ocr_result = (
-                            f"MODE={readout.mode};"
-                            f"TEMP_F={readout.temperature_f};"
-                            f"RAW_MODE={readout.mode_raw};"
-                            f"RAW_TEMP={readout.temperature_raw}"
-                        )
+                    ocr_result = (
+                        f"DISPLAY_FOUND={readout.display_found};"
+                        f"MODE={readout.mode};"
+                        f"TEMP_F={readout.temperature_f};"
+                        f"RAW_MODE={readout.mode_raw};"
+                        f"RAW_TEMP={readout.temperature_raw}"
+                    )
                     current_state = SystemState.REPORT_TO_LABVIEW
                     time.sleep(STATE_SLEEP_SECONDS["READ_DISPLAY"])
                     
