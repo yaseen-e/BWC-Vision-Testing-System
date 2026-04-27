@@ -37,7 +37,7 @@ _MODE_KEYWORDS = {
 
 # Camera object is created lazily so non-Pi environments still run.
 _CAMERA: Optional[Any] = None
-_CAMERA_NUM = 0
+_CAMERA_NUM = 1
 
 
 @dataclass(frozen=True)
