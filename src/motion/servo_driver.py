@@ -22,6 +22,10 @@ class Button(Enum):
 	MENU = "MENU"
 
 
+# Direct LabVIEW command to Button mapping
+_COMMAND_TO_BUTTON = {f"CMD_PRESS_{button.name}": button for button in Button}
+
+
 def initialize() -> None:
 	"""Initialize servo hardware (placeholder for future hardware setup)."""
 	return
@@ -43,18 +47,7 @@ def parse_button_from_command(command: str) -> Optional[Button]:
 		return None
 
 	normalized = command.strip().upper()
-	prefix = "CMD_PRESS_"
-	if not normalized.startswith(prefix):
-		return None
-
-	button_name = normalized[len(prefix):]
-	# Keep only the last token, so CMD_PRESS_TEMP_UP maps to UP.
-	button_name = button_name.split("_")[-1]
-
-	try:
-		return Button[button_name]
-	except KeyError:
-		return None
+	return _COMMAND_TO_BUTTON.get(normalized)
 
 
 def press_button(button: Button) -> bool:
