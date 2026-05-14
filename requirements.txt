@@ -6,5 +6,10 @@ numpy
 # Utilities
 pyserial
 
+# Servo Control
+adafruit-circuitpython-servokit
+adafruit-circuitpython-pca9685
+adafruit-blinka
+
 # Pi camera support is provided by the Raspberry Pi OS packages.
 # Install with: sudo apt install python3-libcamera python3-picamera2
