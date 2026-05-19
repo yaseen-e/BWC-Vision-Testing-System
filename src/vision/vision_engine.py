@@ -4,7 +4,7 @@ Team 14 - Senior Project
 ./src/vision/vision_engine.py - Vision/OCR Engine
 Captures camera frames, isolates the display region, and extracts mode/temperature via OCR.
 """
-
+# TODO: remove try/except imports and add explicit requirements once dependencies are finalized.
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -12,27 +12,22 @@ from difflib import get_close_matches
 import re
 from typing import Any, Optional
 
-import cv2
-import numpy as np
-import pytesseract
+try:
+	import numpy as np
+except Exception:  # pragma: no cover - environment dependent
+	np = None
 
+try:
+	import cv2
+except Exception:  # pragma: no cover - environment dependent
+	cv2 = None
 
-# Expected mode strings from the display.
-KNOWN_MODES = [
-	"HYBRID",
-	"HYBRID PLUS",
-	"HEAT PUMP",
-	"ELECTRIC",
-	"VACATION",
-]
+try:
+	import pytesseract
+except Exception:  # pragma: no cover - environment dependent
+	pytesseract = None
 
-_MODE_KEYWORDS = {
-	"HYBRID PLUS": ("HYBRID", "PLUS"),
-	"HEAT PUMP": ("HEAT", "PUMP"),
-	"HYBRID": ("HYBRID",),
-	"ELECTRIC": ("ELECTRIC",),
-	"VACATION": ("VACATION",),
-}
+from .display_layouts import CURRENT_LAYOUT
 
 
 # Camera object is created lazily so non-Pi environments still run.
@@ -62,8 +57,19 @@ def _order_points(points: np.ndarray) -> np.ndarray:
 	return ordered
 
 
+def _require_cv2() -> None:
+	if cv2 is None:
+		raise RuntimeError("opencv-python is required for OCR image processing")
+
+
+def _require_pytesseract() -> None:
+	if pytesseract is None:
+		raise RuntimeError("pytesseract is required for OCR text extraction")
+
+
 def _four_point_transform(image: np.ndarray, points: np.ndarray) -> np.ndarray:
 	"""Flatten the angled display into a front-facing view."""
+	_require_cv2()
 	rect = _order_points(points)
 	top_left, top_right, bottom_right, bottom_left = rect
 
@@ -91,6 +97,7 @@ def _four_point_transform(image: np.ndarray, points: np.ndarray) -> np.ndarray:
 
 def _display_mask(frame: np.ndarray) -> np.ndarray:
 	"""Keep only the orange display area to reduce OCR noise."""
+	_require_cv2()
 	hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 	lower_orange = np.array([5, 150, 150])
 	upper_orange = np.array([25, 255, 255])
@@ -104,6 +111,7 @@ def _display_mask(frame: np.ndarray) -> np.ndarray:
 
 def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np.ndarray]:
 	"""Find the largest 4-corner shape that looks like the LCD window."""
+	_require_cv2()
 	contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
 	best_contour = None
@@ -124,6 +132,7 @@ def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np
 
 def _prepare_binary(warped: np.ndarray) -> np.ndarray:
 	"""Convert to a high-contrast black/white image for OCR."""
+	_require_cv2()
 	gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
 	gray = cv2.resize(gray, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
 	_, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
@@ -132,8 +141,8 @@ def _prepare_binary(warped: np.ndarray) -> np.ndarray:
 
 def _extract_mode_roi(binary: np.ndarray) -> np.ndarray:
 	"""Crop the top line where mode text appears."""
-	height, width = binary.shape
-	mode_roi = binary[int(height * 0.00):int(height * 0.16), int(width * 0.12):int(width * 0.88)]
+	_require_cv2()
+	mode_roi = CURRENT_LAYOUT.fields["mode"].ideal.crop(binary)
 	mode_roi = cv2.bitwise_not(mode_roi)
 	mode_roi = cv2.GaussianBlur(mode_roi, (3, 3), 0)
 	return cv2.resize(mode_roi, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
@@ -141,6 +150,7 @@ def _extract_mode_roi(binary: np.ndarray) -> np.ndarray:
 
 def _extract_mode_variants(binary: np.ndarray) -> list[np.ndarray]:
 	"""Build a few cheap OCR variants for the mode line."""
+	_require_cv2()
 	mode_roi = _extract_mode_roi(binary)
 	variants = [mode_roi]
 
@@ -154,10 +164,10 @@ def _extract_mode_variants(binary: np.ndarray) -> list[np.ndarray]:
 
 def _fallback_mode_variants(frame: np.ndarray) -> list[np.ndarray]:
 	"""Build conservative OCR variants when the display contour is not found."""
+	_require_cv2()
 	gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 	gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-	height, width = gray.shape
-	mode_roi = gray[int(height * 0.00):int(height * 0.18), int(width * 0.18):int(width * 0.82)]
+	mode_roi = CURRENT_LAYOUT.fields["mode"].fallback.crop(gray)
 	mode_roi = cv2.GaussianBlur(mode_roi, (3, 3), 0)
 	_, otsu = cv2.threshold(mode_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 	return [mode_roi, otsu, cv2.bitwise_not(otsu)]
@@ -165,8 +175,8 @@ def _fallback_mode_variants(frame: np.ndarray) -> list[np.ndarray]:
 
 def _extract_temp_roi(binary: np.ndarray) -> np.ndarray:
 	"""Crop the center section where numeric temperature appears."""
-	height, width = binary.shape
-	temp_roi = binary[int(height * 0.12):int(height * 0.56), int(width * 0.22):int(width * 0.70)]
+	_require_cv2()
+	temp_roi = CURRENT_LAYOUT.fields["temperature"].ideal.crop(binary)
 	temp_roi = cv2.bitwise_not(temp_roi)
 	temp_roi = cv2.GaussianBlur(temp_roi, (3, 3), 0)
 
@@ -178,6 +188,7 @@ def _extract_temp_roi(binary: np.ndarray) -> np.ndarray:
 
 def _extract_temp_variants(binary: np.ndarray) -> list[np.ndarray]:
 	"""Build a few cheap OCR variants for the temperature line."""
+	_require_cv2()
 	temp_roi = _extract_temp_roi(binary)
 	variants = [temp_roi]
 
@@ -191,10 +202,10 @@ def _extract_temp_variants(binary: np.ndarray) -> list[np.ndarray]:
 
 def _fallback_temp_variants(frame: np.ndarray) -> list[np.ndarray]:
 	"""Build conservative OCR variants when the display contour is not found."""
+	_require_cv2()
 	gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 	gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-	height, width = gray.shape
-	temp_roi = gray[int(height * 0.12):int(height * 0.58), int(width * 0.24):int(width * 0.78)]
+	temp_roi = CURRENT_LAYOUT.fields["temperature"].fallback.crop(gray)
 	temp_roi = cv2.GaussianBlur(temp_roi, (3, 3), 0)
 	_, otsu = cv2.threshold(temp_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 	return [temp_roi, otsu, cv2.bitwise_not(otsu)]
@@ -202,14 +213,16 @@ def _fallback_temp_variants(frame: np.ndarray) -> list[np.ndarray]:
 
 def _read_mode(mode_roi: np.ndarray) -> tuple[str, str]:
 	"""Run OCR on mode text and map it to the nearest known mode."""
-	config = "--psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ+ "
+	_require_pytesseract()
+	config = CURRENT_LAYOUT.fields["mode"].tesseract_config
 	return _read_mode_from_variants([mode_roi], config)
 
 
 def _read_mode_from_variants(variants: list[np.ndarray], config: str) -> tuple[str, str]:
 	"""OCR the mode line using several cheap variants and keep the best text."""
+	_require_pytesseract()
 	best_raw = ""
-	best_mode = KNOWN_MODES[0]
+	best_mode = CURRENT_LAYOUT.known_modes[0]
 	best_score = -1.0
 
 	for variant in variants:
@@ -226,12 +239,14 @@ def _read_mode_from_variants(variants: list[np.ndarray], config: str) -> tuple[s
 
 def _read_temperature(temp_roi: np.ndarray) -> tuple[str, Optional[float]]:
 	"""Run OCR on numeric text and parse a float when possible."""
-	config = "--psm 7 -c tessedit_char_whitelist=0123456789Ool|SsbZ"
+	_require_pytesseract()
+	config = CURRENT_LAYOUT.fields["temperature"].tesseract_config
 	return _read_temperature_from_variants([temp_roi], config)
 
 
 def _read_temperature_from_variants(variants: list[np.ndarray], config: str) -> tuple[str, Optional[int]]:
 	"""OCR the temperature line using several cheap variants and keep the best integer."""
+	_require_pytesseract()
 	best_raw = ""
 	best_value: Optional[int] = None
 	best_score = -1.0
@@ -254,11 +269,11 @@ def _read_temperature_from_variants(variants: list[np.ndarray], config: str) -> 
 def parse_mode_text(raw_mode: str) -> str:
 	"""Map free-form OCR text to the closest expected mode string."""
 	if not raw_mode:
-		return KNOWN_MODES[0]
+		return CURRENT_LAYOUT.known_modes[0]
 
 	normalized = raw_mode.strip().upper()
 	if not normalized:
-		return KNOWN_MODES[0]
+		return CURRENT_LAYOUT.known_modes[0]
 
 	# First try keyword hits because the display text is short and highly structured.
 	keyword_match = _score_mode_keywords(normalized)
@@ -266,11 +281,11 @@ def parse_mode_text(raw_mode: str) -> str:
 		return keyword_match
 
 	# Fall back to fuzzy matching, then the closest string by ratio.
-	match = get_close_matches(normalized, KNOWN_MODES, n=1, cutoff=0.55)
+	match = get_close_matches(normalized, CURRENT_LAYOUT.known_modes, n=1, cutoff=0.55)
 	if match:
 		return match[0]
 
-	return max(KNOWN_MODES, key=lambda mode: _sequence_score(normalized, mode))
+	return max(CURRENT_LAYOUT.known_modes, key=lambda mode: _sequence_score(normalized, mode))
 
 
 def _normalize_mode_text(raw_mode: str) -> str:
@@ -284,7 +299,7 @@ def _normalize_mode_text(raw_mode: str) -> str:
 def _score_mode_keywords(normalized: str) -> Optional[str]:
 	"""Pick the mode that best matches obvious keywords in the OCR text."""
 	words = set(normalized.split())
-	for mode, keywords in _MODE_KEYWORDS.items():
+	for mode, keywords in CURRENT_LAYOUT.mode_keywords.items():
 		if all(keyword in words for keyword in keywords):
 			return mode
 
@@ -348,7 +363,8 @@ def parse_temperature_text(raw_temp: str) -> Optional[int]:
 def _score_temperature_candidate(raw_temp: str, temperature: int) -> float:
 	"""Score a candidate temperature by plausibility and OCR shape."""
 	score = 0.0
-	if 80 <= temperature <= 220:
+	min_temp, max_temp = CURRENT_LAYOUT.temperature_range_f
+	if min_temp <= temperature <= max_temp:
 		score += 2.0
 	if 100 <= temperature <= 199:
 		score += 1.5
@@ -375,6 +391,8 @@ def read_display(
 	Returns:
 		OCRReadout with mode text + temperature float.
 	"""
+	_require_cv2()
+	_require_pytesseract()
 	mask = _display_mask(frame)
 	display_contour = _find_display_contour(mask)
 
