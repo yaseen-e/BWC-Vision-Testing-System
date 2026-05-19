@@ -61,15 +61,42 @@ class DisplayLayout:
 
 
 ROOT_MENU = MenuNode(
-	key="root",
-	label="Main Menu",
+	key="dashboard",
+	label="Dashboard Home",
 	children=(
 		MenuNode(key="active_faults", label="Active Faults"),
-		MenuNode(key="historical_faults", label="Historical Faults"),
+		MenuNode(key="history", label="History", children=(
+			MenuNode(key="historical_faults", label="Historical Faults"),
+		)),
 		MenuNode(key="first_time_setup", label="First Time Setup"),
 		MenuNode(key="get_connected", label="Get Connected"),
 		MenuNode(key="pro_tools", label="Pro Tools"),
-		MenuNode(key="schedules", label="Schedules"),
+		MenuNode(key="schedules", label="Schedules", children=(
+			MenuNode(key="schedules_current", label="Current"),
+			MenuNode(key="schedules_get", label="Get"),
+			MenuNode(key="schedules_set", label="Set"),
+			MenuNode(key="schedules_status", label="Status"),
+		)),
+		MenuNode(key="system", label="System", children=(
+			MenuNode(key="system_info", label="Info"),
+			MenuNode(key="system_fw_version", label="FwVersion"),
+		)),
+		MenuNode(key="control", label="Control", children=(
+			MenuNode(key="control_heat_mode", label="HeatMode"),
+			MenuNode(key="control_setpoint", label="Setpoint"),
+			MenuNode(key="control_status", label="Status"),
+			MenuNode(key="control_states", label="States"),
+		)),
+		MenuNode(key="io", label="IO", children=(
+			MenuNode(key="io_anode", label="Anode"),
+			MenuNode(key="io_relays", label="Relays"),
+			MenuNode(key="io_temps", label="Temps"),
+			MenuNode(key="io_sensors", label="Sensors"),
+		)),
+		MenuNode(key="energy", label="Energy", children=(
+			MenuNode(key="energy_info", label="Info"),
+			MenuNode(key="energy_usage", label="Usage"),
+		)),
 	),
 )
 
@@ -94,6 +121,28 @@ BANNER_SYMBOLS_FIELD = OCRField(
 	tesseract_config="--psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-_:/(). ",
 )
 
+# Placeholders inferred from document text positioning (exact boundaries pend calibration)
+DASHBOARD_INFO_LINE_3 = OCRField(
+	name="dashboard_info_line_3",
+	ideal=ROIBox(top=0.50, bottom=0.65, left=0.10, right=0.90),
+	fallback=ROIBox(top=0.45, bottom=0.70, left=0.05, right=0.95),
+	tesseract_config="--psm 7",
+)
+
+ACTIVE_FAULT_TEXT = OCRField(
+	name="active_fault_text",
+	ideal=ROIBox(top=0.20, bottom=0.80, left=0.10, right=0.90),
+	fallback=ROIBox(top=0.15, bottom=0.85, left=0.05, right=0.95),
+	tesseract_config="--psm 6",
+)
+
+SCHEDULE_INFO_TEXT = OCRField(
+	name="schedule_info_text",
+	ideal=ROIBox(top=0.30, bottom=0.70, left=0.10, right=0.90),
+	fallback=ROIBox(top=0.25, bottom=0.75, left=0.05, right=0.95),
+	tesseract_config="--psm 6",
+)
+
 CURRENT_LAYOUT = DisplayLayout(
 	name="bwc_water_heater_lcd_v1",
 	menu_tree=ROOT_MENU,
@@ -110,5 +159,8 @@ CURRENT_LAYOUT = DisplayLayout(
 		"mode": MODE_FIELD,
 		"temperature": TEMPERATURE_FIELD,
 		"banner_symbols": BANNER_SYMBOLS_FIELD,
+		"dashboard_info_line_3": DASHBOARD_INFO_LINE_3,
+		"active_fault_text": ACTIVE_FAULT_TEXT,
+		"schedule_info_text": SCHEDULE_INFO_TEXT,
 	},
 )

@@ -1,0 +1,1505 @@
+
+--- Get_connected_process_04_30_2025.docx ---
+Link to GUI/App design files: (available in  sharepoint ) Project PRS doc:  HPWH (2H) Product Requirement Specification.docx (cannot find a BW location for where these are stored) Figma design files (not linked to PRS):  2H Team File – Figma Connection process from Kevin Smith -  BW Wave Te a m Fil e  – Figma Design file draft from Ketih Hemenway  -   Excal i draw GUI perspective: Begin the process from either the  main dashboard or the menu options. Implementation for  both of these   are  iden
+
+--- Active_Faults_behavior_in_production.docx ---
+Link to GUI/App design files: (available in  sharepoint ) Project PRS doc:  HPWH (2H) Product Requirement Specification.docx (cannot find a BW location for where these are stored) Figma design files (not linked to PRS):  2H Team File – Figma Connection process from Kevin Smith -  BW Wave Te a m Fil e  – Figma Design file draft from Ketih Hemenway  -   Excal i draw GUI perspective: The Dashboard Home screen will  indicate  if there are Active Faults in the third line of information al text . If t
+
+--- Historical_Faults_behavior_in_production.docx ---
+Link to GUI/App design files: (available in  sharepoint ) Project PRS doc:  HPWH (2H) Product Requirement Specification.docx (cannot find a BW location for where these are stored) Figma design files (not linked to PRS):  2H Team File – Figma Connection process from Kevin Smith -  BW Wave Te a m Fil e  – Figma Design file draft from Ketih Hemenway  -   Excal i draw GUI perspective: Access fault history by selecting the History menu  option  and then selecting the Faults option.          The  Hist
+
+--- Pro_Tools_behavior_in_production.docx ---
+Link to GUI/App design files: (available in  sharepoint ) Project PRS doc:  HPWH (2H) Product Requirement Specification.docx (cannot find a BW location for where these are stored) Figma design files (not linked to PRS):  2H Team File – Figma Connection process from Kevin Smith -  BW Wave Te a m Fil e  – Figma Design file draft from Ketih Hemenway  -   Excal i draw GUI perspective: Switching User to Pro To enable the Pro Tools setting option, the  User must be switched to a Pro.  To do this,  nav
+
+--- Schedules_implementation_03_04_2025.docx ---
+Document details:  There are notes provided at the start or end of certain sections providing insight into the expected user experience .  Schedule name defaults will be updated in the future.  5715 0 Schedules home page :  labelled “ SCHEDULES ” Scenario One:  no  schedules saved.  Info Text: “ No saved or running schedules. Select the CREATE button to add a new schedule.” Button behavior:  MANAGE  button will be unavailable (greyed out). Scenario Two: one or more schedules saved, with space to
+
+--- First_Time_Setup_behavior_in_production.docx ---
+Link to GUI/App design files: (available in sharepoint) Project PRS doc:  HPWH (2H) Product Requirement Specification.docx (cannot find a BW location for where these are stored) Figma design files (not linked to PRS):  2H Team File – Figma Connection process from Kevin Smith -  BW Wave Team File – Figma Design file draft from Ketih Hemenway -  Excalidraw GUI perspective: First Time Setup When the water heater is first installed and powered up, the  first-time  setup (also referred to as  initial
+
+--- F401-80_TestData.xlsm ---
+Prepared
+Document type
+Confidentiality status
+Aswin K         2025-01-02
+Test Software Information
+High
+Checked
+Title
+Document state
+2_Hearted_Water_Heater (50Galon)
+Draft
+Approved
+File name
+Revision
+Language
+Pages
+Fred              20XX-XX-XX
+0.1
+en
+14
+F401-50
+2_Hearted_Water_Heater (80Galon)
+SW Information
+Revision History
+Date
+(
+YYYY-MM-DD
+)
+Document State
+Review Record
+Rev 0.1
+2025-01-02
+Initial Draft
+DESCRIPTION
+DATA
+DATA_END
+SOFTWARE_PART_NUMBER
+F401
+UUT_PART_NUMBER
+SKIP_TEST
+GIT_REPO_CLONE_URL
+GIT_REPO_PATH
+C:\Data\Projects\TwoHeartedControlF401-Aswin
+END**
+TN
+T1
+T2
+T3a
+T3b
+T4
+T5
+T6a
+T6b
+DLY
+DIO_DO
+ATMP
+RTMP
+CTA_TOPIC
+NOTUSED
+NO
+YES
+TEST_GROUP_NAME
+FIRST_TEST_NUMBER
+LAST_TEST_NUMBER
+TEST_DESCRIPTION_OF_THE_TEST_GROUP
+Flash the code.
+Startup_Sequence_Test(FFT2_Buttons)
+Startup_Sequence_Test(FFT2_Screen_colours)
+Sequence_and_Logic_Functionality_Test_(Mode_Temp)
+Test the Sequence and logic functionality of HPWH using Keypad Buttons
+Sequence_and_Logic_Functionality_Test_(Errors)
+Test the Error codes from Active faults page
+Sequence_and_Logic_Functionality_Test_(Date_Time_setting)
+Test the Date& Time Settings In HPWH
+MRTX_RLY_MAP
+C_MRTX_RLY
+DIO_DI
+LEFT,TOP
+BOTTOM,RIGHT
+BLE_CMD
+MQTT_Topic
+NTP_IP
+MENU_SELECT
+TEMP_MIN
+MODBUS_Commands
+OSCILLOSCOPE DATA
+KEYPAD_UP
+3518,1
+KEYPAD_SELECT
+KEYPAD_DOWN
+KEYPAD_LEFT
+KEYPAD_RIGHT
+KEYPAD_BACK
+KEYPAD_MENU
+SCREEN_RED
+3519,1,5
+SCREEN_GREEN
+3519,1,6
+SCREEN_BLUE
+3519,1,7
+HYBRID_STANDARD
+TEMPERATURE_SETPOINT_MIN
+TEMPERATURE_SETPOINT_MAX
+HYBRID_PLUS
+HEAT_PUMP(ONLY)
+ELECTRIC(ONLY)
+VACATION
+TEMPERATURE_SETPOINT_INC
+TEMPERATURE_SETPOINT_DIC
+LOCKOUT_FLAG_MIN
+LOCKOUT_FLAG_MAX
+ERROR_CODE
+1000,2,1,7;1013,1,0:1013,1,7200;1000,2,0,7
+1000,2,1,8;1014,1,0:1014,1,7200;1000,2,0,8
+1000,2,133,12:4501,1,1
+1000,2,134,12:4501,1,1
+1000,2,135,12:4501,1,1
+1000,2,136,12:4501,1,1
+1000,2,137,12:4501,1,1
+1000,2,138,12:4501,1,1
+1000,2,139,12:4501,1,1
+1000,2,140,12:4501,1,1
+1000,2,141,12:4501,1,1
+1000,2,142,12:4501,1,1
+1000,2,143,12:4501,1,1
+1000,2,144,12:4501,1,1
+1000,2,145,12:4501,1,1
+1000,2,126,12:4501,1,1
+1000,2,128,12:4501,1,1
+1000,2,129,12:4501,1,1
+1000,2,146,12:4501,1,1
+1000,2,147,12:4501,1,1
+1000,2,148,12:4501,1,1
+1000,2,149,12:4501,1,1
+129.6.15.29
+LOCATION_USA_DST_OFF
+UTC_3:30
+UTC_4:00
+UTC_5:00
+UTC_6:00
+UTC_7:00
+UTC_8:00
+UTC_9:00
+UTC_10:00
+LOCATION_CANADA_DST_OFF
+LOCATION_MEXICO_DST_OFF
+LOCATION_OTHER_DST_OFF
+LOCATION_USA_DST_ON
+LOCATION_CANADA_DST_ON
+LOCATION_MEXICO_DST_ON
+LOCATION_OTHER_DST_ON
+MESSAGE
+MESSAGE_TYPE
+Operator Verification:
+Buzzer Sound?
+LED_POPUP
+SEQ5
+SEQ7
+SEQ9
+SEQ12
+SEQ14
+SEQ15
+SEQ17
+SEQ20
+SEQ29
+SEQ30
+SEQ33
+         
+                             
+                           
+                            
+                    
+     
+                          
+              
+TEST NAME
+CRLY
+ORLY
+IMSR
+OPVER
+ LL
+UL
+UNITS
+CMP
+POPUP
+BBT System Auto
+EXPSTR
+CCRLY
+OCRLY
+EXPECTED_TIME
+WIRE_RES
+GOTO_TEST
+TEST_DESCRIPTION
+OTHER
+EQ
+00:00:00
+UP
+MENU
+Keypad UP Button Presss 
+SELECT
+Keypad SELECT Button Press
+DOWN
+Keypad DOWN  Button Press
+LEFT
+Keypad LEFT Button Press
+RIGHT
+Keypad RIGHT Button Press
+BACK
+Keypad BACK Button Press
+Keypad MENU Button Press
+Keypad UP Button Press
+Keypad DOWN Button Press
+RED
+VISION
+To Test RED colour screen in FFT2
+GREEN
+To Test GREEN  colour screen in FFT2
+BLUE
+To Test BLUE colour Screen In FFT2
+HYBRID
+SR-01:
+When the control is in the Hybrid standard mode the Hybrid standard state shall be published.
+100
+NA
+SR-02:
+When the control is in The Hybrid standard state the controller shall set Minimum set point Temperature to 100 F
+140
+SR-03:
+When the control is in The Hybrid standard state the controller shall set Maximum set point Temperature to 140 F
+HYBRIDPLUS
+SR-04:
+When the control is in the Hybrid Plus state the Hybrid plus state shall be published. 
+SR-05:
+When the control is in The HybridPlus state the controller shall set Maximum set point temparature to 140F
+SR-06:
+When the control is in The HybridPlus state the controller shall set Minimum set point temparature to 100F
+HEATPUMP
+SR-07:
+When the control is in The Heatpumponly state the Heatpumponly state shall be published. 
+SR-08:
+When the control is in The Heatpumponly state the controller shall  set Minimum set point temparature to 100F
+SR-09:
+When the control is in The Heatpumponly state the controller shall set Maximum set point temparature to 140F
+ELECTRIC
+SR-10:
+When the control is in The Electric Only state the Electric Only state shall be published. 
+SR-11:
+When the control is in The Electric only state the controller shall set Maximum set point temparature to 140F
+SR-12:
+When the control is in The Electric only state the controller shall set Minimum set point temparature to 100F
+SR-13:
+When the control is in The Vacation state the Vacation state shall be published. 
+54
+SR-14:
+When the control is in The Vacation state the controller shall set minimum set point temparature to 54F
+SR-15:
+When the control is in The Vacation state the controller shall set maximum set point temparature to 54F
+PASS
+SR-16:
+When the set point temparature increased by one deg F controller shall NVM the incremented Temparature.
+SR-17:
+When the set point temparature Decreased by two deg F  the controller shall NVM the Decremented Temperature.
+When the control is in Hybrid Standard state setpoint change request are more than Five times in one minute ,The control shall not change setpoint temperature for the next 15 minutes
+LOCKOUT_MAX
+When the control is in HybridPlus state setpoint change request are more than Five times in one minute ,The control shall not change setpoint temperature for the next 15 minutes
+When the control is in Heatpump only state setpoint change request are more than Five times in one minute ,The control shall not change setpoint temperature for the next 15 minutes
+When the control is in Electric only state setpoint change request are more than Five times  in one minute ,The control shall not change setpoint temperature for the next 15 minutes
+ERROR_CODES
+USA
+SR-06:
+When the controller is in Hybrid standard state the controller shall able to set the loaction USA (DST OFF)
+set NL Time Zone UTC-3.30
+set Atlamtic Time Zone UTC-4.00
+set Eastern Time Zone UTC-5.00
+set Central Time Zone UTC-6.00
+set Mountain Time Zone UTC-7.00
+set Pacefic Time Zone UTC-8.00
+set Alaska Time Zone UTC-9.00
+set Huwaii Time Zone UTC-10.00
+CANADA
+SR-07:
+When the controller is in Hybrid standard state the controller shall able to set the loaction CANADA(DST OFF)
+MEXICO
+SR-08:
+When the controller is in Hybrid standard state the controller shall able to set the loaction MEXICO(DST OFF)
+SR-09:
+When the controller is in Hybrid standard state the controller shall able to set the loaction OTHER(DST OFF)
+SR-10:
+When the controller is in Hybrid standard state the controller shall able to set the loaction USA (DST ON)
+SR-11:
+When the controller is in Hybrid standard state the controller shall able to set the loaction CANADA(DST ON)
+SR-08:
+When the controller is in Hybrid standard state the controller shall able to set the loaction MEXICO(DST ON)
+CRADLE
+STIMULUS
+MEASUREMENT
+TEST_NAME
+RESULT
+PROBLEM
+DESCRIPTION_AND_PROBABLE_FAILURE_CAUSES
+FAIL
+LOCATIONUSA
+LOCATION_SETTING_DST_OFF
+LOCATION_SETTING_DST_ON
+SN
+Connect 2 Hearted Water Heater Test Harness to PCB
+2 Hearted Water Heater Test Harness
+MODE
+DO_SEQ_FOR_MODE
+Modes
+S.No
+Button 
+DO Number
+1
+DO0
+2
+DO1
+3
+DO2
+4
+DO3
+5
+DO4
+DO2,DO1,DO5;DO6,DO1
+6
+DO5
+DO0,DO1,DO5;DO6,DO1
+7
+DO6
+SETPOINT_TEMPERATURE
+DO6,DO1,DO5
+DO6,DO1,DO4,DO1;DO2;DO5
+Error 112,113 not generating because of temperature values can not be applied
+error 122 disabled
+Error 117,126,133 moved to long time test group
+DATE_SETTING_WIFI
+DO6,DO4,DO2,DO1,DO2,DO2,DO1,DO1;DO2,DO1;DO2,DO1;DO2,DO1;DO5,DO5,DO5
+TIME_SETTING_WIFI
+DO6,DO4,DO2,DO1,DO2,DO2,DO1,DO2,DO1;DO2,DO1;DO2,DO1;DO2,DO1;DO5,DO5,DO5
+DO6,DO4,DO2,DO1,DO2,DO2,DO1,DO2,DO2,DO1,DO1,DO1,DO1,DO4,DO1,DO1,DO2,DO1,DO1,DO2,DO2,DO1;DO5
+DO6,DO4,DO2,DO1,DO2,DO2,DO1,DO2,DO2,DO1,DO1,DO2,DO1,DO1,DO4,DO1,DO1,DO2,DO1,DO1,DO2,DO2,DO1;DO5
+DO6,DO4,DO2,DO1,DO2,DO2,DO1,DO2,DO2,DO1,DO1,DO2,DO2,DO1,DO1,DO4,DO1,DO1,DO2,DO1,DO1,DO2,DO2,DO1;DO5
+BUZZZER
+DO6,DO4,DO2,DO1,DO2,DO2,DO1,DO2,DO2,DO1,DO1,DO2,DO2,DO2,DO1,DO1,DO4,DO1,DO1,DO2,DO1,DO1,DO2,DO2,DO1;DO5
+DO6,DO4,DO2,DO1,DO2,DO2,DO1,DO2,DO2,DO1,DO1,DO1,DO1,DO4,DO1,DO1,DO1,DO1,DO2,DO2,DO1;DO5
+DO6,DO4,DO2,DO1,DO2,DO2,DO1,DO2,DO2,DO1,DO1,DO2,DO1,DO1,DO4,DO1,DO1,DO1,DO1,DO2,DO2,DO1;DO5
+DO6,DO4,DO2,DO1,DO2,DO2,DO1,DO2,DO2,DO1,DO1,DO2,DO2,DO1,DO1,DO4,DO1,DO1,DO1,DO1,DO2,DO2,DO1;DO5
+DO6,DO4,DO2,DO1,DO2,DO2,DO1,DO2,DO2,DO1,DO1,DO2,DO2,DO2,DO1,DO1,DO4,DO1,DO1,DO1,DO1,DO2,DO2,DO1;DO5
+Detail Sheet for Test Data
+Heading/Field Name
+Heading/Field Description
+Info_Skip
+ENTER DESCRIPTION IN THE COLUMN 
+ENTER THE FILE NAME WITH VERSION NUMBER OF THE EXCEL SHEET IN THE COLUMN BESIDE 
+ENTER THE PART NUMBER OF THE UUT IN THE COLUMN BESIDE
+DIAGNOSTIC_EXCEL_SHEET
+ENTER THE FILE NAME OF THE DIAGNOSTIC EXCEL SHEET IF ANY IN THE COLUMN BESIDE OR LEAVE B;ANK IF NO SHEET IS AVAILABLE OR USED
+ENTER TESTS TO BE SKIPPED DURING THE TEST RUN IN THE COLUMN BESIDE
+ENTER DETAILS OF THE RESPECTIVE FIELD
+SELECT END CHARACTER AT THE END OF INFORMATION IN THE COLUMN 
+END
+END OF LINE CHARACTER WHICH INDICATES THE END OF DATA IN THE FILE
+AppStim
+ENTER TEST NUMBER IN THE COLUMN 
+ENTER POWER SUPPLY VOLTAGE (V) IN THE COLUMN 
+ENTER POWER SUPPLY CURRENT (A) IN THE COLUMN 
+TS
+ENTER DELAY IN MILLI SECONDS (ms) TO BE OCCURED AFTER ANY INSTRUMENT TURNED ON IN THE COLUMN 
+ENTER DO'S TO BE TURNED ON DURING TEST IN THE COLUMN 
+AST
+SELECT THE APPLY STIMULUS (POWER FOR THE OTHER UUT FUNCTIONS) YES/NO  FROM THE DROPDOWN MENU IN THE COLUMN 
+RST
+SELECT REMOVE POWER YES/NO AFTER THE TEST FROM THE DROPDOWN MENU IN THE COLUMN  
+NO SETTING IS BEING SET TO THE INSTRUMENT OR INSTRUMENT IS NOT USED IN THAT PERTICULAR TEST
+Group
+ENTER THE TEST GROUP NAME OF THE TEST PERFORMED ON THE UUT IN THE COLUMN 
+ENTER THE FIRST TEST NUMBER IN THE TEST GROUP IN THE COLUMN 
+ENTER THE LAST TEST NUMBER IN THE TEST GROUP IN THE COLUMN 
+TEST_DESCRIPTION_OF_TEST_GROUP
+ENTER THE DESCRIPTION OF WHAT TYPE OF TESTS ARE PERFORMED IN PERTICULAR TEST GROUP
+InstConn
+ENTER THE TEST NUMBER IN THE COLUMN 
+ENTER THE RELAYS TO BE SWITCHED FOR THE PARTICULAR TEST EXCLUDING THE CRADLE (MAIN PS) RELAYS IN THE COLUMN 
+ENTER THE RELAYS TO BE SWITCHED FOR THE PARTICULAR TEST EXCLUDING THE STIMULUS RELAYS IN THR COLUMN 
+Measure
+ENTER DIO DI CHANNELS TO BE TURNED ON,IF THERE ARE MULTIPLE VALUES ENTER VALUES USING COMMA IN THE COLUMN 
+PopUpMsg
+ENTER THE POPUP MESSAGE TO BE DISPLAYED FOR PARTICULAR TEST NUMBER IN THE COLUMN 
+SELECT THE TYPE OF MESSAGE WITH/WITHOUT MEASUREMENT TO BE DISPLAYED TO THE OPERATOR FOR POPUP MESSAGE IN THE COLUMN 
+CUSTOM_POPUP
+THIS IS USED TO SHOW SOME USER SPECIFIED POPUP MESSAGE
+WIRING_POPUP
+THIS USED WHEN THERE IS CHANGE IN HARNESS/FIXTURE IN BETWEEN THE TESTING
+THIS IS YES/NO VERIFICATION POPUP
+SpecialCall
+THIS CALL CAN BE USED TO SET THE STRING NAME FOR THE BOOKMARK TO BE OPENED FOR EXAMPLE USER MANUAL
+THIS CALL CAN BE USED TO DISPLAY A CUSTOMISED POPUP MESSAGE AND/OR SETUP INFORMATION PRIOR TO TEST,FOR EXAMPLE POPUP MESSAGE DURING PARTICULAR TEST ONLY
+THIS CALL CAN BE USED TO CALL VIS TO CLOSE ADDITIONAL CONNECTIONS BETWEEN THE BTE AND UUT,FOR EXAMPLE POWER CONNECTIONS TO THE EXTERNAL ADAPTERS
+THIS CALL CAN BE USED TO PERFORM THE CUSTOMISED POWERUP ROUTINES
+THIS CALL CAN BE USED TO PERFORM CUSTOMISED OSCILLOSCOPE SETUP ROUTINES
+THIS CALL CAN BE USED TO PERFORM CALLS TO SOFTWARE DRIVERS THAT COMMUNICATE WITH THE UUT
+THIS CALL CAN BE USED TO PERFORM ACTIONS REQUIRED TO BE PERFORMED AFTER  POWER IS APPLIED TO UUT BUT PRIOR TO MEASUREMENT BEING TAKEN
+THIS CALL CAN BE USED TO PERFORM CUSTOMISED SPECIAL MEASUREMENT,FOR EXAMPLE DAQ WAVEFORM ANALYSIS.THIS VI SHOULD BE PLACE IT RESULTS IN GLOBAL VI AND SHOULD SUPPORT DESKTOP MODE WITHOUT ERROR POPUPS
+THIS CALL CAN BE USED TO PERFORM  CUSTOMISED POWER DOWN ROUTINES OF THE STIMILUS INSTRUMENTS
+THIS CALL CAN BE USED TO PERFORM  CUSTOMISED ROUTINES TO OPEN RELAYS
+THIS CALL CAN BE USED TO PERFORM CUSTOMISED CLEANUP ROUTINES
+TestBox
+ENTER CRADLE POWER APPLIED BETWEEN THE PINS OF  UUT  IN THE COLUMN 
+ENTER STIMULUS POWER APPLIED BETWEEN THE PINS OF  UUT  IN THE COLUMN 
+ENTER THE CONNECTOR PINS BETWEEN WHICH THE  MEASUREMENT IS PERFORMED IN THE COLUMN 
+Test
+ENTER THE NAME OF THE TEST IN THE COLUMN
+SELECT TO CLOSE RELAYS AT THE BEGINNING OF THE TEST OF COLUMN .EXCEPT THE CRADLE RELAYS(MAIN POWER RELAYS)
+SELECT THE OPEN RELAYS AT THE END OF THE TEST IN THE COLUMN .EXCEPT THE CRADLE RELAYS(MAIN POWER RELAYS)
+SELECT IF INSTRUMENT MEASUREMENT IS REQUIRED DURING THE TEST IN THE COLUMN 
+SELECT IF OPERATOR VERIFICATION IS REQUIRED DURING THE TEST IN THE COLUMN 
+LL
+ENTER THE LOWER LIMIT OF THE EXPECTED MEASUREMENT RESULT DURING THE TEST
+ENTER THE UPPER LIMIT OF THE EXPECTED MEASUREMENT RESULT DURING THE TEST
+SELECT THE UNITS OF THE EXPECTED RESULT MEASUREMENT IN THE COLUMN 
+SELECT THE MODE OF COMPARISION OF THE MEASURED VALUE WITH EXPECTED LIMITS IN THE COLUMN 
+SELECT IF POPUP MESSAGE IS AVAILABLE DURING THE TEST IN THE COLUMN 
+ENTER THE EXPECTED STRING DATA IF ANY  FROM THE TEST IN THE COLUMN 
+SELECT TO  CLOSE CRADLE RELAY(MAIN POWER) AT THE BEGINNING OF TEST IN COLUMN 
+SELECT TO  OPEN CRADLE RELAY(MAIN POWER) AT THE END OF TEST IN COLUMN 
+ENTER THE EXPECTED TIME FOR COMPLETION OF THE PARTICULAR TEST IN COLUMN 
+ENTER WIRE RESISTANCE VALUE TO BE SUBSTRACTED FROM DMM RESISTANCE MEASUREMENT IN THE COLUMN 
+ENTER THE TEST NUMBER TO WHICH THE TEST SHOULD BE PASS ON TO IN A CASE OF CURRENT TEST FAILED IN THE COLUMN 
+IF THE PERTICULAR RELAY OR MEASUREMENT IS USED IN THE TEST SELECT YES FROM THE DROP DOWN MENU
+IF THE PERTICULAR RELAY OR MEASUREMENT IS NOTUSED IN THE TEST SELECT NO FROM THE DROP DOWN MENU
+GELE
+SELECT IF THE MEASURED VALUE IS GREATER THAN THE LOWER LIMIT AND LESSER THAN THE UPPER LIMIT
+SELECT IF THE MEASURED VALUE IS EQUAL TO LOWER LIMIT AND UPPER LIMIT
+GT
+SELECT IF THE MEASURED VALUE IS GREATER THAN THE LOWER LIMIT
+LT
+SELECT IF THE MEASURED VALUE IS LESSER THAN THE UPPER LIMIT
+STRING
+SELECT IF THE MEASURED VALUE IS A STRING MEASUREMENT
+NOT APPLICABLE
+FailureAnalysis
+ENTER THE NAME OF THE TEST AT WHICH FAILURE OCCURRED IN THE COLUMN 
+ENTER RESULT OF TEST PERFORMED IN THE COLUMN 
+ENTER THE RESULT OF THE SUSPECTED FAILURE COMPONENTS IN THE COLUMN 
+ENTER THE DEBUGGING INFORMATION FOR FAILURES IN THE COLUMN 
+TFConnections
+ENTER SERIAL NUMBER IN THE COLUMN 
+ENTER TEXT FIXTURE CONNECTION TO BE CONNECTED BETWEEN UUT AND BTE IN THE COLUMN 
+TFMaterial
+ENTER THE LIST OF MATERIAL TO BE REQUIRED TO PERFORM THE TEST IN THE COLUMN 
+Diagonistic_Map
+TN_FIRST
+ENTER THE STARTING TEST NUMBER OF THE FAILED TEST IN THE COLUMN 
+TN_LAST
+ENTER THE LAST TEST NUMBER OF THE FAILED TEST IN THE COLUMN 
+TEST_TO_BE_SELECTED
+ENTER DATA OF TEST TO BE SELECTED IN THE DIAGONISTIC MODE IN A CASE OF LRU FAILURE IN THE COLUMN 
+MQTT_TEST
+MQTT
+SR-14
+When controller is in Hybrid standard mode controller shall able to read the   T1 Temperature(T1Comp) in HPWH  through the MQTT server.
+T4sensor
+T5sensor
+MQTT_TOPIC
+UP_Button
+SELECT_Button
+DOWN_Button
+LEFT_Bttton
+RIGHT_Button
+BACK_Button
+MENU_Button
+USER_HEATMODE_SETTING
+71
+73
+1480,950
+1020,1750
+SCHEDULE_HYBRIDPLUS
+SCHEDULE_ELECTRIC
+SCHEDULE_VACATION
+SCHEDULE_HYBRID 
+SCHEDULE_HEATPUMP
+SCHEDULE_START_TIME
+SCHEDULE_STARTMODE_TEMP
+SCHEDULE_STOP_TIME
+SCHEDULE_STOPMODE_TEMP
+HOME_SCREEN
+DO5,DO5,DO5,DO5,DO5
+Scheduling_Test
+Test HPWH with MQTT Topics
+74
+75
+76
+77
+79
+SR-02:
+When the control is in the Hybrid standard mode,control shall read Setpoint temperature
+SR-03:
+When the control is in the Hybrid standard mode,control shall read date on the Home screen
+SR-04:
+When the control is in the Hybrid standard mode,control shall read Time on the Home screen
+SR-05:
+When the control is in the Hybrid standard mode,control shall create scheduling for complete week with start time XX:XX with start Mode Hybrib Plus,Setpoint Temperature 121,stop mode Heat Pump stop setpoint temperature 118 Stop time XX:XX
+SR-06:
+Read the scheduled start time
+HYBRIDPLUS,121
+SR-07:
+Read the scheduled Start Mode & setpoint Temperature
+SR-08:
+Read the scheduled Stop time
+HEATPUMP,118
+SR-09:
+Read the scheduled Stop Mode and stop & setpoint Temperature
+SR-10:
+Check schdule In activation With start mode and Temperature
+SR-11:
+Check schdule Out activation With stop mode and Temperature
+SR-12:
+When the control is in the Heat pump mode,control shall create scheduling for complete week with start time XX:XX with start Mode electric,Setpoint Temperature 122,stop mode vacation stop setpoint temperature 54 Stop time XX:XX.
+ELECTRIC,122
+VACATION,54
+SR-17:
+Check schdule In activation With start mode and Temperature
+SR-18:
+Check schdule Out activation With stop mode and Temperature
+TroubleShooting_System_Status
+T1Senseor
+System_Status
+T2Sensor
+T3aSensor
+T3bSensor
+T6asensor
+T6bsensor
+SuperheatTemperature
+EEV
+Upperelement
+Lowerelement
+Compressor
+EvaparatorFan
+HYBRIDSTANDARD
+SETPOINTTEMPERATURE
+TEMPERATURE SETTING
+DATE
+DATE/WIFI/RTC
+TIME
+TIE/WIFI/RTC
+SCHEDULING_SETTING
+SCHEDULESTARTTIME
+SCHEDULING_STARTTIME_SETTING
+SCHEDULESTARTMODE&SETPOINT
+SCHEDULING_STARTMODE&SETPOINT_SETTING
+SCHEDULESTOPTIME
+SCHEDULING_STOPTIME_SETTING
+SCHEDULESTOPMODE&SETPOINT
+SCHEDULING_STOPMODE&SETPOINT_SETTING
+SCHEDULEINMODE&SETPOINT
+SCHEDULING_IN_WORKING
+SCHEDULEOUTMODE&SETPOINT
+SCHEDULING_OUT_WORKING
+TEMP
+DATE_SETTING_NO_WIFI
+TIME_SETTING_NO_WIFI
+DELETE_SCHEDULE
+Delete Schedule
+SCHEDULING_Deleting
+1:05AM
+1:10AM
+HYBRIDPLUSSCHEDULE
+1:00AM
+DO2,DO2,DO2,DO2,DO2,DO1;DO5
+SCHEDULE_START
+SCHEDULE_STOP
+DO2,DO2,DO2,DO2,DO1,DO1;DO5;DO2,DO1;DO5,DO5
+DO2,DO2,DO2,DO2,DO2,DO2,DO1,DO1;DO5;DO2,DO1;DO5,DO5,DO5,DO5,DO5,DO5
+SCHEDULEDELETED
+WIFI_DISC
+Read Time When Wi-Fi is connected
+Disconnect Wi-Fi to the HPWH
+Read Time Synchronization of CEL With STM
+Read Time with Wi-Fi
+Reading Time
+Disconnect Wi-Fi
+Wi-Fi
+Time Synchronization With STM
+STM Time Synchronization With CEL Problem
+Read Wi-Fi Connection Status
+Reset control Board
+129.6.15.30
+Read Wi-Fi connection Stat
+Wi-Fi connection Reading
+Reset
+Sequence_and_Logic_Functionality_Test_(STM_Time_Sync)
+WI-FI
+PRETEST
+Reset board and Wait until Turn ON.
+1122,930
+1036,1233
+TIME_SYNC
+13
+12
+15
+17
+SR-19:
+When the controller is in Hybrid standard mode,if T5<37F  controller shall Display  Bad Ambient Error(118) In Active faults Screen.(Ambient over Temperature)
+SR-23:
+When the controller is in Hybrid standard mode,if T4>240F  controller shall Display  Compressor Too Hot Error(123) In Active faults Screen.(Compressor over temperature)
+9
+8
+When the control is in FAT State the control shall configure Power config to 120 V
+When the Control Is in FAT State the control shall configure the Tank Size to 80 gallons
+When the control Is in FAT State the control shall read the MAC adress of the control on Display
+Read Normal Operation state
+80gallons
+MACADDRESS
+BUZZER
+FFT2_ScreenColours
+FFT2_Buzzer
+3530,1
+When the control is in FAT state the control shall complete the FAT state and enter into the Smart start state
+Smart Start Test
+120v
+FFT2 Complete&readFATStatus
+MACAdderss
+FATComplete
+smartstart
+Normaloperation
+FATreading problem
+120v configuration
+TankSize
+Reading MAC Address
+FAT Completion Problem
+SmartStart
+control operation status reading
+SMART_START
+T1_TEMP_SENSOR_TEST
+Testing T1 Temperature sensor Post Processor working
+Testing T1 Temperaute Sensor Post Processing
+-1
+55
+61
+67
+85
+91
+97
+103
+109
+115
+121
+127
+133
+139
+145
+151
+157
+163
+169
+175
+181
+187
+193
+196
+T1 Post Processor
+4531,1
+4534,1
+199
+T2_TEMP_SENSOR_TEST
+Testing T2 Temperature sensor Post Processor working
+T2 Post Processor
+1509,1
+1510,1
+Testing T2 Temperaute Sensor Post Processing
+Startup_Sequence_Test(FAT)
+Startup_Sequence_Test(SmartStart&Commissioning)
+10
+16
+22
+28
+34
+40
+46
+52
+58
+64
+70
+82
+88
+94
+106
+112
+118
+120
+124
+130
+136
+142
+148
+154
+160
+166
+172
+178
+184
+190
+98
+202
+99
+Sequence_and_Logic_Functionality_Test_(Temp_Lockout)
+smart test start
+11
+19
+23
+29
+35
+41
+47
+53
+59
+65
+83
+89
+95
+125
+49
+43
+37
+31
+25
+MAC_ADDRESS
+3517,1,1;3530,1
+4038,1,2;4038,1
+4037,1,3;4037,1
+4036,1,1;4036,1
+4045,1,1;3530,1
+DO4,DO1,DO4,DO1,DO4,DO1,DO4,DO1,DO4,DO1,DO4,DO1,DO1,DO1
+300
+When Compressor Is in Smart Start State the control Shall Read Compressor ON Time
+MODBUS
+MODBUS_MENU
+READ
+4537,1
+WRITE_READ_WAIT
+4512,1
+DO6,DO4,DO4,DO1,DO1,DO1,DO4,DO1,DO0,DO1,DO0,DO0,DO0,DO0,DO0,DO1,DO1,DO1,DO2,DO1,DO2,DO1,DO0,DO1,DO2,DO1,DO0,DO1,DO0,DO0,DO0,DO0,DO0,DO0,DO0,DO0,DO0,DO0,DO1,DO1,DO1,DO2,DO2,DO1,DO2,DO1,DO2,DO2,DO1,DO2,DO1,DO2,DO2,DO4,DO1;DO1,DO5,DO5
+DO6,DO4,DO4,DO1,DO1,DO1,DO4,DO1,DO0,DO1,DO0,DO1,DO1,DO1,DO1,DO1,DO2,DO1,DO0,DO0,DO0,DO1,DO2,DO1,DO0,DO1,DO0,DO1,DO1,DO1,DO2,DO1,DO2,DO1,DO2,DO2,DO2,DO1,DO2,DO1,DO2,DO2,DO4,DO1;DO1,DO5,DO5
+WRITE
+3519,1,9;3519,1
+WRITE_READ
+To Test Step-9 In FFT2
+Step-9
+3519,1,8;3519,1
+To complete FFT2 Status and read System Control State shall Move to FAT state (4).
+SMARTSTART
+HEATPUMP_ON
+SMARTSTART_READ_WAIT
+To Test Buzzer In Step-8 of FFT2
+When the control is in Smart Start State the control shall complete the Smart Start State and enter into the Commissioning State
+Commissioning State Upper Element ON Time
+Commissioning State Lower Element ON Time
+20
+26
+32
+38
+44
+50
+56
+62
+68
+80
+86
+92
+122
+READ_TEMP
+T2_Temp
+DO6,DO4,DO4,DO1,DO1,DO1,DO1,DO1,DO2,DO2,DO2,DO2,DO2,DO2,DO2,DO1,DO1;DO1,DO5,DO5,DO5,DO5
+DO6,DO4,DO4,DO1,DO1,DO1,DO1,DO1,DO2,DO2,DO2,DO1;DO5
+STM_DOWNLOAD
+CEL_DOWNLOAD
+STM_FLASH
+CEL_FLASH
+SPDT3,SPDT4,SPDT5
+When the controller is in Hybrid standard state the controller shall able to set the loaction OTHER(DST ON)
+WI-FI-CON
+Wi-Fi Connect
+Wi-Fi connection failed
+WIFI_CON
+WI-FI-DISC
+Wi-Fi Disconnect
+Wi-Fi disconnection failed
+1000,2,150,12:4501,1,1
+1000,2,152,12:4501,1,1
+1000,2,153,12:4501,1,1
+1000,2,151,12:4501,1,1
+1000,2,124,12:4501,1,1
+1000,2,121,12:4501,1,1
+1000,2,127,12:4501,1,1
+1000,2,130,12:4501,1,1
+1000,2,132,12:4501,1,1
+1000,2,131,12:4501,1,1
+1000,2,122,12:4501,1,1
+1000,2,115,12:4501,1,1
+SR-18:
+When the controller is in Hybrid standard mode,if T1>=195F,the controller shall display T1 Shorted Error(103) In Active faults Screen.(Lower Sensor Malfunction)
+SR-19:
+When the controller is in Hybrid standard mode,if T2>=195F,the controller shall display T2 Shorted Error(104) In Active faults Screen.(Upper Sensor Malfunction)
+SR-20:
+When the controller is in Hybrid standard mode,if T3a>=195F,the controller shall display T3a Shorted Error(105) In Active faults Screen.(Evaparator inlet malfunction)
+SR-21:
+When the controller is in Hybrid standard mode,if T3b>=195F,the controller shall display T3b Shorted Error(106) In Active faults Screen.(Evaparator outlet malfunction)
+SR-22:
+When the controller is in Hybrid standard mode,if T4>=300F,the controller shall display T4 Shorted Error(107) In Active faults Screen.(Compressor Sensor malfunction)
+SR-23:
+When the controller is in Hybrid standard mode,if T5>=195F,the controller shall display T5 Shorted Error(108) In Active faults Screen.(Ambient Sensor malfunction)
+SR-24:
+When the controller is in Hybrid standard mode,if T1<15F,the controller shall display T1 Open Error (109) In Active faults Screen.(Lower Sensor Malfunction)
+SR-25:
+When the controller is in Hybrid standard mode,if T2<15F,the controller shall display T2 Open Error (110) In Active faults Screen.(Upper Sensor Malfunction)
+SR-28:
+When the controller is in Hybrid standard mode,if T4<15F,the controller shall display T4 Open Error (113) In Active faults Screen.(Compressor Sensor malfunction)
+SR-29:
+When the controller is in Hybrid standard mode,if T5<15F,the controller shall display T5 Open Error (114) In Active faults Screen.(Ambient Sensor malfunction)
+T1 Sensor Open
+T2 Sensor Open
+T3a sensor Open
+T3b sensor Open
+T4 Sensor Open
+T5 Sensor Open
+T1 Sensor Short
+T2 Sensor short
+T4 Sensor Short
+T5 sensor Short
+Ambinet Temperature Fault
+Ambinet Temperature Fault(T5<37F)
+Ambinet Temperature Fault(T5<45F)
+Compressor High Temperature
+Compressor High Temperature(T4>240F)
+Upper Element Open
+Lower Element Open
+Upper Element Short
+Lower Element Short
+Upper Element Short or Locked Rotor
+Lower Element Short or Locked Rotor
+Compressor Locked Rotor Fault
+Fan Open Error
+Compressor Open Error
+Compressor Locked Rotor Error
+Fan Hard Fault
+Compressor Hard Fault
+Dirty Filter Fault
+Clogged Filter current Fault
+Fan Locked Rotor Fault
+Low SuperHeat Fault
+Low Refrigerant Fault
+High SuperHeat Fault
+Drain Pan Fault
+Leakage Detection
+Leakage Dectection
+Hybrid Mode
+Minimum SetPoint Temperature
+Maximum SetPoint Temperature
+Hybrid Plus Mode
+Hybrid Plus
+HeatPump Mode
+Heat Pump Mode
+ElECTRIC Mode
+Vacation Mode
+SetPoint Temperature Increment
+SetPoint Temperature decrement
+SetPoint LockOut In Decrement
+SetPoint LockOut In increment
+Electric Mode
+ElectricMode
+1030,50
+120,1260
+950,50
+120,1350
+970,50
+120,1320
+990,50
+120,1290
+980,50
+120,1300
+750,160
+400,1200
+490,180;490,330;490,490;490,640;490,790
+280,790;430,790;580,790;730,790;880,790
+1100,900
+980,1200
+680,76;1100,900
+180,1433;980,1200
+1450,900
+970,1700
+960,320
+410,1110
+880,320
+410,1200
+1200,900
+970,1460
+720,300
+400,1315
+630,300
+390,1420
+600,360;970,360;1280,360
+475,747;475,1140;475,1510
+950,50;750,160;1450,900
+120,1350;400,1200;970,1700
+660,365;760,330
+WIFI_Connectivity
+Testing WIFI Connectivity
+Power_Cycle_Memory_Retention
+Testing Memory Retention after Power loss
+SR- control shall connect a wifi Network with valid ssid and Passwords
+The stored network name must be able to be up to 32 characters long and password but be able to work up to 63 characters long.
+SR-
+The Controller Shall Not Accept the WIFI SSID and PASSWORD  More than 32 and 63 charcaters Respectively
+The stored network name must be able to be up to 32 characters long and password but be able to work up to 63 characters long.
+SR-
+The Controller Shall  Accept the WIFI SSID and PASSWORD 32 and 63 charcaters Respectively
+If the water heater is disconnected from Wi-Fi, either by loss of power or loss of connection, the water heater shall reconnect to Wi-Fi automatically without requiring a reset proactively by the user. 
+SR-
+Disconnect the Wifi Router Power and check the WIFI Connection Status On Water Heater Display
+If the water heater is disconnected from Wi-Fi, either by loss of power or loss of connection, the water heater shall reconnect to Wi-Fi automatically without requiring a reset proactively by the user. 
+SR-
+Reconnect the Wifi Router Power and check the WIFI Connection Status On Water Heater Display
+SR-01
+when the control is in Hybrid state control shall able to Publish the Hybrid mode.
+
+SR-02
+When the Control is in Hybrid state ,control shall able to set setpoint temperature to 120F
+DATE&TIME
+SR- 03
+When the control is in Hybrid standard mode ,control shall read the Date & Time 
+RESET
+SR-04
+Reset the Control by Doing Power cycle OFF -ON
+SR-05
+When the Control Is In Hybrid state, control shall read the user Heat mode & Set point Temperature
+00:00:01
+SR-06
+When the Control  is in Hybrid mode control shall read Date & Time 
+SSID,PASSWORD
+Length of SSID&Password
+WIFI Connection
+WIFI connection Loss of Power_router
+User Heat mode
+SetPoint Temperature
+User setpoint Temperature
+Date & Time
+1200,900;1450,900
+970,1460;970,1700
+STARTUP_SEQUENCE_TEST
+SEQUENCE_AND_LOGIC_FUNCTIONALITY_TEST_(MODE_TEMP)
+SEQUENCE_AND_LOGIC_FUNCTIONALITY_TEST_(TEMP_LOCKOUT)
+SEQUENCE_AND_LOGIC_FUNCTIONALITY_TEST_(ERRORS)
+SEQUENCE_AND_LOGIC_FUNCTIONALITY_TEST_(DATE_TIME_SETTING)
+SEQUENCE_AND_LOGIC_FUNCTIONALITY_TEST_(STM_TIME_SYNC)
+TROUBLESHOOT_SYSTEM_STATUS_TEST
+WIFI_CONNECTIVITY
+SCHEDULING_TEST
+POWER_CYCLE_MEMORY_RETENTION
+480,1410;580,1200
+18
+96
+T4_TEMP_SENSOR_TEST
+Testing T4 Temperature sensor Post Processor working
+T3A_TEMP_SENSOR_TEST
+Testing T3a Temperature sensor Post Processor working
+T3B_TEMP_SENSOR_TEST
+Testing T3b Temperature sensor Post Processor working
+T5_TEMP_SENSOR_TEST
+Testing T5 Temperature sensor Post Processor working
+T6A_TEMP_SENSOR_TEST
+Testing T6a Temperature sensor Post Processor working
+T6B_TEMP_SENSOR_TEST
+Testing T6b Temperature sensor Post Processor working
+1513,1
+1511,1
+1512,1
+1514,1
+1515,1
+1516,1
+00:00:05
+Testing T4 Temperaute Sensor Post Processing
+Testing T3a Temperaute Sensor Post Processing
+223
+225
+226
+228
+229
+231
+232
+234
+235
+237
+238
+240
+241
+243
+244
+246
+247
+249
+250
+252
+253
+255
+256
+258
+261
+264
+267
+Testing T3b Temperaute Sensor Post Processing
+Testing T5 Temperaute Sensor Post Processing
+211
+213
+214
+216
+219
+220
+Testing T6A Temperaute Sensor Post Processing
+Testing T6B Temperaute Sensor Post Processing
+T4 Post Processor
+T3a Post Processor
+T3b Post Processor
+T5 Post Processor
+T6a Post Processor
+T6b Post Processor
+RMS_VOLTAGE
+UPPER_TANK_TEMP(T2)
+AMBIENT_TEMP(T5)
+COMPRESSOR
+EVAPORATOT_FAN
+UPPER_ELEMENT
+LOWER_ELEMENT
+SYSTEM_STATUS
+OFF
+SPEED0
+340,660
+490,845
+530,660
+720,660
+217
+257
+COMPRESSOR(T4)
+EVMP_INLET(T3A)
+EVMP_OUTLET(T3B)
+915,750
+60
+117
+72
+SPEED2
+DO1,DO2
+DO1,DO2,DO2
+READ_WAIT
+ON
+420
+System/Info
+System/FwVersion
+Control/HeatMode
+Control/Setpoint
+Control/Status
+Control/States
+IO/Anode
+IO/Relays
+IO/Temps
+IO/Sensors
+Energy/Info
+Schedules/Get
+Schedules/Status
+Schedules/Set
+Schedules/Current
+Errors
+DemandResponse
+Energy/Usage
+51
+SPEED3
+SR-02:
+When the control is in The Hybrid standard state the controller shall set Minimum set point Temperature to 38 C
+SR-03:
+When the control is in The Hybrid standard state the controller shall set Maximum set point Temperature to 60 C
+SR-05:
+When the control is in The HybridPlus state the controller shall set Maximum set point temparature to 60 C
+SR-06:
+When the control is in The HybridPlus state the controller shall set Minimum set point temparature to 38 C
+SR-08:
+When the control is in The Heatpumponly state the controller shall  set Minimum set point temparature to 38 C
+SR-09:
+When the control is in The Heatpumponly state the controller shall set Maximum set point temparature to 60 C
+SR-11:
+When the control is in The Electric only state the controller shall set Maximum set point temparature to 60 C
+SR-12:
+When the control is in The Electric only state the controller shall set Minimum set point temparature to 38 C
+SR-14:
+When the control is in The Vacation state the controller shall set minimum set point temparature to 12 C
+SR-15:
+When the control is in The Vacation state the controller shall set maximum set point temparature to 12 C
+SR-07:
+When the controller is in Hybrid standard state the controller shall able to set the loaction USA(DST ON)
+SR-07:
+When the controller is in Hybrid standard state the controller shall able to set the loaction CANADA(DST ON)
+LOCATION_SETTING
+ELECTRICSCHEDULE
+1:20AM
+DO6,DO1,DO3,DO1,DO1;DO5,DO5,DO4,DO6,DO4,DO4,DO1,DO1,DO1;DO5,DO5,DO5,DO5
+490,277
+345,789
+980,50;750,160;1450,900
+120,1300;400,1200;970,1700
+990,50;750,160;1450,900
+120,1290;400,1200;970,1700
+1030,50;750,160;1450,900
+120,1260;400,1200;970,1700
+VACATIONSCHEDULE
+HYBRID,119
+345,810
+1:30AM
+HEATPUMPSCHEDULE
+HEATPUMP,116
+ELECTRIC,121
+345,830
+WIFI_3364
+WIFI_3263
+DO6,DO1,DO3,DO1,DO1;DO5,DO5,DO5
+WIFI_CON_VALUE_CHANGE
+WIFI_DISC_VALUE_CHANGE
+TOU_TEST
+TROUBLESHOOTING_SYSTEM_STATUS_TEST
+Testing General Scheduling
+Testing TOU Sscheduling
+Testing System Status
+Test LockOut with 5 conseq setpoint changes.
+TOU-1
+HYBRID,108
+HYBRID,121
+TOU-2
+HEATPUMP,108
+HYBRID,122
+105
+TOU-3
+HEATPUMP,105
+HYBRID,105
+TOU-4
+HYBRID,106
+970,50;750,160;1450,900
+120,1320;400,1200;970,1700
+480,220
+TOU1
+TOU2
+TOU3
+TOU4
+TOUSCHEDULEDELETED
+650,310
+390,1400
+TOU_SCH_DELETE
+DO6,DO1,DO3,DO1,DO1;DO5,DO5,DO6,DO4,DO4,DO1,DO1,DO2,DO1;DO5,DO5,DO5,DO5
+DO6,DO4,DO4,DO1,DO1,DO2,DO1;DO4,DO1,DO3,DO1,DO1,DO1;DO1,DO5,DO5,DO5,DO5
+300,720
+Testing PRO User and Tools
+PRO_TOOLS_TEST
+PRO Tools Failure
+PRO
+PRO_TOOLS
+PRO_USER_INCORRECT
+PRO_USER_CORRECT
+750,50
+DO5,DO6,DO4,DO4,DO4,DO2,DO1,DO2,DO1;DO4,DO4,DO2,DO2,DO1,DO1,DO1,DO2,DO1;DO1,DO5,DO5,DO5
+DO5,DO6,DO4,DO4,DO4,DO2,DO1,DO2,DO1;DO4,DO4,DO2,DO2,DO1,DO1,DO1,DO1,DO2,DO1;DO1,DO5,DO5,DO5
+INCORRECTPIN
+SUCCESS
+417,890
+970,545
+550,15
+105,1515
+PROSYSTEMSTATUSCHECK
+PRO_SYSTEM_STATUS_CHECK
+PRO_TOOLS_SYSTEM_STATUS
+STM Software flash
+CEL Software flash
+4538,1
+When Compressor Is in Smart Start State the control Shall Read Compressor OFF Time
+180
+205
+DO5,DO6,DO1,DO3,DO3,DO1,DO2,DO2,DO1,DO4,DO4
+DO5,DO6,DO1,DO3,DO3,DO1,DO1,DO4,DO4
+DO5,DO6,DO1,DO3,DO3,DO1,DO2,DO1,DO4,DO4
+DO5,DO6,DO1,DO3,DO3,DO1,DO2,DO2,DO2,DO1,DO4,DO4
+DO5,DO6,DO1,DO3,DO3,DO1,DO2,DO2,DO2,DO2,DO1,DO4,DO4
+1030,50;750,160
+120,1260;400,1200
+NO_LOCKOUT_MIN
+260
+263
+1000,2,155,12:4501,1,1
+1000,2,119,12:4501,1,1
+1000,2,154,12:4501,1,1
+1000,2,249,12:4501,1,1
+93
+SR-18:
+When the controller is in Hybrid standard mode,if T5>120F  controller shall Display  Bad Ambient Error(118) In Active faults Screen.(Ambient over Temperature)
+1000,2,111,12:4501,1,1
+1000,2,112,12:4501,1,1
+DO5,DO6,DO4,DO2,DO1,DO2,DO2,DO2,DO2,DO2,DO2,DO1;DO1
+490,180;490,330;490,490;490,640;490,791
+280,790;430,790;580,790;730,790;880,791
+1000,2,250,12:4501,1,1
+490,180;490,330;490,490;490,640;490,792
+280,790;430,790;580,790;730,790;880,792
+1000,2,252,12:4501,1,1
+490,180;490,330;490,490;490,640;490,793
+280,790;430,790;580,790;730,790;880,793
+1000,2,253,12:4501,1,1
+490,180;490,330;490,490;490,640;490,794
+280,790;430,790;580,790;730,790;880,794
+1000,2,256,12:4501,1,1
+490,180;490,330;490,490;490,640;490,795
+280,790;430,790;580,790;730,790;880,795
+1000,2,257,12:4501,1,1
+490,180;490,330;490,490;490,640;490,796
+280,790;430,790;580,790;730,790;880,796
+1000,2,258,12:4501,1,1
+490,180;490,330;490,490;490,640;490,797
+280,790;430,790;580,790;730,790;880,797
+1000,2,198,12:4501,1,1
+00:00:02
+00:00:03
+00:00:04
+00:00:06
+00:00:07
+Wi-Fi connection setup
+SR-26: (Simulated Error)
+When the controller is in Hybrid standard mode,When the Fan ,Compressor and Upper Element is ON and the Input Current drawing is lesserthan 5amps controller shall Display Upper Element Open Error(133) In Active faults Screen.(Upper Element Malfunction)
+SR-27: (Simulated Error)
+When the controller is in Hybrid standard mode,When the Fan ,Compressor and Lower Element is ON and the Input Current drawing is lesserthan 5amps controller shall Display Upper Element Open Error(134) In Active faults Screen.(Lower Element Malfunction)
+SR-28: (Simulated Error)
+When the controller is in Hybrid standard mode,When the  Upper Element is ON and the Input Current drawing is 20 Amps controller shall Display 20A_ Upper Element Short Error(135) In Active faults Screen.(Upper Element Malfunction)
+SR-29: (Simulated Error)
+When the controller is in Hybrid standard mode,When the  Upper Element is ON and the Input Current drawing is 22 Amps controller shall Display 22A_ Upper Element Short Error(136) In Active faults Screen.(Upper Element Malfunction)
+SR-30: (Simulated Error)
+When the controller is in Hybrid standard mode,When the  Upper Element is ON and the Input Current drawing is 30 Amps controller shall Display 30A_ Upper Element Short Error(137) In Active faults Screen.(Upper Element Malfunction)
+SR-31: (Simulated Error)
+When the controller is in Hybrid standard mode,When the  Lower Element is ON and the Input Current drawing is 20 Amps controller shall Display 20_ Lower Element Short Error(138) In Active faults Screen.(Lower Element Malfunction)
+SR-32: (Simulated Error)
+When the controller is in Hybrid standard mode,When the  Lower Element is ON and the Input Current drawing is 22 Amps controller shall Display 22_ Lower Element Short Error(139) In Active faults Screen.(Lower Element Malfunction)
+SR-33: (Simulated Error)
+When the controller is in Hybrid standard mode,When the  Lower Element is ON and the Input Current drawing is 30 Amps controller shall Display 30_ Lower Element Short Error(140) In Active faults Screen.(Lower Element Malfunction)
+SR-34: (Simulated Error)
+When the controller is in Hybrid standard mode,When the Fan ,Compressor and Upper Element is ON and the Input Current drawing is 22 Amps controller shall Display 22A_Upper Element short or Locked Rotor Error(141) In Active faults Screen.(Upper Element Malfunction)
+SR-35: (Simulated Error)
+When the controller is in Hybrid standard mode,When the Fan ,Compressor and Upper Element is ON and the Input Current drawing is 30A controller shall Display 30A_Upper Element Short or Locked Rotor(142)Error In Active faults Screen.(Upper Element Malfunction)
+SR-36: (Simulated Error)
+When the controller is in Hybrid standard mode,When the Fan ,Compressor and Lower Element is ON and the Input Current drawing is 22 Amps controller shall Display 22A_Lower Element short or Locked Rotor Error(143) In Active faults Screen.(Lower Element Malfunction)
+SR-37: (Simulated Error)
+When the controller is in Hybrid standard mode,When the Fan ,Compressor and Lower Element is ON and the Input Current drawing is 30A controller shall Display 30A_Lower Element Short or Locked Rotor(144)Error In Active faults Screen.(Lower Element Malfunction)
+SR-38: (Simulated Error)
+When the controller is in Hybrid standard mode,When the Fan ,Compressor and Lower Element is ON and the Input Current drawing is greaterthan 5A controller shall Display System Control compressed Locked Rotor (145)Error In Active faults Screen.(Compressor Malfunction)
+SR-39: (Simulated Error)
+When the controller is in Hybrid standard mode,When the Fan ,Compressor and Upper Element is ON and the Input Current drawing is greaterthan 5A controller shall Display System Control compressed Locked Rotor (145)Error In Active faults Screen.(Compressor Malfunction)
+(Simulated Error)
+When the controller is in Hybrid standard mode,When the Fan is On and the Input Current drawing is less than 0.08 A controller shall Display Fan Open Error (126) In Active faults Screen.(Fan Malfunction)
+SR-42: (Simulated Error)
+When the controller is in Hybrid standard mode,When the Fan and Compressor is On and the Input Current drawing is less than 1 A controller shall Display compressor Open Error (128) In Active faults Screen.(Compressor Malfunction)
+SR-43: (Simulated Error)
+When the controller is in Hybrid standard mode,When the Fan is On and the Input Current drawing is Greaterthan 5 A controller shall Display Compressor Locked Rotor Error (129) In Active faults Screen.(Compressor Malfunction)
+SR-44: (Simulated Error)
+When the controller is in Hybrid standard mode,When the Fan is On and the Input Current drawing is less than 0.08 A controller shall Display Fan Open Hard Fault Error (146) In Active faults Screen.(Fan Hard Fault)
+SR-45: (Simulated Error)
+When the controller is in Hybrid standard mode,When the Fan is On and the Input Current drawing is Greaterthan 3 A controller shall Display Fan Locked Rotor Hard Fault Error (147) In Active faults Screen.(Fan Hard Fault)
+SR-46: (Simulated Error)
+When the controller is in Hybrid standard mode,When the Fan is On and the Input Current drawing is lessthan 1 A controller shall Display Compressor Open Hard Fault Error (148) In Active faults Screen.(Compressor Hard Fault)
+SR-47: (Simulated Error)
+When the controller is in Hybrid standard mode,When the Fan is On and the Input Current drawing is greaterthan 5 A controller shall Display Compressor Open Hard Fault Error (149) In Active faults Screen.(Compressor Hard Fault)
+SR-52: (Simulated Error)
+When the controller is in Hybrid standard mode
+If SuperheatcompressorModel>5F
+After 10 Seconds If Compressor relay is ON
+If Compressor is ON for 30 Minutes controller shall Display Low Super Heat Hard Fault (150) In Active faults Screen.(Super Heat Malfunction)
+SR-48: (Simulated Error)
+When the controller is in Hybrid standard mode,if (T5-T3a)<10F  controller shall Display Low Refrigerant Hard Fault Error(152) In Active faults Screen.
+SR-50: (Simulated Error)
+When the controller is in Hybrid standard mode,if (T2-T1)<5F 
+ If T2>(setpoint-1) and Upper element is off from 6 minutes and lower element is off from 30 minutes 
+and If Fan speed is 1 and compressor is ON from 30 Minutes controller shall Display Dirty Filter Temperature Hard Fault(153) In Active faults Screen.
+SR-54: (Simulated Error)
+When the controller is in Hybrid standard mode
+If SuperheatcompressorModel>20
+If CurrentEEV position steps Model>450
+After 10 Seconds If Compressor relay is ON
+If Compressor is ON for 30 Minutes controller shall Display High Super Heat Hard Fault (151) In Active faults Screen.
+SR-49: (Simulated Error)
+When the controller is in Hybrid standard mode,if (T2-T1)<5F 
+ If T2>(setpoint-1) and Upper element is off from 6 minutes and lower element is off from 30 minutes 
+and If Fan speed is 1 and compressor is ON from 30 Minutes controller shall Display Dirty Filter Temperature Fault(124) In Active faults Screen.
+SR-21: (Simulated Error)
+When the controller is in Hybrid standard mode,When Fan Speed is 10 rpm and  Filter current is  greaterthan 309 mA the controller shall Display Clogged Filter Current Fault Code(121) In Active faults Screen.(Air Flow Restriction Fault)
+SR-41: (Simulated Error)
+When the controller is in Hybrid standard mode,When the Fan is On and the Input Current drawing is Greaterthan 3 A controller shall Display Fan Locked Rotor Error (127) In Active faults Screen.(Fan Malfunction)
+SR-51: (Simulated Error)
+When the controller is in Hybrid standard mode
+If SuperheatcompressorModel>5F
+After 10 Seconds If Compressor relay is ON
+If Compressor is ON for 30 Minutes controller shall Display Low Super Heat Fault (130) In Active faults Screen.(Super Heat Malfunction)
+SR-25: (Simulated Error)
+When the controller is in Hybrid standard mode,if (T5-T3a)<10F  controller shall Display Low Refrigerant Fault(132) In Active faults Screen.(Super Heat Malfunction)
+SR-53: (Simulated Error)
+When the controller is in Hybrid standard mode
+If SuperheatcompressorModel>20
+If CurrentEEV position steps Model>450
+After 10 Seconds If Compressor relay is ON
+If Compressor is ON for 30 Minutes controller shall Display High Super Heat  Fault (131) In Active faults Screen.(Super Heat Malfunction)
+SR-22: (Simulated Error)
+When the controller is in Hybrid standard mode,if Drain Pan Switch SPDT13 is Close,the controller shall display Drain pan Error (122) In Active faults Screen.(Condensate fault)
+SR-16: (Simulated Error)
+When the controller is in Hybrid standard mode,if Leak Sense Switch SPDT12 is Close,the controller shall display Leak Sense Error (115) In Active faults Screen.(Leakage Detected)
+SR-55: (Simulated Error)
+When the controller is in Hybrid standard mode&When Safety Relay is only ON and if Fan current Detected for 10 Seconds control shall Display Fan relay short unrecovarable Error (155) In Active faults Screen.
+SR-01: (Simulated Error)
+When the controller  is in Hybrid standard mode the if the input Voltage is 140 V Ac  controller shall display Bad Voltage Error (119) Faultcode notifications on main sreen display(Supply Voltage Malfunction)
+(Simulated Error)
+When the controller is in Hybrid standard mode&When Safety Relay is only ON and if Compressor current  Detected for 10 Seconds control shall Display Compressor Relay short Unrecoverable Error(156), Heating Relay fault(92) in Display
+SR-57: (Simulated Error)
+When the controller is in Hybrid standard mode control shall Display Upper Element open hard Fault Error(249), Element Hardfault(93) in Display
+SR-12: (Simulated Error)
+When the controller is in Hybrid standard mode,if T1<15F,the controller shall display T3a Open Error (111) In Active faults Screen.
+SR-13: (Simulated Error)
+When the controller is in Hybrid standard mode,if T3b<15F,the controller shall display T3b Open Error (112) In Active faults Screen.
+SR-58: (Simulated Error)
+When the controller is in Hybrid standard mode control shall Display Upper Element Short hard Fault Error(250), Element Hardfault(93) in Display
+SR-59: (Simulated Error)
+When the controller is in Hybrid standard mode control shall Display Lower Element open hard Fault Error(252), Element Hardfault(93) in Display
+SR-60: (Simulated Error)
+When the controller is in Hybrid standard mode control shall Display Lower Element open hard Fault Error(253), Element Hardfault(93) in Display
+SR-61: (Simulated Error)
+When the controller is in Hybrid standard mode control shall Display minumum EEV rotation Error(256),Compressor Fault(9) in Display
+SR-62: (Simulated Error)
+When the controller is in Hybrid standard mode control shall Display Maximum EEV rotation Error(257),Compressor Fault(9) in Display
+SR-63: (Simulated Error)
+When the controller is in Hybrid standard mode control shall Display Maximum EEV rotation HardFault Error(258),Compressor Fault(9) in Display
+SR-64: (Simulated Error)
+When the controller is in Hybrid standard mode control shall Detect Power Config Mismacth Error(198) for Higher and Lower level of Operating Voltages and shall Display Supply Voltage Fault(6) in Display
+Fan Relay Short Error
+Supply Voltage Fault
+Safety Relay Short Error
+Upper Element Open Hard Fault
+T3a Open Error
+T3b Open Error
+Upper Element Short HardFault
+Lower Element Open Hardfault
+Lower Element short Hardfault
+Minimum EEv Rotation Error
+Maximum EEv Rotation Error
+Maximum EEv Rotation HardFault
+140,1320
+500,45
+135,1580
+PRO_EEV
+DO5,DO6,DO4,DO2,DO1,DO2,DO2,DO2,DO2,DO2,DO2,DO1,DO2;DO1
+PRO_EEV_OPEN
+PRO_EEV_CLOSE
+485,460
+537,620
+ELECTRONICEXPANSIONVALVE
+0
+480
+TOU-5
+DI1
+DI2
+DI3
+TOU_TEST_MoreTests
+TOU5
+FAN
+HYBRID,130
+TOU
+590,850
+925,1100
+224
+DO3,DO1;DO5,DO5,DO5,DO5,DO5
+DO1,DO4,DO1,DO3,DO1,DO4,DO1
+UPPER_ELEMENT_ON
+UPPER_ELEMENT_OFF
+DI No
+Operation
+Upper Element
+DI0
+Lower Element
+UPPER_ELEMENT_WAIT
+LOWER_ELEMENT_ON
+LOWER_ELEMENT_OFF
+LOWER_ELEMENT_WAIT
+COMPRESSOR_ON
+COMPRESSOR_OFF
+FAN_SPEED1
+FAN_SPEED2
+FAN_SPEED3
+FAN_OFF
+45
+SPEED1
+135,1320
+400,1200;560,1140
+750,160;850,460
+COMPRESSOR_ON_CHECK
+4543,1
+COMPRESSOR_ON_FANCHANGE
+HOME_SCREEN_DATE_TIME
+480,270
+480,460
+480,650
+480,845
+DO2,DO1
+550,15;500,210
+550,15;500,405
+550,15;530,800
+550,15;500,600
+105,1515;300,840
+105,1515;500,840
+105,1515;885,920
+105,1515;690,840
+DO2,DO1,DO2,DO2,DO1
+DO1,DO2,DO2,DO2,DO1
+DO1,DO1
+251
+208
+259
+262
+265
+268
+271
+274
+277
+280
+283
+286
+289
+292
+295
+298
+301
+304
+307
+310
+313
+316
+319
+322
+325
+328
+331
+334
+337
+340
+343
+346
+349
+210
+222
+242
+245
+254
+198
+201
+204
+207
+215
+230
+233
+236
+239
+248
+650,450
+550,1060
+345,660
+535,660
+725,660
+920,660
+350,750
+OWNER
+1280,660
+755,1525
+DO5,DO5,DO5,DO5,DO5,DO6,DO4,DO4,DO4,DO2,DO1,DO1,DO1;DO5,DO5,DO5
+DO6,DO4,DO2,DO1,DO2,DO2,DO1,DO2,DO2,DO1,DO4,DO1,DO1,DO1,DO4,DO4,DO1
+DO6,DO4,DO2,DO1,DO2,DO2,DO1,DO2,DO2,DO1,DO4,DO1,DO1,DO2,DO1,DO4,DO4,DO1
+DO6,DO4,DO2,DO1,DO2,DO2,DO1,DO2,DO2,DO1,DO4,DO1,DO1,DO2,DO2,DO1,DO4,DO4,DO1
+DO6,DO4,DO2,DO1,DO2,DO2,DO1,DO2,DO2,DO1,DO4,DO1,DO1,DO2,DO2,DO2,DO1,DO4,DO4,DO1
+DO6,DO4,DO2,DO1,DO2,DO2,DO1,DO2,DO2,DO1,DO4,DO1,DO1,DO2,DO2,DO2,DO2,DO1,DO4,DO4,DO1
+DO6,DO4,DO2,DO1,DO2,DO2,DO1,DO2,DO2,DO1,DO4,DO1,DO1,DO2,DO2,DO2,DO2,DO2,DO1,DO4,DO4,DO1
+DO6,DO4,DO2,DO1,DO2,DO2,DO1,DO2,DO2,DO1,DO4,DO1,DO1,DO2,DO2,DO2,DO2,DO2,DO2,DO1,DO4,DO4,DO1
+DO6,DO4,DO2,DO1,DO2,DO2,DO1,DO2,DO2,DO1,DO4,DO1,DO1,DO2,DO2,DO2,DO2,DO2,DO2,DO2,DO1,DO4,DO4,DO1
+MQTT Failure

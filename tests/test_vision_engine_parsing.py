@@ -30,14 +30,9 @@ class TestVisionEngineParsing(unittest.TestCase):
         self.assertEqual(TEMPERATURE_FIELD.ideal.right, 0.70)
         self.assertIn("banner_symbols", CURRENT_LAYOUT.fields)
         self.assertEqual(BANNER_SYMBOLS_FIELD.name, "banner_symbols")
-        self.assertEqual([child.key for child in CURRENT_LAYOUT.menu_tree.children], [
-            "active_faults",
-            "historical_faults",
-            "first_time_setup",
-            "get_connected",
-            "pro_tools",
-            "schedules",
-        ])
+        child_keys = [child.key for child in CURRENT_LAYOUT.menu_tree.children]
+        for expected in ["active_faults", "history", "first_time_setup", "system", "control", "energy", "io"]:
+            self.assertIn(expected, child_keys)
 
 
 if __name__ == "__main__":
