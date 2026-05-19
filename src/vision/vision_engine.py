@@ -39,10 +39,8 @@ class OCRReadout:
 	"""Single OCR result payload for upstream logic (main/network)."""
 
 	display_found: bool
-	mode: str
-	mode_raw: str
-	temperature_f: Optional[int]
-	temperature_raw: str
+	current_menu_key: str
+	fields: dict[str, dict[str, Any]]
 
 
 def _order_points(points: np.ndarray) -> np.ndarray:
@@ -139,129 +137,85 @@ def _prepare_binary(warped: np.ndarray) -> np.ndarray:
 	return thresh
 
 
-def _extract_mode_roi(binary: np.ndarray) -> np.ndarray:
-	"""Crop the top line where mode text appears."""
+def _extract_field_variants(binary: np.ndarray, field_name: str) -> list[np.ndarray]:
+	"""Build OCR variants for any field using its ROI definitions."""
 	_require_cv2()
-	mode_roi = CURRENT_LAYOUT.fields["mode"].ideal.crop(binary)
-	mode_roi = cv2.bitwise_not(mode_roi)
-	mode_roi = cv2.GaussianBlur(mode_roi, (3, 3), 0)
-	return cv2.resize(mode_roi, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
-
-
-def _extract_mode_variants(binary: np.ndarray) -> list[np.ndarray]:
-	"""Build a few cheap OCR variants for the mode line."""
-	_require_cv2()
-	mode_roi = _extract_mode_roi(binary)
-	variants = [mode_roi]
-
-	# Slightly different binarization paths help when the display is dim or skewed.
-	_, otsu_inverse = cv2.threshold(mode_roi, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-	variants.append(otsu_inverse)
-	variants.append(cv2.morphologyEx(mode_roi, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))))
-
-	return variants
-
-
-def _fallback_mode_variants(frame: np.ndarray) -> list[np.ndarray]:
-	"""Build conservative OCR variants when the display contour is not found."""
-	_require_cv2()
-	gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-	gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-	mode_roi = CURRENT_LAYOUT.fields["mode"].fallback.crop(gray)
-	mode_roi = cv2.GaussianBlur(mode_roi, (3, 3), 0)
-	_, otsu = cv2.threshold(mode_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-	return [mode_roi, otsu, cv2.bitwise_not(otsu)]
-
-
-def _extract_temp_roi(binary: np.ndarray) -> np.ndarray:
-	"""Crop the center section where numeric temperature appears."""
-	_require_cv2()
-	temp_roi = CURRENT_LAYOUT.fields["temperature"].ideal.crop(binary)
-	temp_roi = cv2.bitwise_not(temp_roi)
-	temp_roi = cv2.GaussianBlur(temp_roi, (3, 3), 0)
-
-	# Small close operation helps connect broken strokes in digits.
+	field = CURRENT_LAYOUT.fields[field_name]
+	roi = field.ideal.crop(binary)
+	roi = cv2.bitwise_not(roi)
+	roi = cv2.GaussianBlur(roi, (3, 3), 0)
+	
 	kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-	temp_roi = cv2.morphologyEx(temp_roi, cv2.MORPH_CLOSE, kernel)
-	return cv2.resize(temp_roi, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
-
-
-def _extract_temp_variants(binary: np.ndarray) -> list[np.ndarray]:
-	"""Build a few cheap OCR variants for the temperature line."""
-	_require_cv2()
-	temp_roi = _extract_temp_roi(binary)
-	variants = [temp_roi]
-
-	_, otsu_inverse = cv2.threshold(temp_roi, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+	if field_name == "temperature":
+		roi = cv2.morphologyEx(roi, cv2.MORPH_CLOSE, kernel)
+		
+	roi = cv2.resize(roi, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
+	variants = [roi]
+	
+	_, otsu_inverse = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
 	variants.append(otsu_inverse)
-	variants.append(cv2.morphologyEx(temp_roi, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))))
-	variants.append(cv2.dilate(temp_roi, cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2)), iterations=1))
-
+	variants.append(cv2.morphologyEx(roi, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))))
+	
+	if field_name == "temperature":
+		variants.append(cv2.dilate(roi, cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2)), iterations=1))
+		
 	return variants
 
 
-def _fallback_temp_variants(frame: np.ndarray) -> list[np.ndarray]:
+def _fallback_field_variants(frame: np.ndarray, field_name: str) -> list[np.ndarray]:
 	"""Build conservative OCR variants when the display contour is not found."""
 	_require_cv2()
 	gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 	gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-	temp_roi = CURRENT_LAYOUT.fields["temperature"].fallback.crop(gray)
-	temp_roi = cv2.GaussianBlur(temp_roi, (3, 3), 0)
-	_, otsu = cv2.threshold(temp_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-	return [temp_roi, otsu, cv2.bitwise_not(otsu)]
+	field = CURRENT_LAYOUT.fields[field_name]
+	roi = field.fallback.crop(gray)
+	roi = cv2.GaussianBlur(roi, (3, 3), 0)
+	_, otsu = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+	return [roi, otsu, cv2.bitwise_not(otsu)]
 
 
-def _read_mode(mode_roi: np.ndarray) -> tuple[str, str]:
-	"""Run OCR on mode text and map it to the nearest known mode."""
+def _read_field_from_variants(field_name: str, variants: list[np.ndarray]) -> tuple[str, Any]:
+	"""OCR a field using several cheap variants and keep the best text based on field type."""
 	_require_pytesseract()
-	config = CURRENT_LAYOUT.fields["mode"].tesseract_config
-	return _read_mode_from_variants([mode_roi], config)
-
-
-def _read_mode_from_variants(variants: list[np.ndarray], config: str) -> tuple[str, str]:
-	"""OCR the mode line using several cheap variants and keep the best text."""
-	_require_pytesseract()
+	field = CURRENT_LAYOUT.fields[field_name]
 	best_raw = ""
-	best_mode = CURRENT_LAYOUT.known_modes[0]
+	best_value: Any = None
 	best_score = -1.0
 
 	for variant in variants:
-		raw = pytesseract.image_to_string(variant, config=config).strip().upper()
-		mode = parse_mode_text(raw)
-		score = _sequence_score(raw, mode)
-		if score > best_score:
-			best_raw = raw
-			best_mode = mode
-			best_score = score
+		raw = pytesseract.image_to_string(variant, config=field.tesseract_config).strip()
+		
+		# Parse based on field type
+		if field_name == "mode":
+			mode = parse_mode_text(raw)
+			score = _sequence_score(raw, mode)
+			if score > best_score:
+				best_raw = raw
+				best_value = mode
+				best_score = score
+		elif field_name == "temperature":
+			value = parse_temperature_text(raw)
+			if value is None:
+				continue
+			score = _score_temperature_candidate(raw, value)
+			if score > best_score:
+				best_raw = raw
+				best_value = value
+				best_score = score
+		else:
+			# Generic strings - score by raw length
+			score = len(raw)
+			if score > best_score:
+				best_raw = raw
+				best_value = raw.upper() if raw else ""
+				best_score = score
 
-	return best_raw, best_mode
-
-
-def _read_temperature(temp_roi: np.ndarray) -> tuple[str, Optional[float]]:
-	"""Run OCR on numeric text and parse a float when possible."""
-	_require_pytesseract()
-	config = CURRENT_LAYOUT.fields["temperature"].tesseract_config
-	return _read_temperature_from_variants([temp_roi], config)
-
-
-def _read_temperature_from_variants(variants: list[np.ndarray], config: str) -> tuple[str, Optional[int]]:
-	"""OCR the temperature line using several cheap variants and keep the best integer."""
-	_require_pytesseract()
-	best_raw = ""
-	best_value: Optional[int] = None
-	best_score = -1.0
-
-	for variant in variants:
-		raw = pytesseract.image_to_string(variant, config=config).strip()
-		value = parse_temperature_text(raw)
-		if value is None:
-			continue
-
-		score = _score_temperature_candidate(raw, value)
-		if score > best_score:
-			best_raw = raw
-			best_value = value
-			best_score = score
+	# Default return values when parsing fully fails
+	if best_value is None:
+		if field_name == "mode":
+			best_value = CURRENT_LAYOUT.known_modes[0]
+		elif field_name != "temperature":
+			best_value = ""
 
 	return best_raw, best_value
 
@@ -381,51 +335,46 @@ def _score_temperature_candidate(raw_temp: str, temperature: int) -> float:
 
 def read_display(
 	frame: np.ndarray,
+	current_menu_key: str = "dashboard",
 ) -> OCRReadout:
 	"""
-	Read both display mode and temperature from one frame.
+	Read fields from the display in one frame based on current context.
 
 	Args:
 		frame: BGR image from camera.
+		current_menu_key: Current menu state from layout.
 
 	Returns:
-		OCRReadout with mode text + temperature float.
+		OCRReadout structure containing dynamic fields.
 	"""
 	_require_cv2()
 	_require_pytesseract()
 	mask = _display_mask(frame)
 	display_contour = _find_display_contour(mask)
+	fields_result: dict[str, dict[str, Any]] = {}
 
 	if display_contour is None:
-		fallback_raw, fallback_mode = _read_mode_from_variants(
-			_fallback_mode_variants(frame),
-			"--psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ+ ",
-		)
+		for field_name in CURRENT_LAYOUT.fields:
+			raw, val = _read_field_from_variants(field_name, _fallback_field_variants(frame, field_name))
+			fields_result[field_name] = {"raw": raw, "value": val}
+		
 		return OCRReadout(
 			display_found=False,
-			mode=fallback_mode,
-			mode_raw=fallback_raw,
-			temperature_f=None,
-			temperature_raw="",
+			current_menu_key=current_menu_key,
+			fields=fields_result,
 		)
 
 	warped = _four_point_transform(frame, display_contour.reshape(4, 2))
 	binary = _prepare_binary(warped)
 
-	mode_variants = _extract_mode_variants(binary)
-	mode_raw, mode = _read_mode_from_variants(mode_variants, "--psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ+ ")
-
-	temp_raw, temp_value = _read_temperature_from_variants(
-		_extract_temp_variants(binary),
-		"--psm 7 -c tessedit_char_whitelist=0123456789Ool|SsbZ",
-	)
+	for field_name in CURRENT_LAYOUT.fields:
+		raw, val = _read_field_from_variants(field_name, _extract_field_variants(binary, field_name))
+		fields_result[field_name] = {"raw": raw, "value": val}
 
 	return OCRReadout(
 		display_found=True,
-		mode=mode,
-		mode_raw=mode_raw,
-		temperature_f=temp_value,
-		temperature_raw=temp_raw,
+		current_menu_key=current_menu_key,
+		fields=fields_result,
 	)
 
 
@@ -439,20 +388,23 @@ def capture_frame() -> Optional[np.ndarray]:
 
 
 def capture_and_read_display(
+	current_menu_key: str = "dashboard",
 ) -> OCRReadout:
 	"""One-call helper used by main: capture frame then run OCR pipeline."""
 	frame = capture_frame()
 	if frame is None:
+		empty_fields = {name: {"raw": "", "value": None} for name in CURRENT_LAYOUT.fields}
+		# Ensure defaults
+		empty_fields["mode"] = {"raw": "", "value": "UNKNOWN"}
 		return OCRReadout(
 			display_found=False,
-			mode="UNKNOWN",
-			mode_raw="",
-			temperature_f=None,
-			temperature_raw="",
+			current_menu_key=current_menu_key,
+			fields=empty_fields,
 		)
 
 	return read_display(
 		frame,
+		current_menu_key,
 	)
 
 

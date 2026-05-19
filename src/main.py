@@ -18,6 +18,7 @@ from enum import Enum, auto
 import data_manager
 from motion import servo_driver
 from vision import vision_engine
+from vision.display_layouts import CURRENT_LAYOUT
 
 
 # Capture storage layout (repo-relative): data/captures
@@ -70,7 +71,8 @@ def _open_test_report() -> tuple[object, csv.DictWriter, Path]:
     report_id = data_manager.build_capture_id("test_report")
     report_path = TEST_REPORT_DIR / f"{report_id}.csv"
     report_file = report_path.open("w", newline="", encoding="utf-8")
-    writer = csv.DictWriter(report_file, fieldnames=["step", "temperature", "mode"])
+    fieldnames = ["step", "menu"] + list(CURRENT_LAYOUT.fields.keys())
+    writer = csv.DictWriter(report_file, fieldnames=fieldnames)
     writer.writeheader()
     report_file.flush()
     return report_file, writer, report_path
@@ -179,12 +181,11 @@ def main():
                     frame = vision_engine.capture_frame()
                     if frame is None:
                         print("[WARNING] No camera frame available; skipping image save.")
+                        current_menu_key = last_command.split("MENU_")[1] if "MENU_" in last_command else "dashboard"
                         readout = vision_engine.OCRReadout(
                             display_found=False,
-                            mode="UNKNOWN",
-                            mode_raw="",
-                            temperature_f=None,
-                            temperature_raw="",
+                            current_menu_key=current_menu_key,
+                            fields={"mode": {"raw": "", "value": "UNKNOWN"}, "temperature": {"raw": "", "value": None}},
                         )
                     else:
                         saved_path = data_manager.save_capture_frame(CAPTURE_DIR, frame, capture_id)
@@ -192,22 +193,32 @@ def main():
                             print("[WARNING] Capture frame could not be saved.")
                         else:
                             print(f"[INFO] Saved capture frame: {saved_path}")
-                        readout = vision_engine.read_display(frame)
+                        
+                        # In the future, this current_menu_key will be derived from LabVIEW nav commands
+                        current_menu_key = last_command.split("MENU_")[1] if "MENU_" in last_command else "dashboard"
+                        readout = vision_engine.read_display(frame, current_menu_key)
+                    
+                    # Convert the dynamic dictionary of fields into a unified result string
+                    fields_str = ";".join(f"{k.upper()}={v.get('value', '')}" for k, v in readout.fields.items())
                     ocr_result = (
                         f"DISPLAY_FOUND={readout.display_found};"
-                        f"MODE={readout.mode};"
-                        f"TEMP={readout.temperature_f};"
-                        f"RAW_MODE={readout.mode_raw};"
-                        f"RAW_TEMP={readout.temperature_raw}"
+                        f"MENU={readout.current_menu_key};"
+                        f"{fields_str}"
                     )
                     step_counter += 1
-                    report_writer.writerow(
-                        {
-                            "step": step_counter,
-                            "temperature": "" if readout.temperature_f is None else int(readout.temperature_f),
-                            "mode": readout.mode,
-                        }
-                    )
+                    
+                    # Extract values for the report safely and dynamically based on the current layout's defined fields.
+                    row_data = {"step": step_counter, "menu": readout.current_menu_key}
+                    for field_name in CURRENT_LAYOUT.fields:
+                        val = readout.fields.get(field_name, {}).get("value")
+                        if field_name == "temperature":
+                            row_data[field_name] = "" if val is None else int(val)
+                        elif field_name == "mode":
+                            row_data[field_name] = "UNKNOWN" if val is None else val
+                        else:
+                            row_data[field_name] = "" if val is None else val
+                    
+                    report_writer.writerow(row_data)
                     current_state = SystemState.REPORT_TO_LABVIEW
                     time.sleep(STATE_SLEEP_SECONDS["READ_DISPLAY"])
                     

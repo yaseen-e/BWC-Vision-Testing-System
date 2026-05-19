@@ -121,7 +121,7 @@ BANNER_SYMBOLS_FIELD = OCRField(
 	tesseract_config="--psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-_:/(). ",
 )
 
-# Placeholders inferred from document text positioning (exact boundaries pend calibration)
+# TODO: Exact boundaries need calibration. Placeholders inferred from document text positioning.
 DASHBOARD_INFO_LINE_3 = OCRField(
 	name="dashboard_info_line_3",
 	ideal=ROIBox(top=0.50, bottom=0.65, left=0.10, right=0.90),
