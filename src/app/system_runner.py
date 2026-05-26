@@ -92,7 +92,7 @@ def main():
                         if pending_command is not None:
                             if get_button_for_command(pending_command) is not None:
                                 current_state = SystemState.PRESS_BUTTON
-                            elif pending_command is LabViewCommand.READ:
+                            elif pending_command is LabViewCommand.RUN_OCR:
                                 current_state = SystemState.READ_DISPLAY
                             elif pending_command is LabViewCommand.SHUTDOWN:
                                 current_state = SystemState.SHUTDOWN
@@ -108,8 +108,11 @@ def main():
                     if button is None:
                         print(f"[WARNING] Unable to map command to button: {last_command}")
                     else:
+                        print(f"[MANUAL] Please press the {button.name} button on the water heater.")
+                        terminal_control_temp.wait_for_enter()
                         servo_driver.press_button(button)
-                    current_state = SystemState.READ_DISPLAY
+
+                    current_state = SystemState.WAIT_FOR_COMMAND
                     time.sleep(STATE_SLEEP_SECONDS["PRESS_BUTTON"])
                     
                 case SystemState.READ_DISPLAY:

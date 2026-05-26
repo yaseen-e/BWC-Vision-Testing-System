@@ -2,7 +2,7 @@ from enum import Enum
 from typing import Optional
 
 class LabViewCommand(Enum):
-    READ = "READ"
+    RUN_OCR = "RUN_OCR"
     SHUTDOWN = "SHUTDOWN"
     UP = "UP"
     LEFT = "LEFT"

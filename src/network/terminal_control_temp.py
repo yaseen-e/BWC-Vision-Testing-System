@@ -33,3 +33,15 @@ def space_pressed() -> bool:
         return False
 
     return sys.stdin.read(1) == " "
+
+def wait_for_enter() -> None:
+    """Block until the user presses the ENTER key. Used for manual intervention steps."""
+    if not sys.stdin.isatty():
+        return
+    print("Press ENTER to continue...", end="", flush=True)
+    while True:
+        char = sys.stdin.read(1)
+        if char in ('\n', '\r'):
+            print()
+            break
+

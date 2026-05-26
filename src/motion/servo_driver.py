@@ -38,6 +38,6 @@ def shutdown() -> None:
 
 def press_button(button: Button) -> bool:
 	"""Press one button using the mapped servo (returns success state)."""
-	# Hardware control will be added later. This keeps API stable now.
+	# TODO: Add hardware control
 	_ = button
 	return True
