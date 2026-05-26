@@ -8,7 +8,6 @@ Provides button mapping and servo control hooks for water heater UI actuation.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional
 
 
 class Button(Enum):
@@ -20,10 +19,6 @@ class Button(Enum):
 	BACK = "BACK"
 	DOWN = "DOWN"
 	MENU = "MENU"
-
-
-# Direct LabVIEW command to Button mapping
-_COMMAND_TO_BUTTON = {f"CMD_PRESS_{button.name}": button for button in Button}
 
 
 def initialize() -> None:
@@ -39,15 +34,6 @@ def home_all() -> None:
 def shutdown() -> None:
 	"""Release servo resources (placeholder)."""
 	return
-
-
-def parse_button_from_command(command: str) -> Optional[Button]:
-	"""Convert LabVIEW command text into a Button enum when possible."""
-	if not command:
-		return None
-
-	normalized = command.strip().upper()
-	return _COMMAND_TO_BUTTON.get(normalized)
 
 
 def press_button(button: Button) -> bool:

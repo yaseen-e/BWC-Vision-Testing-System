@@ -1,5 +1,0 @@
-CMD_READ_ONLY_MENU_dashboard
-CMD_PRESS_UP_MENU_control
-CMD_PRESS_RIGHT_MENU_energy
-CMD_READ_ONLY_MENU_active_faults
-CMD_READ_ONLY_MENU_schedules

@@ -14,6 +14,7 @@ import traceback
 import termios
 import tty
 from enum import Enum, auto
+from typing import Optional
 
 import data_manager
 from motion import servo_driver
@@ -47,6 +48,42 @@ class SystemState(Enum):
     REPORT_TO_LABVIEW = auto()
     ERROR = auto()
     SHUTDOWN = auto()
+
+
+class LabViewCommand(Enum):
+    RUN_OCR = "RUN_OCR"
+    SHUTDOWN = "SHUTDOWN"
+    UP = "UP"
+    LEFT = "LEFT"
+    SELECT = "SELECT"
+    RIGHT = "RIGHT"
+    BACK = "BACK"
+    DOWN = "DOWN"
+    MENU = "MENU"
+
+
+LABVIEW_COMMANDS: tuple[str, ...] = tuple(command.value for command in LabViewCommand)
+LABVIEW_BUTTON_COMMANDS = {
+    LabViewCommand.UP: servo_driver.Button.UP,
+    LabViewCommand.LEFT: servo_driver.Button.LEFT,
+    LabViewCommand.SELECT: servo_driver.Button.SELECT,
+    LabViewCommand.RIGHT: servo_driver.Button.RIGHT,
+    LabViewCommand.BACK: servo_driver.Button.BACK,
+    LabViewCommand.DOWN: servo_driver.Button.DOWN,
+    LabViewCommand.MENU: servo_driver.Button.MENU,
+}
+
+
+def _parse_labview_command(command: str) -> Optional[LabViewCommand]:
+    """Normalize a LabVIEW TCP/IP command into a known command token."""
+    if not command:
+        return None
+
+    normalized = command.strip().upper()
+    try:
+        return LabViewCommand(normalized)
+    except ValueError:
+        return None
 
 
 def _run_capture_cleanup() -> None:
@@ -107,12 +144,14 @@ def _space_pressed() -> bool:
 
     return sys.stdin.read(1) == " "
 
+
 def main():
     """Main Event Loop (The Orchestrator)"""
     
     # initial state on startup
     current_state = SystemState.STARTUP
     last_command = ""
+    pending_command: LabViewCommand | None = None
     ocr_result = ""
     error_message = ""
     readout = None
@@ -146,27 +185,29 @@ def main():
                     time.sleep(STATE_SLEEP_SECONDS["STARTUP"])
                     
                 case SystemState.WAIT_FOR_COMMAND:
-                    last_command = "CMD_PRESS_TEMP_UP" # simulated command received from LabVIEW
+                    last_command = LabViewCommand.UP.value  # simulated command received from LabVIEW
                     print(f"[NETWORK] Received command from LabVIEW: {last_command}")
                     # TODO: listen to LabVIEW via Serial or TCP/IP socket      
                     if last_command: # string is true if not empty = command received
                         # --- COMMAND ROUTING LOGIC ---
-                        if last_command.startswith("CMD_PRESS"):
+                        pending_command = _parse_labview_command(last_command)
+                        if pending_command in LABVIEW_BUTTON_COMMANDS:
                             current_state = SystemState.PRESS_BUTTON
-                        elif last_command == "CMD_READ_ONLY":
+                        elif pending_command is LabViewCommand.RUN_OCR:
                             current_state = SystemState.READ_DISPLAY
-                        elif last_command == "CMD_SHUTDOWN":
+                        elif pending_command is LabViewCommand.SHUTDOWN:
                             current_state = SystemState.SHUTDOWN
                         else:
                             print(f"[WARNING] Unknown command from LabVIEW: {last_command}")
                             # just ignore it and wait for a valid one
                             last_command = ""
+                            pending_command = None
                     time.sleep(STATE_SLEEP_SECONDS["WAIT_FOR_COMMAND"])
                         
                 case SystemState.PRESS_BUTTON:
                     print(f"[ACTION] Executing command: {last_command}")
-                    # Parse command text into one of the seven physical buttons.
-                    button = servo_driver.parse_button_from_command(last_command)
+                    # Map the validated LabVIEW command onto one of the physical buttons.
+                    button = LABVIEW_BUTTON_COMMANDS.get(pending_command) if pending_command is not None else None
                     if button is None:
                         print(f"[WARNING] Unable to map command to button: {last_command}")
                     else:
@@ -181,10 +222,9 @@ def main():
                     frame = vision_engine.capture_frame()
                     if frame is None:
                         print("[WARNING] No camera frame available; skipping image save.")
-                        current_menu_key = last_command.split("MENU_")[1] if "MENU_" in last_command else "dashboard"
                         readout = vision_engine.OCRReadout(
                             display_found=False,
-                            current_menu_key=current_menu_key,
+                            current_menu_key="dashboard",
                             fields={"mode": {"raw": "", "value": "UNKNOWN"}, "temperature": {"raw": "", "value": None}},
                         )
                     else:
@@ -194,9 +234,8 @@ def main():
                         else:
                             print(f"[INFO] Saved capture frame: {saved_path}")
                         
-                        # In the future, this current_menu_key will be derived from LabVIEW nav commands
-                        current_menu_key = last_command.split("MENU_")[1] if "MENU_" in last_command else "dashboard"
-                        readout = vision_engine.read_display(frame, current_menu_key)
+                        # LabVIEW commands no longer encode the menu path; default context stays stable.
+                        readout = vision_engine.read_display(frame, "dashboard")
                     
                     # Convert the dynamic dictionary of fields into a unified result string
                     fields_str = ";".join(f"{k.upper()}={v.get('value', '')}" for k, v in readout.fields.items())
