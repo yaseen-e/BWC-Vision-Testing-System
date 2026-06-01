@@ -1,17 +1,29 @@
 """
 servo_test.py
 
-Interactive servo tester for:
-- Adafruit PCA9685 Servo HAT
+Interactive tester for:
+- PCA9685 Servo HAT
 - AGFRC B13DLM V2 servos
+
+Channel Mapping:
+UP      -> Channel 0
+LEFT    -> Channel 1
+SELECT  -> Channel 2
+RIGHT   -> Channel 3
+BACK    -> Channel 4
+DOWN    -> Channel 5
+MENU    -> Channel 6
 """
 
 import time
 from adafruit_blinka.microcontroller.generic_linux.i2c import I2C as LinuxI2C
 from adafruit_servokit import ServoKit
 
-# Use a custom Linux I2C bus (e.g. /dev/i2c-4) with Blinka.
-# The Adafruit BusDevice layer expects I2C objects to support try_lock()/unlock().
+
+# ==================================================
+# Linux I2C Wrapper
+# ==================================================
+
 class LinuxI2CBus:
     def __init__(self, bus_num):
         self._i2c = LinuxI2C(bus_num)
@@ -27,10 +39,22 @@ class LinuxI2CBus:
         self._locked = False
 
     def writeto(self, address, buffer, *, start=0, end=None, stop=True):
-        return self._i2c.writeto(address, buffer, start=start, end=end, stop=stop)
+        return self._i2c.writeto(
+            address,
+            buffer,
+            start=start,
+            end=end,
+            stop=stop
+        )
 
     def readfrom_into(self, address, buffer, *, start=0, end=None, stop=True):
-        return self._i2c.readfrom_into(address, buffer, start=start, end=end, stop=stop)
+        return self._i2c.readfrom_into(
+            address,
+            buffer,
+            start=start,
+            end=end,
+            stop=stop
+        )
 
     def writeto_then_readfrom(
         self,
@@ -55,79 +79,124 @@ class LinuxI2CBus:
             stop=stop,
         )
 
-# ==========================================
-# CONFIG
-# ==========================================
 
-CHANNEL = 0
+# ==================================================
+# CONFIGURATION
+# ==================================================
 
-# AGFRC digital servos usually tolerate wide pulse ranges
+BUS_NUM = 4
+
 MIN_PULSE = 500
 MAX_PULSE = 2500
 
-# Safe initial position
-START_ANGLE = 90
+HOME_ANGLE = 50
+PRESS_ANGLE = 145
 
-# ==========================================
-# INITIALIZE
-# ==========================================
+SERVO_CHANNELS = [0, 1, 2, 3, 4, 5, 6]
 
-BUS_NUM = 4
+COMMANDS = {
+    "UP": 0,
+    "LEFT": 1,
+    "SELECT": 2,
+    "RIGHT": 3,
+    "BACK": 4,
+    "DOWN": 5,
+    "MENU": 6,
+}
+
+
+# ==================================================
+# INITIALIZATION
+# ==================================================
+
+print("\nInitializing PCA9685...")
 
 i2c = LinuxI2CBus(BUS_NUM)
 kit = ServoKit(channels=16, i2c=i2c)
 
-servo = kit.servo[CHANNEL]
+servos = {}
 
-# Configure PWM pulse range
-servo.set_pulse_width_range(MIN_PULSE, MAX_PULSE)
+for channel in SERVO_CHANNELS:
 
-print(f"\nInitializing servo on channel {CHANNEL}...")
+    servo = kit.servo[channel]
 
-servo.angle = START_ANGLE
-time.sleep(1)
+    servo.set_pulse_width_range(
+        MIN_PULSE,
+        MAX_PULSE
+    )
 
-print("\nServo calibration tester")
-print("Enter angle values between 0 and 180")
-print("Type 'q' to quit\n")
+    servos[channel] = servo
 
-# ==========================================
+print("\nRunning startup calibration...")
+print("Moving one servo at a time.\n")
+
+for channel in SERVO_CHANNELS:
+
+    print(f"Channel {channel} -> {HOME_ANGLE}°")
+
+    servos[channel].angle = HOME_ANGLE
+
+    # Wait for this servo to finish moving
+    time.sleep(0.5)
+
+print("\nInitialization complete.\n")
+
+print("Available Commands:")
+for cmd, ch in COMMANDS.items():
+    print(f"  {cmd:<8} -> Channel {ch}")
+
+print("\nType command or 'q' to quit.\n")
+
+
+# ==================================================
+# SERVO ACTUATION
+# ==================================================
+
+def press_button(channel):
+
+    servo = servos[channel]
+
+    print(f"\nChannel {channel}")
+
+    servo.angle = PRESS_ANGLE
+
+    time.sleep(0.5)
+
+    servo.angle = HOME_ANGLE
+
+    # Allow servo to settle before accepting
+    # another command
+    time.sleep(0.5)
+
+
+# ==================================================
 # MAIN LOOP
-# ==========================================
+# ==================================================
 
 try:
+
     while True:
 
-        value = input("Angle> ").strip()
+        command = input("> ").strip().upper()
 
-        if value.lower() == "q":
+        if command == "Q":
             break
 
-        try:
-            angle = float(value)
+        if command not in COMMANDS:
+            print("Invalid command")
+            continue
 
-            # Safety clamp
-            if angle < 0 or angle > 180:
-                print("Angle must be between 0 and 180")
-                continue
-
-            print(f"Moving to {angle}°")
-
-            servo.angle = angle
-
-            # Allow servo time to move
-            time.sleep(0.3)
-
-        except ValueError:
-            print("Invalid number")
+        press_button(COMMANDS[command])
 
 except KeyboardInterrupt:
+
     print("\nInterrupted")
 
 finally:
-    print("Releasing servo...")
 
-    # Disable PWM signal
-    servo.angle = None
+    print("\nDisabling servos...")
+
+    for channel in SERVO_CHANNELS:
+        servos[channel].angle = None
 
     print("Done.")
