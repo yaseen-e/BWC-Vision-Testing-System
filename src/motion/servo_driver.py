@@ -4,7 +4,7 @@ Team 14 - Senior Project
 ./src/motion/servo_driver.py - Servo Driver
 Provides button mapping and servo control hooks for water heater UI actuation.
 """
-
+# TODO: Add error handling and limited number of retries. Program breaks when servo not connected (bad I2C bus) or when servo is stuck. Should not crash whole program, just report error and skip actuation.
 from __future__ import annotations
 
 from enum import Enum

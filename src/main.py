@@ -26,16 +26,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CAPTURE_DIR = PROJECT_ROOT / "data" / "captures"
 CLEANUP_RETENTION_DAYS = 14
 
-STATE_SLEEP_SECONDS = {
-    "STARTUP": 2,
-    "WAIT_FOR_COMMAND": 1,
-    "PRESS_BUTTON": 2,
-    "READ_DISPLAY": 3,
-    "REPORT_TO_LABVIEW": 1,
-    "ERROR": 1,
-    "SHUTDOWN": 2,
-}
-
 def _run_capture_cleanup() -> None:
     CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
     try:
@@ -82,7 +72,6 @@ def main():
                     else:
                         print("[WARNING] Camera NOT found.")
                     current_state = SystemState.WAIT_FOR_COMMAND
-                    time.sleep(STATE_SLEEP_SECONDS["STARTUP"])
                     
                 case SystemState.WAIT_FOR_COMMAND:
                     last_command = labview_tcp.get_next_command(simulated=True)
@@ -100,7 +89,7 @@ def main():
                             print(f"[WARNING] Unknown command from LabVIEW: {last_command}")
                             last_command = ""
                             pending_command = None
-                    time.sleep(STATE_SLEEP_SECONDS["WAIT_FOR_COMMAND"])
+                    pass
                         
                 case SystemState.PRESS_BUTTON:
                     print(f"[ACTION] Executing command: {last_command}")
@@ -113,7 +102,6 @@ def main():
                         # servo_driver.press_button(button)
 
                     current_state = SystemState.WAIT_FOR_COMMAND
-                    time.sleep(STATE_SLEEP_SECONDS["PRESS_BUTTON"])
                     
                 case SystemState.READ_DISPLAY:
                     print("[ACTION] Reading UI display...")
@@ -155,17 +143,14 @@ def main():
                     
                     report_csv_writer.writerow(row_data)
                     current_state = SystemState.REPORT_TO_LABVIEW
-                    time.sleep(STATE_SLEEP_SECONDS["READ_DISPLAY"])
                     
                 case SystemState.REPORT_TO_LABVIEW:
                     print(f"[NETWORK] Reporting data to LabVIEW: {ocr_result}")
                     labview_tcp.send_report(ocr_result)
                     current_state = SystemState.WAIT_FOR_COMMAND
-                    time.sleep(STATE_SLEEP_SECONDS["REPORT_TO_LABVIEW"])
                     
                 case SystemState.ERROR:
                     print(f"[FATAL] System Faulted: {error_message}")
-                    time.sleep(STATE_SLEEP_SECONDS["ERROR"])
                     break
                     
                 case SystemState.SHUTDOWN:
@@ -176,7 +161,6 @@ def main():
                     # servo_driver.shutdown()
                     vision_engine.shutdown()
                     terminal_control_temp.disable_single_key_mode(stdin_fd, previous_termios)
-                    time.sleep(STATE_SLEEP_SECONDS["SHUTDOWN"])
                     break
     
     except Exception as e:
