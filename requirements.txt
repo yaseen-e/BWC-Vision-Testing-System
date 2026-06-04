@@ -1,16 +1,22 @@
-# Image Processing
+# BWC-Vision-Testing-System Python dependencies (pip)
+
+# Image processing
 opencv-python
+Pillow
 pytesseract
 numpy
 
 # Utilities
 pyserial
 
-# Servo Control
+# Servo / hardware (Adafruit PCA9685 + Blinka)
 adafruit-circuitpython-servokit
 adafruit-circuitpython-pca9685
 adafruit-blinka
 lgpio
 
-# Pi camera support is provided by the Raspberry Pi OS packages.
-# Install with: sudo apt install python3-libcamera python3-picamera2
+# Notes: The following system packages must be installed via apt on Raspberry Pi OS
+# (they are not provided reliably via pip):
+# - Tesseract OCR engine: sudo apt install tesseract-ocr
+# - Picamera2 / libcamera Python bindings: sudo apt install python3-picamera2 python3-libcamera libcamera-apps
+# If you run inside a virtualenv, create it with --system-site-packages so the OS-installed picamera2/libcamera packages are available.

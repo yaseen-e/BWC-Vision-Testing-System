@@ -438,7 +438,7 @@ def _get_camera() -> Optional[Any]:
 		# Use the first available camera
 		camera_num = camera_info[0]["Num"]
 		camera = Picamera2(camera_num=camera_num)
-		config = camera.create_preview_configuration(main={"size": (1280, 720)})
+		config = camera.create_preview_configuration(main={"size": (1536, 864)})
 		camera.configure(config)
 		camera.start()
 		camera.set_controls({"AfMode": 2})
