@@ -18,59 +18,67 @@ print(f"Connected by {addr}")
 conn.settimeout(0.1) 
 
 ocr_result = True # Placeholder for OCR result status, should be set to True when OCR is ready
+ocr_sent = False
+command = ""
 
 while True:
 
 #checking if ocr_result is ready from camera vision system
-    if ocr_result:
+    if ocr_result and not ocr_sent:
         response = "OCR ready\n"
         conn.sendall(response.encode())
+        ocr_sent = True
 
-#if there is a Labview command, capture it with data
-try:
-    data = conn.recv(1024)  #1024 byte string limit
+    #if there is a Labview command, capture it with data
+    try:
+        data = conn.recv(1024)  #1024 byte string limit
+        
+        if data:
+            #decodes \n to end string
+            command = data.decode().strip()
+            print("Received:", command)
+    
 
-    if data:
-        #decodes \n to end string
-        command = data.decode().strip()
+            # Example command handling
+            if command == "UP":
+                response = "UP Button Pressed\n"
 
-    print("Received:", command)
+            elif command == "SELECT":
+                response = "SELECT Button Pressed\n"
+                print("reached Select")
 
-    # Example command handling
-    if command == "UP":
-        response = "UP Button Pressed\n"
+            elif command == "DOWN":
+                response = "DOWN Button Pressed\n"
 
-    elif command == "SELECT":
-        response = "SELECT Button Pressed\n"
+            elif command == "LEFT":
+                response = "LEFT Button Pressed\n"
 
-    elif command == "DOWN":
-        response = "DOWN Button Pressed\n"
+            elif command == "RIGHT":
+                response = "RIGHT Button Pressed\n"
 
-    elif command == "LEFT":
-        response = "LEFT Button Pressed\n"
+            elif command == "BACK":
+                response = "BACK Button Pressed\n"
 
-    elif command == "RIGHT":
-        response = "RIGHT Button Pressed\n"
+            elif command == "MENU":
+                response = "MENU Button Pressed\n"
 
-    elif command == "BACK":
-        response = "BACK Button Pressed\n"
+            elif command == "RUN_OCR":
+                response = "Running OCR\n"
 
-    elif command == "MENU":
-        response = "MENU Button Pressed\n"
+            elif command == "SEND_OCR_RESULT":
+                response = "Sending OCR\n"
 
-    elif command == "RUN_OCR":
-        response = "Running OCR\n"
+            else:
+                response = "Unknown Command\n"
 
-    elif command == "SEND_OCR_RESULT":
-        response = "Sending OCR\n"
-
-    else:
-        response = "Unknown Command\n"
-
-    conn.sendall(response.encode())
-
+            conn.sendall(response.encode())
+            
+            
     #ensures that if no data is found in data = conn.recv(1024) line then the program #doesn’t timeout
-except socket.timeout:
-    pass 
+    except socket.timeout:
+        pass 
 
-conn.close() 
+    
+
+
+#conn.close() 
