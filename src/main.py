@@ -9,17 +9,17 @@ from pathlib import Path
 import time
 import traceback
 
-import data_manager
-from motion import servo_driver
-from vision import vision_engine
-from vision.display_layouts import CURRENT_LAYOUT
+from src import data_manager
+from src.motion import servo_driver
+from src.vision import vision_engine
+from src.vision.display_layouts import CURRENT_LAYOUT
 
-from app.state_machine import SystemState
-from app.command_router import get_button_for_command
-from network.labview_protocol import LabViewCommand, parse_labview_command
-from network import labview_tcp
-from network import report_writer
-from network import terminal_control_temp
+from src.app.state_machine import SystemState
+from src.app.command_router import get_button_for_command
+from src.network.labview_protocol import LabViewCommand, parse_labview_command
+from src.network import labview_tcp
+from src.network import report_writer
+from src.network import terminal_control_temp
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
