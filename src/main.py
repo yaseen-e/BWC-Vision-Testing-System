@@ -120,6 +120,12 @@ def main():
                             print("[WARNING] Capture frame could not be saved.")
                         else:
                             print(f"[INFO] Saved capture frame: {saved_path}")
+
+                        roi_overlay_path = vision_engine.save_roi_ocr_overlay(CAPTURE_DIR, frame, capture_id)
+                        if roi_overlay_path is None:
+                            print("[WARNING] ROI calibration image could not be saved.")
+                        else:
+                            print(f"[INFO] Saved ROI calibration image: {roi_overlay_path}")
                         
                         readout = vision_engine.read_display(frame, "dashboard")
                     

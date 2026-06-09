@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from difflib import get_close_matches
 import re
+from pathlib import Path
 from typing import Any, Optional
 
 try:
@@ -172,6 +173,89 @@ def _fallback_field_variants(frame: np.ndarray, field_name: str) -> list[np.ndar
 	roi = cv2.GaussianBlur(roi, (3, 3), 0)
 	_, otsu = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 	return [roi, otsu, cv2.bitwise_not(otsu)]
+
+
+def _draw_roi_overlay(image: np.ndarray, use_fallback_rois: bool) -> np.ndarray:
+	"""Draw every OCR ROI on a frame for calibration and debugging."""
+	_require_cv2()
+	overlay = image.copy()
+	height, width = overlay.shape[:2]
+	fields = list(CURRENT_LAYOUT.fields.values())
+
+	for index, field in enumerate(fields):
+		box = field.fallback if use_fallback_rois else field.ideal
+		top = int(height * box.top)
+		bottom = int(height * box.bottom)
+		left = int(width * box.left)
+		right = int(width * box.right)
+		color = (255, 255, 255)
+		label_color = (255, 255, 255)
+
+		# High-contrast 0.5 pt-style outline: black shadow plus white edge.
+		cv2.rectangle(overlay, (left, top), (right, bottom), (0, 0, 0), 3, cv2.LINE_AA)
+		cv2.rectangle(overlay, (left, top), (right, bottom), color, 1, cv2.LINE_AA)
+
+		label_top = max(12, top - 6)
+		label_origin = (left + 4, label_top)
+		label = field.name.upper()
+		cv2.putText(
+			overlay,
+			label,
+			label_origin,
+			cv2.FONT_HERSHEY_SIMPLEX,
+			0.45,
+			(0, 0, 0),
+			3,
+			cv2.LINE_AA,
+		)
+		cv2.putText(
+			overlay,
+			label,
+			label_origin,
+			cv2.FONT_HERSHEY_SIMPLEX,
+			0.45,
+			label_color,
+			1,
+			cv2.LINE_AA,
+		)
+
+		# Stagger labels slightly when ROIs overlap near the top edge.
+		if index > 0:
+			cv2.line(overlay, (left, top), (left + 12, top), color, 1, cv2.LINE_AA)
+
+	return overlay
+
+
+def _safe_capture_stem(capture_id: Optional[str]) -> str:
+	"""Normalize optional IDs into filename-safe stems."""
+	if not capture_id:
+		return "roi_ocr"
+
+	cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", capture_id).strip("._")
+	return cleaned or "roi_ocr"
+
+
+def save_roi_ocr_overlay(capture_dir: Path, frame: np.ndarray, capture_id: Optional[str]) -> Optional[Path]:
+	"""Persist a calibration image that shows every OCR ROI on the current frame."""
+	_require_cv2()
+	if frame is None:
+		return None
+
+	capture_dir.mkdir(parents=True, exist_ok=True)
+	mask = _display_mask(frame)
+	display_contour = _find_display_contour(mask)
+
+	if display_contour is None:
+		overlay = _draw_roi_overlay(frame, use_fallback_rois=True)
+	else:
+		warped = _four_point_transform(frame, display_contour.reshape(4, 2))
+		overlay = _draw_roi_overlay(warped, use_fallback_rois=False)
+
+	output_path = capture_dir / f"{_safe_capture_stem(capture_id)}_roi_ocr.jpg"
+	if not cv2.imwrite(str(output_path), overlay):
+		return None
+
+	return output_path
 
 
 def _read_field_from_variants(field_name: str, variants: list[np.ndarray]) -> tuple[str, Any]:
