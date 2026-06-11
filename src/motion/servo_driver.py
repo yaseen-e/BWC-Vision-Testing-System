@@ -14,7 +14,7 @@ from adafruit_blinka.microcontroller.generic_linux.i2c import I2C as LinuxI2C
 from adafruit_servokit import ServoKit
 
 """CONSTANTS"""
-BUS_NUM = 4
+BUS_NUM = 1
 
 MIN_PULSE = 500
 MAX_PULSE = 2500
