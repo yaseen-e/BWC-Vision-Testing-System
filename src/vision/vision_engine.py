@@ -109,11 +109,44 @@ def _display_mask(frame: np.ndarray) -> np.ndarray:
 
 
 def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np.ndarray]:
-	"""Find the largest 4-corner shape that looks like the LCD window."""
+	"""Find the 4-corner shape that best matches the LCD window geometry."""
 	_require_cv2()
 	contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
 	best_contour = None
+	best_score = float("inf")
+	target_ratio = CURRENT_LAYOUT.display_aspect_ratio
+	ratio_tolerance = 0.22
+	for contour in contours:
+		area = cv2.contourArea(contour)
+		if area < min_area:
+			continue
+
+		perimeter = cv2.arcLength(contour, True)
+		approx = cv2.approxPolyDP(contour, 0.02 * perimeter, True)
+		if len(approx) != 4:
+			continue
+
+		(x, y), (width, height), angle = cv2.minAreaRect(approx)
+		short_side = min(width, height)
+		long_side = max(width, height)
+		if short_side <= 0 or long_side <= 0:
+			continue
+
+		ratio = short_side / long_side
+		ratio_error = abs(ratio - target_ratio)
+		if ratio_error > ratio_tolerance:
+			continue
+
+		score = ratio_error - (area / 1_000_000.0)
+		if score < best_score:
+			best_contour = approx
+			best_score = score
+
+	if best_contour is not None:
+		return best_contour
+
+	# Fallback: choose the largest quadrilateral if nothing fit the expected shape.
 	best_area = 0.0
 	for contour in contours:
 		area = cv2.contourArea(contour)
@@ -226,6 +259,54 @@ def _draw_roi_overlay(image: np.ndarray, use_fallback_rois: bool) -> np.ndarray:
 	return overlay
 
 
+def _draw_polygon_outline(image: np.ndarray, points: np.ndarray, label: str) -> None:
+	"""Draw a high-contrast polygon outline with a readable label."""
+	_require_cv2()
+	polygon = points.astype("int32")
+	cv2.polylines(image, [polygon], True, (0, 0, 0), 3, cv2.LINE_AA)
+	cv2.polylines(image, [polygon], True, (255, 255, 255), 1, cv2.LINE_AA)
+
+	anchor_x = int(polygon[:, 0].min()) + 4
+	anchor_y = max(18, int(polygon[:, 1].min()) - 8)
+	anchor = (anchor_x, anchor_y)
+	cv2.putText(
+		image,
+		label,
+		anchor,
+		cv2.FONT_HERSHEY_SIMPLEX,
+		0.45,
+		(0, 0, 0),
+		3,
+		cv2.LINE_AA,
+	)
+	cv2.putText(
+		image,
+		label,
+		anchor,
+		cv2.FONT_HERSHEY_SIMPLEX,
+		0.45,
+		(255, 255, 255),
+		1,
+		cv2.LINE_AA,
+	)
+
+
+def _project_roi_box(box: "ROIBox", inverse_transform: np.ndarray, warped_width: int, warped_height: int) -> np.ndarray:
+	"""Project a normalized warped ROI back into source-frame coordinates."""
+	_require_cv2()
+	warped_points = np.array(
+		[
+			[warped_width * box.left, warped_height * box.top],
+			[warped_width * box.right, warped_height * box.top],
+			[warped_width * box.right, warped_height * box.bottom],
+			[warped_width * box.left, warped_height * box.bottom],
+		],
+		dtype="float32",
+	)
+	projected = cv2.perspectiveTransform(warped_points[None, :, :], inverse_transform)[0]
+	return projected
+
+
 def _safe_capture_stem(capture_id: Optional[str]) -> str:
 	"""Normalize optional IDs into filename-safe stems."""
 	if not capture_id:
@@ -248,8 +329,30 @@ def save_roi_ocr_overlay(capture_dir: Path, frame: np.ndarray, capture_id: Optio
 	if display_contour is None:
 		overlay = _draw_roi_overlay(frame, use_fallback_rois=True)
 	else:
-		warped = _four_point_transform(frame, display_contour.reshape(4, 2))
-		overlay = _draw_roi_overlay(warped, use_fallback_rois=False)
+		source_points = _order_points(display_contour.reshape(4, 2))
+		width_a = np.linalg.norm(source_points[2] - source_points[3])
+		width_b = np.linalg.norm(source_points[1] - source_points[0])
+		warped_width = max(int(width_a), int(width_b))
+		height_a = np.linalg.norm(source_points[1] - source_points[2])
+		height_b = np.linalg.norm(source_points[0] - source_points[3])
+		warped_height = max(int(height_a), int(height_b))
+		dst = np.array(
+			[
+				[0, 0],
+				[warped_width - 1, 0],
+				[warped_width - 1, warped_height - 1],
+				[0, warped_height - 1],
+			],
+			dtype="float32",
+		)
+		transform = cv2.getPerspectiveTransform(source_points, dst)
+		inverse_transform = cv2.getPerspectiveTransform(dst, source_points)
+		overlay = frame.copy()
+		_draw_polygon_outline(overlay, source_points, "DETECTED SCREEN BORDER")
+
+		for field in CURRENT_LAYOUT.fields.values():
+			projected = _project_roi_box(field.ideal, inverse_transform, warped_width, warped_height)
+			_draw_polygon_outline(overlay, projected, field.name.upper())
 
 	output_path = capture_dir / f"{_safe_capture_stem(capture_id)}_roi_ocr.jpg"
 	if not cv2.imwrite(str(output_path), overlay):

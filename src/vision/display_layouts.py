@@ -56,6 +56,7 @@ class DisplayLayout:
 	menu_tree: MenuNode
 	known_modes: tuple[str, ...]
 	mode_keywords: Mapping[str, tuple[str, ...]]
+	display_aspect_ratio: float
 	temperature_range_f: tuple[int, int]
 	fields: Mapping[str, OCRField] = field(default_factory=dict)
 
@@ -153,6 +154,7 @@ CURRENT_LAYOUT = DisplayLayout(
 		"ELECTRIC": ("ELECTRIC",),
 		"VACATION": ("VACATION",),
 	},
+	display_aspect_ratio=1.75 / 2.25,
 	temperature_range_f=(80, 220),
 	fields={
 		"mode": MODE_FIELD,
