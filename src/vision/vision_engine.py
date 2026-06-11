@@ -93,7 +93,7 @@ def _four_point_transform(image: np.ndarray, points: np.ndarray) -> np.ndarray:
 	return cv2.warpPerspective(image, transform, (max_width, max_height))
 
 
-def _elongate_bottom_edge(points: np.ndarray, extra_height_ratio: float = 0.10) -> np.ndarray:
+def _elongate_bottom_edge(points: np.ndarray, extra_height_ratio: float = 0.12) -> np.ndarray:
 	"""Extend the detected border downward so the slim bottom icon bar stays inside the warp."""
 	rect = _order_points(points).copy()
 	top_left, top_right, bottom_right, bottom_left = rect
