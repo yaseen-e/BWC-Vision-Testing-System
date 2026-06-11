@@ -73,8 +73,8 @@ ROOT_MENU = MenuNode(
         MenuNode(key="system_status_top", label="System Status 1/2", route_here={"MENU", "DOWN", "SELECT"}, return_route={"BACK", "BACK"}, children=(
 			MenuNode(key="system_status_bottom", label="System Status 2/2", route_here={"DOWN"}, return_route={"UP"}),
 		)),
-        MenuNode(key="settings", label="Settings", route_here=[{"MENU", "RIGHT", "DOWN", "SELECT"}, {MENU, DOWN, RIGHT, SELECT}], return_route={"MENU"}, children=()),
-		MenuNode(key="schedules", label="Schedules", route_here={"MENU, RIGHT", "RIGHT", "SELECT"}, return_route={"MENU", "SELECT"}),
+        MenuNode(key="settings", label="Settings", route_here=[{"MENU", "RIGHT", "DOWN", "SELECT"}, {"MENU", "DOWN", "RIGHT", "SELECT"}], return_route={"MENU"}, children=()),
+		MenuNode(key="schedules", label="Schedules", route_here={"MENU", "RIGHT", "RIGHT", "SELECT"}, return_route={"MENU", "SELECT"}),
 	),
 )
 
