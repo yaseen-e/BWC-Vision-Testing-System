@@ -26,6 +26,7 @@ def start_tcp_server() -> None:
     """Start TCP server to listen for LabVIEW commands."""
     HOST = '0.0.0.0' # Listen on all interfaces
     PORT = 5000
+    global conn
 
     #Listening and waiting for tcp connection from client
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -43,12 +44,11 @@ def start_tcp_server() -> None:
 
     # initialize command
     TCP_Command = ""
-    return conn
 
 
 
 #def get_next_command(simulated: bool = False) -> str:
-def get_next_command(conn: str) -> str:
+def get_next_command() -> str:
     """Receive next command from LabVIEW."""
     # TODO: listen to LabVIEW via Serial or TCP/IP socket
     #if there is a Labview command, capture it with data

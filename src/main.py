@@ -63,13 +63,14 @@ def _run_capture_cleanup() -> None:
     except Exception as exc:
         print(f"[WARNING] Capture cleanup error: {exc}")
 
-def main(conn):
+def main():
     current_state = SystemState.STARTUP
     last_command = ""
     pending_command = None
     ocr_result = ""
     error_message = ""
     step_counter = 0
+    global conn
 
     report_file, report_csv_writer, report_path = report_writer.open_test_report()
     stdin_fd, previous_termios = terminal_control_temp.enable_single_key_mode()
