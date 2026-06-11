@@ -142,10 +142,10 @@ CURRENT_LAYOUT = DisplayLayout(
 	fields={
 		"mode": MODE_FIELD,
 		"temperature": TEMPERATURE_FIELD,
-		# "time_bar": TIME_BAR,
 		"dashboard_info_line_1": DASHBOARD_INFO_LINE_1,
 		"dashboard_info_line_2": DASHBOARD_INFO_LINE_2,
 		"dashboard_info_line_3": DASHBOARD_INFO_LINE_3,
+		"time_bar": TIME_BAR,
 		# "active_fault_text": ACTIVE_FAULT_TEXT,
 		# "schedule_info_text": SCHEDULE_INFO_TEXT,
 	},
