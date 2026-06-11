@@ -179,7 +179,7 @@ def _extract_field_variants(binary: np.ndarray, field_name: str) -> list[np.ndar
 	"""Build OCR variants for any field using its ROI definitions."""
 	_require_cv2()
 	field = CURRENT_LAYOUT.fields[field_name]
-	roi = field.ideal.crop(binary)
+	roi = field.roi.crop(binary)
 	roi = cv2.bitwise_not(roi)
 	roi = cv2.GaussianBlur(roi, (3, 3), 0)
 	
@@ -199,20 +199,7 @@ def _extract_field_variants(binary: np.ndarray, field_name: str) -> list[np.ndar
 		
 	return variants
 
-
-def _fallback_field_variants(frame: np.ndarray, field_name: str) -> list[np.ndarray]:
-	"""Build conservative OCR variants when the display contour is not found."""
-	_require_cv2()
-	gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-	gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-	field = CURRENT_LAYOUT.fields[field_name]
-	roi = field.fallback.crop(gray)
-	roi = cv2.GaussianBlur(roi, (3, 3), 0)
-	_, otsu = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-	return [roi, otsu, cv2.bitwise_not(otsu)]
-
-
-def _draw_roi_overlay(image: np.ndarray, use_fallback_rois: bool) -> np.ndarray:
+def _draw_roi_overlay(image: np.ndarray) -> np.ndarray:
 	"""Draw every OCR ROI on a frame for calibration and debugging."""
 	_require_cv2()
 	overlay = image.copy()
@@ -220,7 +207,7 @@ def _draw_roi_overlay(image: np.ndarray, use_fallback_rois: bool) -> np.ndarray:
 	fields = list(CURRENT_LAYOUT.fields.values())
 
 	for index, field in enumerate(fields):
-		box = field.fallback if use_fallback_rois else field.ideal
+		box = field.roi
 		top = int(height * box.top)
 		bottom = int(height * box.bottom)
 		left = int(width * box.left)
@@ -331,7 +318,7 @@ def save_roi_ocr_overlay(capture_dir: Path, frame: np.ndarray, capture_id: Optio
 	display_contour = _find_display_contour(mask)
 
 	if display_contour is None:
-		overlay = _draw_roi_overlay(frame, use_fallback_rois=True)
+		overlay = _draw_roi_overlay(frame)
 	else:
 		source_points = _order_points(display_contour.reshape(4, 2))
 		width_a = np.linalg.norm(source_points[2] - source_points[3])
@@ -355,7 +342,7 @@ def save_roi_ocr_overlay(capture_dir: Path, frame: np.ndarray, capture_id: Optio
 		_draw_polygon_outline(overlay, source_points, "DETECTED SCREEN BORDER")
 
 		for field in CURRENT_LAYOUT.fields.values():
-			projected = _project_roi_box(field.ideal, inverse_transform, warped_width, warped_height)
+			projected = _project_roi_box(field.roi, inverse_transform, warped_width, warped_height)
 			_draw_polygon_outline(overlay, projected, field.name.upper())
 
 	output_path = capture_dir / f"{_safe_capture_stem(capture_id)}_roi_ocr.jpg"
@@ -462,8 +449,7 @@ def read_display(
 
 	if display_contour is None:
 		for field_name in CURRENT_LAYOUT.fields:
-			raw, val = _read_field_from_variants(field_name, _fallback_field_variants(frame, field_name))
-			fields_result[field_name] = {"raw": raw, "value": val}
+			fields_result[field_name] = {"raw": "", "value": None}
 		
 		return OCRReadout(
 			display_found=False,
