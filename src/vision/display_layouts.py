@@ -56,8 +56,6 @@ class MenuNode:
 class DisplayLayout:
 	name: str
 	menu_tree: MenuNode
-	known_modes: tuple[str, ...]
-	mode_keywords: Mapping[str, tuple[str, ...]]
 	display_aspect_ratio: float
 	temperature_range_f: tuple[int, int]
 	fields: Mapping[str, OCRField] = field(default_factory=dict)
@@ -82,7 +80,7 @@ MODE_FIELD = OCRField(
 	name="mode",
 	ideal=ROIBox(top=0.00, bottom=0.16, left=0.12, right=0.88),
 	fallback=ROIBox(top=0.00, bottom=0.18, left=0.18, right=0.82),
-	tesseract_config="--psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ+ ",
+	tesseract_config="--psm 7",
 )
 
 TEMPERATURE_FIELD = OCRField(
@@ -123,14 +121,6 @@ SCHEDULE_INFO_TEXT = OCRField(
 CURRENT_LAYOUT = DisplayLayout(
 	name="bwc_water_heater_lcd_v1",
 	menu_tree=ROOT_MENU,
-	known_modes=("HYBRID", "HYBRID PLUS", "HEAT PUMP", "ELECTRIC", "VACATION"),
-	mode_keywords={
-		"HYBRID PLUS": ("HYBRID", "PLUS"),
-		"HEAT PUMP": ("HEAT", "PUMP"),
-		"HYBRID": ("HYBRID",),
-		"ELECTRIC": ("ELECTRIC",),
-		"VACATION": ("VACATION",),
-	},
 	display_aspect_ratio=1.75 / 2.25,
 	temperature_range_f=(80, 220),
 	fields={
