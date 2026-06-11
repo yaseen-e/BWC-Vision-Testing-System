@@ -8,7 +8,6 @@ Captures camera frames, isolates the display region, and extracts mode/temperatu
 from __future__ import annotations
 
 from dataclasses import dataclass
-from difflib import get_close_matches
 import re
 from pathlib import Path
 from typing import Any, Optional
@@ -371,16 +370,8 @@ def _read_field_from_variants(field_name: str, variants: list[np.ndarray]) -> tu
 
 	for variant in variants:
 		raw = pytesseract.image_to_string(variant, config=field.tesseract_config).strip()
-		
-		# Parse based on field type
-		if field_name == "mode":
-			mode = parse_mode_text(raw)
-			score = _sequence_score(raw, mode)
-			if score > best_score:
-				best_raw = raw
-				best_value = mode
-				best_score = score
-		elif field_name == "temperature":
+
+		if field_name == "temperature":
 			value = parse_temperature_text(raw)
 			if value is None:
 				continue
@@ -390,94 +381,18 @@ def _read_field_from_variants(field_name: str, variants: list[np.ndarray]) -> tu
 				best_value = value
 				best_score = score
 		else:
-			# Generic strings - score by raw length
 			score = len(raw)
 			if score > best_score:
 				best_raw = raw
-				best_value = raw.upper() if raw else ""
+				best_value = raw if raw else ""
 				best_score = score
 
 	# Default return values when parsing fully fails
 	if best_value is None:
-		if field_name == "mode":
-			best_value = CURRENT_LAYOUT.known_modes[0]
-		elif field_name != "temperature":
+		if field_name != "temperature":
 			best_value = ""
 
 	return best_raw, best_value
-
-
-def parse_mode_text(raw_mode: str) -> str:
-	"""Map free-form OCR text to the closest expected mode string."""
-	if not raw_mode:
-		return CURRENT_LAYOUT.known_modes[0]
-
-	normalized = raw_mode.strip().upper()
-	if not normalized:
-		return CURRENT_LAYOUT.known_modes[0]
-
-	# First try keyword hits because the display text is short and highly structured.
-	keyword_match = _score_mode_keywords(normalized)
-	if keyword_match is not None:
-		return keyword_match
-
-	# Fall back to fuzzy matching, then the closest string by ratio.
-	match = get_close_matches(normalized, CURRENT_LAYOUT.known_modes, n=1, cutoff=0.55)
-	if match:
-		return match[0]
-
-	return max(CURRENT_LAYOUT.known_modes, key=lambda mode: _sequence_score(normalized, mode))
-
-
-def _normalize_mode_text(raw_mode: str) -> str:
-	"""Normalize OCR text into uppercase words separated by single spaces."""
-	text = raw_mode.upper()
-	text = text.replace("+", " PLUS ")
-	text = re.sub(r"[^A-Z]+", " ", text)
-	return re.sub(r"\s+", " ", text).strip()
-
-
-def _score_mode_keywords(normalized: str) -> Optional[str]:
-	"""Pick the mode that best matches obvious keywords in the OCR text."""
-	words = set(normalized.split())
-	for mode, keywords in CURRENT_LAYOUT.mode_keywords.items():
-		if all(keyword in words for keyword in keywords):
-			return mode
-
-	# Handle common OCR blends like HEATPUMP or HYBRIDPLUS.
-	compact = normalized.replace(" ", "")
-	if "HYBRIDPLUS" in compact:
-		return "HYBRID PLUS"
-	if "HEATPUMP" in compact:
-		return "HEAT PUMP"
-	if "VACATION" in compact:
-		return "VACATION"
-	if "ELECTRIC" in compact:
-		return "ELECTRIC"
-	if "HYBRID" in compact:
-		return "HYBRID"
-
-	return None
-
-
-def _sequence_score(raw_mode: str, mode: str) -> float:
-	"""Score a candidate mode by rough text similarity and keyword presence."""
-	compact_raw = _normalize_mode_text(raw_mode).replace(" ", "")
-	compact_mode = mode.replace(" ", "")
-	# difflib sequence similarity without importing another helper.
-	from difflib import SequenceMatcher
-	value = SequenceMatcher(None, compact_raw, compact_mode).ratio()
-	if mode == "HYBRID PLUS" and "PLUS" in raw_mode:
-		value += 0.08
-	if mode == "HEAT PUMP" and ("HEAT" in raw_mode or "PUMP" in raw_mode):
-		value += 0.08
-	if mode == "HYBRID" and "HYBRID" in raw_mode:
-		value += 0.04
-	if mode == "ELECTRIC" and "ELECTRIC" in raw_mode:
-		value += 0.08
-	if mode == "VACATION" and "VACATION" in raw_mode:
-		value += 0.08
-	return value
 
 
 def parse_temperature_text(raw_temp: str) -> Optional[int]:
