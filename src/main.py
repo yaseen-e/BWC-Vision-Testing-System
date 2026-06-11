@@ -105,6 +105,7 @@ def main():
                         print(f"[NETWORK] Received command from LabVIEW: {last_command}")
                     else:
                         print("[NETWORK] Waiting for LabVIEW command...")
+                        sleep(1)  # Avoid busy waiting
                     if last_command:
                         pending_command = parse_labview_command(last_command)
                         if pending_command is not None:
