@@ -113,7 +113,7 @@ DASHBOARD_INFO_LINE_3 = OCRField(
 
 TIME_BAR = OCRField(
 	name="time_bar",
-	ideal=ROIBox(top=0.94, bottom=1.00, left=0.88, right=1.00),
+	ideal=ROIBox(top=0.88, bottom=1.00, left=0.83, right=1.00),
 	fallback=ROIBox(top=0.82, bottom=1.00, left=0.68, right=1.00),
 	tesseract_config="--psm 7 -c tessedit_char_whitelist=0123456789AMP:. ",
 )
