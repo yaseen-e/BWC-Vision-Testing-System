@@ -68,10 +68,15 @@ def _accept_connection_if_needed() -> bool:
 
 
 
-#def get_next_command(simulated: bool = False) -> str:
-def get_next_command() -> str:
+def get_next_command(simulated: bool = False) -> str:
     """Receive next command from LabVIEW."""
     # TODO: listen to LabVIEW via Serial or TCP/IP socket
+    if simulated:
+        if _SIMULATED_COMMANDS:
+            return _SIMULATED_COMMANDS.popleft()
+        return ""  # No more simulated commands
+    return ""    
+
     #if there is a Labview command, capture it with data
     if not _accept_connection_if_needed():
         return ""
@@ -125,11 +130,7 @@ def get_next_command() -> str:
         print(f"[WARNING] TCP receive failed: {exc}")
         return ""
 
-    #if simulated:
-    #    if _SIMULATED_COMMANDS:
-    #        return _SIMULATED_COMMANDS.popleft()
-     #   return ""  # No more simulated commands
-    #return ""
+
 
     if data:
         return data.decode().strip()
