@@ -157,9 +157,9 @@ CURRENT_LAYOUT = DisplayLayout(
 	fields={
 		"mode": MODE_FIELD,
 		"temperature": TEMPERATURE_FIELD,
-		"banner_symbols": BANNER_SYMBOLS_FIELD,
+		# "banner_symbols": BANNER_SYMBOLS_FIELD,
 		"dashboard_info_line_1": DASHBOARD_INFO_LINE_1,
-		"active_fault_text": ACTIVE_FAULT_TEXT,
-		"schedule_info_text": SCHEDULE_INFO_TEXT,
+		# "active_fault_text": ACTIVE_FAULT_TEXT,
+		# "schedule_info_text": SCHEDULE_INFO_TEXT,
 	},
 )

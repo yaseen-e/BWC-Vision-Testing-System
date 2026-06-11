@@ -21,11 +21,11 @@ _SIMULATED_COMMANDS = collections.deque(
 
 def get_next_command(simulated: bool = False) -> str:
     """Receive next command from LabVIEW."""
-    # TODO: listen to LabVIEW via Serial or TCP/IP socket
     if simulated:
         if _SIMULATED_COMMANDS:
             return _SIMULATED_COMMANDS.popleft()
         return ""  # No more simulated commands
+    # TODO: listen to LabVIEW via Serial or TCP/IP socket and return the next command as a string
     return ""
 
 def send_report(ocr_result: str) -> None:
