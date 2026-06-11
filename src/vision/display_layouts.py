@@ -92,21 +92,21 @@ TEMPERATURE_FIELD = OCRField(
 
 DASHBOARD_INFO_LINE_1 = OCRField(
 	name="dashboard_info_line_1",
-	ideal=ROIBox(top=0.47, bottom=0.57, left=0.10, right=0.90),
+	ideal=ROIBox(top=0.47, bottom=0.56, left=0.10, right=0.90),
 	fallback=ROIBox(top=0.45, bottom=0.70, left=0.05, right=0.95),
 	tesseract_config="--psm 7",
 )
 
 DASHBOARD_INFO_LINE_2 = OCRField(
 	name="dashboard_info_line_2",
-	ideal=ROIBox(top=0.57, bottom=0.67, left=0.10, right=0.90),
+	ideal=ROIBox(top=0.56, bottom=0.65, left=0.10, right=0.90),
 	fallback=ROIBox(top=0.55, bottom=0.75, left=0.05, right=0.95),
 	tesseract_config="--psm 7",
 )
 
 DASHBOARD_INFO_LINE_3 = OCRField(
 	name="dashboard_info_line_3",
-	ideal=ROIBox(top=0.67, bottom=0.77, left=0.10, right=0.90),
+	ideal=ROIBox(top=0.65, bottom=0.74, left=0.10, right=0.90),
 	fallback=ROIBox(top=0.65, bottom=0.80, left=0.05, right=0.95),
 	tesseract_config="--psm 7",
 )
