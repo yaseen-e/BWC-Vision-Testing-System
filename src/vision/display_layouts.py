@@ -39,7 +39,6 @@ class ROIBox:
 class OCRField:
 	name: str
 	ideal: ROIBox
-	fallback: ROIBox
 	tesseract_config: str
 
 
@@ -78,43 +77,37 @@ ROOT_MENU = MenuNode(
 
 MODE_FIELD = OCRField(
 	name="mode",
-	ideal=ROIBox(top=0.00, bottom=0.16, left=0.12, right=0.88),
-	fallback=ROIBox(top=0.00, bottom=0.18, left=0.18, right=0.82),
+	ideal=ROIBox(top=0.05, bottom=0.16, left=0.12, right=0.88),
 	tesseract_config="--psm 7",
 )
 
 TEMPERATURE_FIELD = OCRField(
 	name="temperature",
 	ideal=ROIBox(top=0.16, bottom=0.48, left=0.28, right=0.63),
-	fallback=ROIBox(top=0.12, bottom=0.52, left=0.24, right=0.68),
 	tesseract_config="--psm 7 -c tessedit_char_whitelist=0123456789Ool|SsbZ",
 )
 
 BANNER_SYMBOLS_FIELD = OCRField(
 	name="banner_symbols",
 	ideal=ROIBox(top=0.84, bottom=0.98, left=0.72, right=0.99),
-	fallback=ROIBox(top=0.82, bottom=1.00, left=0.68, right=1.00),
 	tesseract_config="--psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-_:/(). ",
 )
 
 DASHBOARD_INFO_LINE_1 = OCRField(
 	name="dashboard_info_line_1",
 	ideal=ROIBox(top=0.50, bottom=0.65, left=0.10, right=0.90),
-	fallback=ROIBox(top=0.45, bottom=0.70, left=0.05, right=0.95),
 	tesseract_config="--psm 7",
 )
 
 ACTIVE_FAULT_TEXT = OCRField(
 	name="active_fault_text",
 	ideal=ROIBox(top=0.20, bottom=0.80, left=0.10, right=0.90),
-	fallback=ROIBox(top=0.15, bottom=0.85, left=0.05, right=0.95),
 	tesseract_config="--psm 6",
 )
 
 SCHEDULE_INFO_TEXT = OCRField(
 	name="schedule_info_text",
 	ideal=ROIBox(top=0.30, bottom=0.70, left=0.10, right=0.90),
-	fallback=ROIBox(top=0.25, bottom=0.75, left=0.05, right=0.95),
 	tesseract_config="--psm 6",
 )
 
@@ -126,9 +119,9 @@ CURRENT_LAYOUT = DisplayLayout(
 	fields={
 		"mode": MODE_FIELD,
 		"temperature": TEMPERATURE_FIELD,
-		# "banner_symbols": BANNER_SYMBOLS_FIELD,
+		"banner_symbols": BANNER_SYMBOLS_FIELD,
 		"dashboard_info_line_1": DASHBOARD_INFO_LINE_1,
-		# "active_fault_text": ACTIVE_FAULT_TEXT,
-		# "schedule_info_text": SCHEDULE_INFO_TEXT,
+		"active_fault_text": ACTIVE_FAULT_TEXT,
+		"schedule_info_text": SCHEDULE_INFO_TEXT,
 	},
 )
