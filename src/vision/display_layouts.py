@@ -39,6 +39,7 @@ class ROIBox:
 class OCRField:
 	name: str
 	ideal: ROIBox
+	fallback: ROIBox | None = None
 	tesseract_config: str
 
 
@@ -84,30 +85,35 @@ MODE_FIELD = OCRField(
 TEMPERATURE_FIELD = OCRField(
 	name="temperature",
 	ideal=ROIBox(top=0.16, bottom=0.48, left=0.28, right=0.63),
+	fallback=ROIBox(top=0.16, bottom=0.48, left=0.28, right=0.63),
 	tesseract_config="--psm 7 -c tessedit_char_whitelist=0123456789Ool|SsbZ",
 )
 
 BANNER_SYMBOLS_FIELD = OCRField(
 	name="banner_symbols",
 	ideal=ROIBox(top=0.84, bottom=0.98, left=0.72, right=0.99),
+	fallback=ROIBox(top=0.84, bottom=0.98, left=0.72, right=0.99),
 	tesseract_config="--psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-_:/(). ",
 )
 
 DASHBOARD_INFO_LINE_1 = OCRField(
 	name="dashboard_info_line_1",
 	ideal=ROIBox(top=0.50, bottom=0.65, left=0.10, right=0.90),
+	fallback=ROIBox(top=0.50, bottom=0.65, left=0.10, right=0.90),
 	tesseract_config="--psm 7",
 )
 
 ACTIVE_FAULT_TEXT = OCRField(
 	name="active_fault_text",
 	ideal=ROIBox(top=0.20, bottom=0.80, left=0.10, right=0.90),
+	fallback=ROIBox(top=0.20, bottom=0.80, left=0.10, right=0.90),
 	tesseract_config="--psm 6",
 )
 
 SCHEDULE_INFO_TEXT = OCRField(
 	name="schedule_info_text",
 	ideal=ROIBox(top=0.30, bottom=0.70, left=0.10, right=0.90),
+	fallback=ROIBox(top=0.30, bottom=0.70, left=0.10, right=0.90),
 	tesseract_config="--psm 6",
 )
 

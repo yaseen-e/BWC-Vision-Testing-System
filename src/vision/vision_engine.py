@@ -331,7 +331,7 @@ def save_roi_ocr_overlay(capture_dir: Path, frame: np.ndarray, capture_id: Optio
 	display_contour = _find_display_contour(mask)
 
 	if display_contour is None:
-		overlay = _draw_roi_overlay(frame, use_fallback_rois=False)
+		overlay = _draw_roi_overlay(frame, use_fallback_rois=True)
 	else:
 		source_points = _order_points(display_contour.reshape(4, 2))
 		width_a = np.linalg.norm(source_points[2] - source_points[3])
