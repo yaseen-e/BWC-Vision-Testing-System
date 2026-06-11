@@ -50,6 +50,26 @@ LABVIEW_BUTTON_COMMANDS = {
 def get_button_for_command(command: LabViewCommand) -> servo_driver.Button | None:
     return LABVIEW_BUTTON_COMMANDS.get(command)
 
+
+def _prompt_for_command_mode() -> bool:
+    """Ask whether to use simulated commands or a real LabVIEW connection."""
+    while True:
+        try:
+            answer = input("[PROMPT] Use simulated commands? [Y/N]: ").strip().lower()
+        except EOFError:
+            print("[WARNING] No input available; defaulting to real LabVIEW connection.")
+            return False
+
+        if answer in ("y", "yes", "sim", "simulated"):
+            print("[INFO] Simulated command mode enabled.")
+            return True
+
+        if answer in ("", "n", "no", "real", "labview"):
+            print("[INFO] Real LabVIEW connection mode enabled.")
+            return False
+
+        print("[WARNING] Invalid selection. Enter 'y' for simulated or 'n' for LabVIEW.")
+
 def _run_capture_cleanup() -> None:
     CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
     try:
@@ -70,12 +90,13 @@ def main():
     ocr_result = ""
     error_message = ""
     step_counter = 0
-    global conn
+    use_simulated_commands = _prompt_for_command_mode()
 
     report_file, report_csv_writer, report_path = report_writer.open_test_report()
     stdin_fd, previous_termios = terminal_control_temp.enable_single_key_mode()
     
     print("--- Starting BWC Water Heater Vision Testing System ---")
+    #TODO: prompt user to use simulated commands or real LabVIEW connection and update line 104 accordingly
     print(f"[INFO] Test report CSV: {report_path}")
 
     try:
@@ -96,16 +117,25 @@ def main():
                         print("[INFO] Camera detected.")
                     else:
                         print("[WARNING] Camera NOT found.")
-                    labview_tcp.start_tcp_server()
+                    if use_simulated_commands:
+                        print("[NETWORK] Simulated command mode active; skipping TCP server startup.")
+                    else:
+                        if labview_tcp.start_tcp_server():
+                            print("[NETWORK] TCP server started successfully.")
+                        else:
+                            print("[WARNING] TCP server startup failed; continuing to run.")
                     current_state = SystemState.WAIT_FOR_COMMAND
                     
                 case SystemState.WAIT_FOR_COMMAND:
-                    last_command = labview_tcp.get_next_command(simulated=False)
+                    last_command = labview_tcp.get_next_command(simulated=use_simulated_commands)
                     if last_command:
                         print(f"[NETWORK] Received command from LabVIEW: {last_command}")
                     else:
-                        print("[NETWORK] Waiting for LabVIEW command...")
-                        sleep(1)  # Avoid busy waiting
+                        if use_simulated_commands:
+                            print("[SIMULATION] Waiting for next simulated command...")
+                        else:
+                            print("[NETWORK] Waiting for LabVIEW command...")
+                        time.sleep(1)  # Avoid busy waiting
                     if last_command:
                         pending_command = parse_labview_command(last_command)
                         if pending_command is not None:
@@ -182,7 +212,7 @@ def main():
                     
                 case SystemState.REPORT_TO_LABVIEW:
                     print(f"[NETWORK] Reporting data to LabVIEW: {ocr_result}")
-                    labview_tcp.send_report(ocr_result)
+                    labview_tcp.send_report(ocr_result, simulated=use_simulated_commands)
                     current_state = SystemState.WAIT_FOR_COMMAND
                     
                 case SystemState.ERROR:

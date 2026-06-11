@@ -26,7 +26,7 @@ _SIMULATED_COMMANDS = collections.deque(
 _SERVER_SOCKET = None
 conn = None
 
-def start_tcp_server() -> None:
+def start_tcp_server() -> bool:
     """Start TCP server to listen for LabVIEW commands."""
     HOST = '0.0.0.0' # Listen on all interfaces
     PORT = 5000
@@ -42,10 +42,12 @@ def start_tcp_server() -> None:
         conn = None
         print(f"[NETWORK] TCP server listening on {HOST}:{PORT}")
         print("[NETWORK] Waiting for connection...")
+        return True
     except Exception as exc:
         _SERVER_SOCKET = None
         conn = None
         print(f"[ERROR] Failed to start TCP server on {HOST}:{PORT}: {exc}")
+        return False
 
 
 def _accept_connection_if_needed() -> bool:
@@ -85,7 +87,10 @@ def get_next_command(simulated: bool = False) -> str:
     # TODO: listen to LabVIEW via Serial or TCP/IP socket
     if simulated:
         if _SIMULATED_COMMANDS:
-            return _SIMULATED_COMMANDS.popleft()
+            command = _SIMULATED_COMMANDS.popleft()
+            print(f"[SIMULATION] Replaying command: {command}")
+            return command
+        print("[SIMULATION] No more simulated commands.")
         return ""  # No more simulated commands
 
     #if there is a Labview command, capture it with data
@@ -116,9 +121,13 @@ def get_next_command(simulated: bool = False) -> str:
         return ""
 
 #def send_report(ocr_result: str) -> None:
-def send_report(ocr_result: str) -> None:
+def send_report(ocr_result: str, simulated: bool = False) -> None:
     """Send data back to LabVIEW."""
     # TODO: send ocr_result back to LabVIEW via Serial or TCP/IP socket
+    if simulated:
+        print(f"[SIMULATION] OCR report ready:\n{ocr_result}")
+        return
+
     if conn is None:
         print("[WARNING] Cannot send OCR report: no LabVIEW connection yet.")
         return
