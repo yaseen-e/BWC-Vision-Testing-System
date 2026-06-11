@@ -22,28 +22,49 @@ _SIMULATED_COMMANDS = collections.deque(
     ]
 )
 
+
+_SERVER_SOCKET = None
+conn = None
+
 def start_tcp_server() -> None:
     """Start TCP server to listen for LabVIEW commands."""
     HOST = '0.0.0.0' # Listen on all interfaces
     PORT = 5000
+    global _SERVER_SOCKET, conn
+
+    try:
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind((HOST, PORT))
+        server.listen(1)
+        server.settimeout(0.1)
+        _SERVER_SOCKET = server
+        conn = None
+        print(f"[NETWORK] TCP server listening on {HOST}:{PORT}")
+        print("[NETWORK] Waiting for connection...")
+    except Exception as exc:
+        _SERVER_SOCKET = None
+        conn = None
+        print(f"[ERROR] Failed to start TCP server on {HOST}:{PORT}: {exc}")
+
+
+def _accept_connection_if_needed() -> bool:
+    """Accept the first LabVIEW connection without blocking the main loop."""
     global conn
+    if conn is not None or _SERVER_SOCKET is None:
+        return conn is not None
 
-    #Listening and waiting for tcp connection from client
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.bind((HOST, PORT))
-    server.listen(1)
-
-    print("Waiting for connection...")
-
-    #connection from client found
-    conn, addr = server.accept()
-    print(f"Connected by {addr}")
-
-    #Timeout needed to ensure Pi has time to send a OCR ready response independent #from a Labview Command
-    conn.settimeout(0.1) 
-
-    # initialize command
-    TCP_Command = ""
+    try:
+        new_conn, addr = _SERVER_SOCKET.accept()
+        new_conn.settimeout(0.1)
+        conn = new_conn
+        print(f"[NETWORK] Connected by {addr}")
+        return True
+    except socket.timeout:
+        return False
+    except Exception as exc:
+        print(f"[WARNING] TCP accept failed: {exc}")
+        return False
 
 
 
@@ -52,6 +73,9 @@ def get_next_command() -> str:
     """Receive next command from LabVIEW."""
     # TODO: listen to LabVIEW via Serial or TCP/IP socket
     #if there is a Labview command, capture it with data
+    if not _accept_connection_if_needed():
+        return ""
+
     try:
         data = conn.recv(1024)  #1024 byte string limit
 
@@ -97,6 +121,9 @@ def get_next_command() -> str:
     #ensures that if no data is found in data = conn.recv(1024) line then the program #doesn’t timeout
     except socket.timeout:
         pass 
+    except Exception as exc:
+        print(f"[WARNING] TCP receive failed: {exc}")
+        return ""
 
     #if simulated:
     #    if _SIMULATED_COMMANDS:
@@ -105,14 +132,21 @@ def get_next_command() -> str:
     #return ""
 
     if data:
-        return data
+        return data.decode().strip()
     else:
         return ""
 
 #def send_report(ocr_result: str) -> None:
-def send_report(conn: str) -> None:
+def send_report(ocr_result: str) -> None:
     """Send data back to LabVIEW."""
     # TODO: send ocr_result back to LabVIEW via Serial or TCP/IP socket
-    response = "OCR ready\n"
-    conn.sendall(response.encode())
-    pass
+    if conn is None:
+        print("[WARNING] Cannot send OCR report: no LabVIEW connection yet.")
+        return
+
+    try:
+        response = f"OCR ready\n{ocr_result}\n"
+        conn.sendall(response.encode())
+        print("[NETWORK] Sent OCR report to LabVIEW.")
+    except Exception as exc:
+        print(f"[WARNING] Failed to send OCR report: {exc}")
