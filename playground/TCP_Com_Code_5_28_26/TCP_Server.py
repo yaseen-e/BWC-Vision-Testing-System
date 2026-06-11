@@ -45,7 +45,6 @@ while True:
 
             elif command == "SELECT":
                 response = "SELECT Button Pressed\n"
-                print("reached Select")
 
             elif command == "DOWN":
                 response = "DOWN Button Pressed\n"
