@@ -97,10 +97,12 @@ def _display_mask(frame: np.ndarray) -> np.ndarray:
 	"""Keep the LCD body and bright UI content so the icon bar stays attached."""
 	_require_cv2()
 	hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+	height = hsv.shape[0]
 	lower_orange = np.array([5, 150, 150])
 	upper_orange = np.array([25, 255, 255])
 	orange_mask = cv2.inRange(hsv, lower_orange, upper_orange)
 	bright_mask = cv2.inRange(hsv, np.array([0, 0, 170]), np.array([180, 90, 255]))
+	bright_mask[: int(height * 0.62), :] = 0
 	mask = cv2.bitwise_or(orange_mask, bright_mask)
 
 	# A taller closing kernel helps bridge the darker lower strip back into the screen outline.
