@@ -63,7 +63,7 @@ def _run_capture_cleanup() -> None:
     except Exception as exc:
         print(f"[WARNING] Capture cleanup error: {exc}")
 
-def main():
+def main(conn):
     current_state = SystemState.STARTUP
     last_command = ""
     pending_command = None
@@ -99,7 +99,7 @@ def main():
                     current_state = SystemState.WAIT_FOR_COMMAND
                     
                 case SystemState.WAIT_FOR_COMMAND:
-                    last_command = labview_tcp.get_next_command(simulated=False)
+                    last_command = labview_tcp.get_next_command(conn)
                     print(f"[NETWORK] Received command from LabVIEW: {last_command}")
                     if last_command:
                         pending_command = parse_labview_command(last_command)
