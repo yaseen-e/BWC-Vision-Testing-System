@@ -17,7 +17,7 @@ print(f"Connected by {addr}")
 #Timeout needed to ensure Pi has time to send a OCR ready response independent #from a Labview Command
 conn.settimeout(0.1) 
 
-ocr_result = True # Placeholder for OCR result status, should be set to True when OCR is ready
+ocr_result = False # Placeholder for OCR result status, should be set to True when OCR is ready
 ocr_sent = False
 command = ""
 
@@ -71,6 +71,8 @@ while True:
                 response = "Unknown Command\n"
 
             conn.sendall(response.encode())
+            
+            ocr_result = True
             
             
     #ensures that if no data is found in data = conn.recv(1024) line then the program #doesn’t timeout
