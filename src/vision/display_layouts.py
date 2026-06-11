@@ -97,6 +97,20 @@ DASHBOARD_INFO_LINE_1 = OCRField(
 	tesseract_config="--psm 7",
 )
 
+DASHBOARD_INFO_LINE_2 = OCRField(
+	name="dashboard_info_line_2",
+	ideal=ROIBox(top=0.57, bottom=0.67, left=0.10, right=0.90),
+	fallback=ROIBox(top=0.55, bottom=0.75, left=0.05, right=0.95),
+	tesseract_config="--psm 7",
+)
+
+DASHBOARD_INFO_LINE_3 = OCRField(
+	name="dashboard_info_line_3",
+	ideal=ROIBox(top=0.67, bottom=0.77, left=0.10, right=0.90),
+	fallback=ROIBox(top=0.65, bottom=0.80, left=0.05, right=0.95),
+	tesseract_config="--psm 7",
+)
+
 TIME_BAR = OCRField(
 	name="time_bar",
 	ideal=ROIBox(top=0.84, bottom=0.98, left=0.72, right=0.99),
@@ -130,6 +144,8 @@ CURRENT_LAYOUT = DisplayLayout(
 		"temperature": TEMPERATURE_FIELD,
 		# "time_bar": TIME_BAR,
 		"dashboard_info_line_1": DASHBOARD_INFO_LINE_1,
+		"dashboard_info_line_2": DASHBOARD_INFO_LINE_2,
+		"dashboard_info_line_3": DASHBOARD_INFO_LINE_3,
 		# "active_fault_text": ACTIVE_FAULT_TEXT,
 		# "schedule_info_text": SCHEDULE_INFO_TEXT,
 	},
