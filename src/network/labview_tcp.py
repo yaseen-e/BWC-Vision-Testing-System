@@ -1,6 +1,6 @@
 import collections
 
-# Simulated sequences for the 5 modes (first five rows). Concluding with READ (RUN_OCR equivalent).
+# Simulated sequences for the 5 modes (first five rows). Concluding with RUN_OCR.
 # These mimic what LabVIEW would send over TCP/IP during automated mode testing.
 _SIMULATED_COMMANDS = collections.deque(
     [

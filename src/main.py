@@ -6,6 +6,7 @@ Coordinates startup, command handling, actuation, OCR reads, reporting, and shut
 """
 
 from pathlib import Path
+from enum import Enum, auto
 import time
 import traceback
 
@@ -14,8 +15,6 @@ from src.motion import servo_driver
 from src.vision import vision_engine
 from src.vision.display_layouts import CURRENT_LAYOUT
 
-from src.app.state_machine import SystemState
-from src.app.command_router import get_button_for_command
 from src.network.labview_protocol import LabViewCommand, parse_labview_command
 from src.network import labview_tcp
 from src.network import report_writer
@@ -25,6 +24,31 @@ from src.network import terminal_control_temp
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CAPTURE_DIR = PROJECT_ROOT / "data" / "captures"
 CLEANUP_RETENTION_DAYS = 14
+
+
+class SystemState(Enum):
+    STARTUP = auto()
+    WAIT_FOR_COMMAND = auto()
+    PRESS_BUTTON = auto()
+    READ_DISPLAY = auto()
+    REPORT_TO_LABVIEW = auto()
+    ERROR = auto()
+    SHUTDOWN = auto()
+
+
+LABVIEW_BUTTON_COMMANDS = {
+    LabViewCommand.UP: servo_driver.Button.UP,
+    LabViewCommand.LEFT: servo_driver.Button.LEFT,
+    LabViewCommand.SELECT: servo_driver.Button.SELECT,
+    LabViewCommand.RIGHT: servo_driver.Button.RIGHT,
+    LabViewCommand.BACK: servo_driver.Button.BACK,
+    LabViewCommand.DOWN: servo_driver.Button.DOWN,
+    LabViewCommand.MENU: servo_driver.Button.MENU,
+}
+
+
+def get_button_for_command(command: LabViewCommand) -> servo_driver.Button | None:
+    return LABVIEW_BUTTON_COMMANDS.get(command)
 
 def _run_capture_cleanup() -> None:
     CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
