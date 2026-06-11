@@ -67,6 +67,18 @@ def _accept_connection_if_needed() -> bool:
         return False
 
 
+_COMMAND_RESPONSES = {
+    "UP": "UP Button Pressed\n",
+    "SELECT": "SELECT Button Pressed\n",
+    "DOWN": "DOWN Button Pressed\n",
+    "LEFT": "LEFT Button Pressed\n",
+    "RIGHT": "RIGHT Button Pressed\n",
+    "BACK": "BACK Button Pressed\n",
+    "MENU": "MENU Button Pressed\n",
+    "RUN_OCR": "Running OCR\n",
+    "SEND_OCR_RESULT": "Sending OCR\n",
+}
+
 
 def get_next_command(simulated: bool = False) -> str:
     """Receive next command from LabVIEW."""
@@ -75,7 +87,6 @@ def get_next_command(simulated: bool = False) -> str:
         if _SIMULATED_COMMANDS:
             return _SIMULATED_COMMANDS.popleft()
         return ""  # No more simulated commands
-    return ""    
 
     #if there is a Labview command, capture it with data
     if not _accept_connection_if_needed():
@@ -85,43 +96,10 @@ def get_next_command(simulated: bool = False) -> str:
         data = conn.recv(1024)  #1024 byte string limit
 
         if data:
-                #decodes \n to end string
-                command = data.decode().strip()
-                print("Received:", command)
-        
-
-                # Example command handling
-                if command == "UP":
-                    response = "UP Button Pressed\n"
-
-                elif command == "SELECT":
-                    response = "SELECT Button Pressed\n"
-
-                elif command == "DOWN":
-                    response = "DOWN Button Pressed\n"
-
-                elif command == "LEFT":
-                    response = "LEFT Button Pressed\n"
-
-                elif command == "RIGHT":
-                    response = "RIGHT Button Pressed\n"
-
-                elif command == "BACK":
-                    response = "BACK Button Pressed\n"
-
-                elif command == "MENU":
-                    response = "MENU Button Pressed\n"
-
-                elif command == "RUN_OCR":
-                    response = "Running OCR\n"
-
-                elif command == "SEND_OCR_RESULT":
-                    response = "Sending OCR\n"
-
-                else:
-                    response = "Unknown Command\n"
-
-                conn.sendall(response.encode())
+            command = data.decode().strip()
+            print("Received:", command)
+            response = _COMMAND_RESPONSES.get(command, "Unknown Command\n")
+            conn.sendall(response.encode())
         
     #ensures that if no data is found in data = conn.recv(1024) line then the program #doesn’t timeout
     except socket.timeout:
