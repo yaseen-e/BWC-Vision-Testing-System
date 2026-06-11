@@ -94,21 +94,16 @@ def _four_point_transform(image: np.ndarray, points: np.ndarray) -> np.ndarray:
 
 
 def _display_mask(frame: np.ndarray) -> np.ndarray:
-	"""Keep the LCD body and bright UI content so the icon bar stays attached."""
+	"""Keep only the orange display area to reduce OCR noise."""
 	_require_cv2()
 	hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-	height = hsv.shape[0]
 	lower_orange = np.array([5, 150, 150])
 	upper_orange = np.array([25, 255, 255])
-	orange_mask = cv2.inRange(hsv, lower_orange, upper_orange)
-	bright_mask = cv2.inRange(hsv, np.array([0, 0, 170]), np.array([180, 90, 255]))
-	bright_mask[: int(height * 0.62), :] = 0
-	mask = cv2.bitwise_or(orange_mask, bright_mask)
+	mask = cv2.inRange(hsv, lower_orange, upper_orange)
 
-	# A taller closing kernel helps bridge the darker lower strip back into the screen outline.
-	kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 21))
+	kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
 	mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-	mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)))
+	mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
 	return mask
 
 
@@ -126,9 +121,8 @@ def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np
 		if area < min_area:
 			continue
 
-		hull = cv2.convexHull(contour)
-		perimeter = cv2.arcLength(hull, True)
-		approx = cv2.approxPolyDP(hull, 0.02 * perimeter, True)
+		perimeter = cv2.arcLength(contour, True)
+		approx = cv2.approxPolyDP(contour, 0.02 * perimeter, True)
 		if len(approx) != 4:
 			continue
 
@@ -158,9 +152,8 @@ def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np
 		if area < min_area:
 			continue
 
-		hull = cv2.convexHull(contour)
-		perimeter = cv2.arcLength(hull, True)
-		approx = cv2.approxPolyDP(hull, 0.02 * perimeter, True)
+		perimeter = cv2.arcLength(contour, True)
+		approx = cv2.approxPolyDP(contour, 0.02 * perimeter, True)
 		if len(approx) == 4 and area > best_area:
 			best_contour = approx
 			best_area = area

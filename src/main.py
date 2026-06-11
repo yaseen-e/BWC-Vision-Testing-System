@@ -55,7 +55,7 @@ def _prompt_for_command_mode() -> bool:
     """Ask whether to use simulated commands or a real LabVIEW connection."""
     while True:
         try:
-            answer = input("[PROMPT] Use simulated commands? [Y/N]: ").strip().lower()
+            answer = input("[PROMPT] Use simulated commands? [y/N]: ").strip().lower()
         except EOFError:
             print("[WARNING] No input available; defaulting to real LabVIEW connection.")
             return False
