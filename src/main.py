@@ -99,7 +99,7 @@ def main():
                     current_state = SystemState.WAIT_FOR_COMMAND
                     
                 case SystemState.WAIT_FOR_COMMAND:
-                    last_command = labview_tcp.get_next_command(simulated=True)
+                    last_command = labview_tcp.get_next_command(simulated=False)
                     print(f"[NETWORK] Received command from LabVIEW: {last_command}")
                     if last_command:
                         pending_command = parse_labview_command(last_command)

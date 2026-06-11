@@ -1,5 +1,5 @@
 import collections
-from socket import socket
+import socket
 from xmlrpc import server
 
 
