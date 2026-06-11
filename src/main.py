@@ -95,6 +95,7 @@ def main():
                         print("[INFO] Camera detected.")
                     else:
                         print("[WARNING] Camera NOT found.")
+                    tcp_server = labview_tcp.start_tcp_server()
                     current_state = SystemState.WAIT_FOR_COMMAND
                     
                 case SystemState.WAIT_FOR_COMMAND:
