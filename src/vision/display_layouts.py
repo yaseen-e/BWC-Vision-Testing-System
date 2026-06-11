@@ -47,6 +47,8 @@ class OCRField:
 class MenuNode:
 	key: str
 	label: str
+	route_here: list[set[str]] = field(default_factory=list)
+	return_route: set[str] = field(default_factory=set)
 	children: tuple["MenuNode", ...] = ()
 
 
@@ -62,42 +64,17 @@ class DisplayLayout:
 
 
 ROOT_MENU = MenuNode(
-	key="dashboard",
-	label="Dashboard Home",
+	key="homescreen",
+	label="Home Screen",
 	children=(
-		MenuNode(key="active_faults", label="Active Faults"),
-		MenuNode(key="history", label="History", children=(
-			MenuNode(key="historical_faults", label="Historical Faults"),
+		MenuNode(key="active_faults_screen", label="Active Faults Screen", route_here={"RIGHT"}, return_route={"MENU", "SELECT"}, children=(
+			MenuNode(key="active_faults_list", label="Active Faults List", route_here={"SELECT"}, return_route={"BACK"}, children=()),
 		)),
-		MenuNode(key="first_time_setup", label="First Time Setup"),
-		MenuNode(key="get_connected", label="Get Connected"),
-		MenuNode(key="pro_tools", label="Pro Tools"),
-		MenuNode(key="schedules", label="Schedules", children=(
-			MenuNode(key="schedules_current", label="Current"),
-			MenuNode(key="schedules_get", label="Get"),
-			MenuNode(key="schedules_set", label="Set"),
-			MenuNode(key="schedules_status", label="Status"),
+        MenuNode(key="system_status_top", label="System Status 1/2", route_here={"MENU", "DOWN", "SELECT"}, return_route={"BACK", "BACK"}, children=(
+			MenuNode(key="system_status_bottom", label="System Status 2/2", route_here={"DOWN"}, return_route={"UP"}),
 		)),
-		MenuNode(key="system", label="System", children=(
-			MenuNode(key="system_info", label="Info"),
-			MenuNode(key="system_fw_version", label="FwVersion"),
-		)),
-		MenuNode(key="control", label="Control", children=(
-			MenuNode(key="control_heat_mode", label="HeatMode"),
-			MenuNode(key="control_setpoint", label="Setpoint"),
-			MenuNode(key="control_status", label="Status"),
-			MenuNode(key="control_states", label="States"),
-		)),
-		MenuNode(key="io", label="IO", children=(
-			MenuNode(key="io_anode", label="Anode"),
-			MenuNode(key="io_relays", label="Relays"),
-			MenuNode(key="io_temps", label="Temps"),
-			MenuNode(key="io_sensors", label="Sensors"),
-		)),
-		MenuNode(key="energy", label="Energy", children=(
-			MenuNode(key="energy_info", label="Info"),
-			MenuNode(key="energy_usage", label="Usage"),
-		)),
+        MenuNode(key="settings", label="Settings", route_here=[{"MENU", "RIGHT", "DOWN", "SELECT"}, {MENU, DOWN, RIGHT, SELECT}], return_route={"MENU"}, children=()),
+		MenuNode(key="schedules", label="Schedules", route_here={"MENU, RIGHT", "RIGHT", "SELECT"}, return_route={"MENU", "SELECT"}),
 	),
 )
 
