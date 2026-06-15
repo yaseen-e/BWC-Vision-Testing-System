@@ -105,6 +105,10 @@ def get_next_command(simulated: bool = False) -> str:
             print("Received:", command)
             response = _COMMAND_RESPONSES.get(command, "Unknown Command\n")
             conn.sendall(response.encode())
+            return data.decode().strip()
+        
+        else:
+            return ""
         
     #ensures that if no data is found in data = conn.recv(1024) line then the program #doesn’t timeout
     except socket.timeout:
@@ -113,12 +117,6 @@ def get_next_command(simulated: bool = False) -> str:
         print(f"[WARNING] TCP receive failed: {exc}")
         return ""
 
-
-
-    if data:
-        return data.decode().strip()
-    else:
-        return ""
 
 #def send_report(ocr_result: str) -> None:
 def send_report(ocr_result: str, simulated: bool = False) -> None:
