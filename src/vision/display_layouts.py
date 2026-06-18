@@ -314,7 +314,7 @@ DASHBOARD_INFO_LINE_2 = OCRField(
 
 DASHBOARD_INFO_LINE_3 = OCRField(
 	name="dashboard_info_line_3",
-	ideal=ROIBox(top=0.67, bottom=0.76, left=0.10, right=0.90),
+	ideal=ROIBox(top=0.66, bottom=0.77, left=0.10, right=0.90),
 	fallback=ROIBox(top=0.65, bottom=0.80, left=0.05, right=0.95),
 	tesseract_config="--psm 7 -c tessedit_char_whitelist= abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-",
 	value_parser=_parse_text_line_standard,
