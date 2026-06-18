@@ -27,7 +27,7 @@ try:
 except Exception:  # pragma: no cover - environment dependent
 	pytesseract = None
 
-from .display_layouts import CALENDAR_ICON_ROI, CURRENT_LAYOUT, ROIBox, WIFI_ICON_ROI
+from .display_layouts import CURRENT_LAYOUT, OCRField
 
 
 # Camera object is created lazily so non-Pi environments still run.
@@ -353,6 +353,24 @@ def _trim_text_suffix_artifacts(text: str) -> str:
 	return re.sub(r"\s+", " ", trimmed).strip()
 
 
+def _crop_box_gray(image: np.ndarray, box: "ROIBox") -> Optional[np.ndarray]:
+	"""Crop a normalized ROIBox from a grayscale image with bounds checks."""
+	height, width = image.shape[:2]
+	top = int(height * box.top)
+	bottom = int(height * box.bottom)
+	left = int(width * box.left)
+	right = int(width * box.right)
+
+	if top >= bottom or left >= right:
+		return None
+
+	roi_img = image[top:bottom, left:right]
+	if roi_img.size == 0:
+		return None
+
+	return roi_img
+
+
 def save_roi_ocr_overlay(capture_dir: Path, frame: np.ndarray, capture_id: Optional[str]) -> Optional[Path]:
 	"""Persist a calibration image that shows every OCR ROI on the current frame."""
 	_require_cv2()
@@ -459,11 +477,24 @@ def read_display(
 	mask = _display_mask(frame)
 	display_contour = _find_display_contour(mask)
 	fields_result: dict[str, dict[str, Any]] = {}
+	gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
 	if display_contour is None:
 		for field_name in CURRENT_LAYOUT.fields:
-			raw, val = _read_field_from_variants(field_name, _fallback_field_variants(frame, field_name))
-			fields_result[field_name] = {"raw": raw, "value": val}
+			field = CURRENT_LAYOUT.fields[field_name]
+			if field.icon_template_path is not None:
+				detected, score = detect_icon(
+					frame=frame,
+					template_path=field.icon_template_path,
+					field=field,
+					threshold=field.icon_match_threshold,
+					warped=None,
+					gray_frame=gray_frame,
+				)
+				fields_result[field_name] = {"raw": f"{score:.3f}", "value": detected}
+			else:
+				raw, val = _read_field_from_variants(field_name, _fallback_field_variants(frame, field_name))
+				fields_result[field_name] = {"raw": raw, "value": val}
 		
 		return OCRReadout(
 			display_found=False,
@@ -473,10 +504,24 @@ def read_display(
 
 	warped = _four_point_transform(frame, _elongate_bottom_edge(display_contour.reshape(4, 2)))
 	binary = _prepare_binary(warped)
+	gray_warped = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
 
 	for field_name in CURRENT_LAYOUT.fields:
-		raw, val = _read_field_from_variants(field_name, _extract_field_variants(binary, field_name))
-		fields_result[field_name] = {"raw": raw, "value": val}
+		field = CURRENT_LAYOUT.fields[field_name]
+		if field.icon_template_path is not None:
+			detected, score = detect_icon(
+				frame=frame,
+				template_path=field.icon_template_path,
+				field=field,
+				threshold=field.icon_match_threshold,
+				warped=warped,
+				gray_frame=gray_frame,
+				gray_warped=gray_warped,
+			)
+			fields_result[field_name] = {"raw": f"{score:.3f}", "value": detected}
+		else:
+			raw, val = _read_field_from_variants(field_name, _extract_field_variants(binary, field_name))
+			fields_result[field_name] = {"raw": raw, "value": val}
 
 	return OCRReadout(
 		display_found=True,
@@ -584,21 +629,23 @@ def get_warped_display(frame: np.ndarray) -> Optional[np.ndarray]:
 def detect_icon(
 	frame: np.ndarray,
 	template_path: str,
-	roi: ROIBox,
+	field: OCRField,
 	threshold: float = 0.80,
+	warped: Optional[np.ndarray] = None,
+	gray_frame: Optional[np.ndarray] = None,
+	gray_warped: Optional[np.ndarray] = None,
 ) -> tuple[bool, float]:
 
 	_require_cv2()
 
-	warped = get_warped_display(frame)
+	if gray_frame is None:
+		gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
 	if warped is None:
-		return False, 0.0
+		warped = get_warped_display(frame)
 
-	gray = cv2.cvtColor(
-		warped,
-		cv2.COLOR_BGR2GRAY
-	)
+	if warped is not None and gray_warped is None:
+		gray_warped = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
 
 	template = cv2.imread(
 		template_path,
@@ -607,18 +654,13 @@ def detect_icon(
 	if template is None:
 		return False, 0.0
 
-	height, width = gray.shape[:2]
-	top = int(height * roi.top)
-	bottom = int(height * roi.bottom)
-	left = int(width * roi.left)
-	right = int(width * roi.right)
+	roi_img: Optional[np.ndarray]
+	if gray_warped is not None:
+		roi_img = _crop_box_gray(gray_warped, field.ideal)
+	else:
+		roi_img = _crop_box_gray(gray_frame, field.fallback)
 
-	if top >= bottom or left >= right:
-		return False, 0.0
-
-	roi_img = gray[top:bottom, left:right]
-
-	if roi_img.size == 0:
+	if roi_img is None:
 		return False, 0.0
 
 	roi_height, roi_width = roi_img.shape[:2]
@@ -645,25 +687,25 @@ def detect_status_icons(
 	results["wifi_on"] = detect_icon(
 		frame,
 		"vision/templates/wifi_on.png",
-		WIFI_ICON_ROI
+		CURRENT_LAYOUT.fields["wifi_icon"]
 	)
 
 	results["wifi_off"] = detect_icon(
 		frame,
 		"vision/templates/wifi_off.png",
-		WIFI_ICON_ROI
+		CURRENT_LAYOUT.fields["wifi_icon"]
 	)
 
 	results["schedule_running"] = detect_icon(
 		frame,
 		"vision/templates/schedule_running.png",
-		CALENDAR_ICON_ROI
+		CURRENT_LAYOUT.fields["calendar_icon"]
 	)
 
 	results["schedule_not_running"] = detect_icon(
 		frame,
 		"vision/templates/schedule_not_running.png",
-		CALENDAR_ICON_ROI
+		CURRENT_LAYOUT.fields["calendar_icon"]
 	)
 
 	return results

@@ -49,6 +49,8 @@ class OCRField:
 	blank_score_threshold: float | None = None
 	strip_trailing_garbage: bool = False
 	allowed_pattern: str | None = None
+	icon_template_path: str | None = None
+	icon_match_threshold: float = 0.80
 
 
 @dataclass(frozen=True)
@@ -277,9 +279,25 @@ SCHEDULE_INFO_TEXT = OCRField(
 	tesseract_config="--psm 6",
 )
 
-# Icon ROIs live in layout definitions; detection logic uses these boxes in vision_engine.
-WIFI_ICON_ROI = ROIBox(top=0.91, bottom=1.00, left=0.53, right=0.63)
-CALENDAR_ICON_ROI = ROIBox(top=0.91, bottom=1.00, left=0.40, right=0.50)
+WIFI_ICON_FIELD = OCRField(
+	name="wifi_icon",
+	ideal=ROIBox(top=0.91, bottom=1.00, left=0.53, right=0.63),
+	fallback=ROIBox(top=0.82, bottom=1.00, left=0.48, right=0.68),
+	tesseract_config="",
+	empty_value=False,
+	icon_template_path="vision/templates/wifi_on.png",
+	icon_match_threshold=0.80,
+)
+
+CALENDAR_ICON_FIELD = OCRField(
+	name="calendar_icon",
+	ideal=ROIBox(top=0.91, bottom=1.00, left=0.40, right=0.50),
+	fallback=ROIBox(top=0.82, bottom=1.00, left=0.34, right=0.56),
+	tesseract_config="",
+	empty_value=False,
+	icon_template_path="vision/templates/schedule_running.png",
+	icon_match_threshold=0.80,
+)
 
 CURRENT_LAYOUT = DisplayLayout(
 	name="bwc_water_heater_lcd_v1",
@@ -294,8 +312,8 @@ CURRENT_LAYOUT = DisplayLayout(
 		"dashboard_info_line_3": DASHBOARD_INFO_LINE_3,
 		"time_bar": TIME_BAR,
 		"date_bar": DATE_BAR,
-		"wifi_icon": WIFI_ICON_ROI,
-		"calendar_icon": CALENDAR_ICON_ROI,
+		"wifi_icon": WIFI_ICON_FIELD,
+		"calendar_icon": CALENDAR_ICON_FIELD,
 		# "active_fault_text": ACTIVE_FAULT_TEXT,
 		# "schedule_info_text": SCHEDULE_INFO_TEXT,
 	},
