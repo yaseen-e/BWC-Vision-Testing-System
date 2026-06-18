@@ -9,7 +9,6 @@ for the LCD UI.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from difflib import SequenceMatcher
 import re
 from typing import Any, Callable, Mapping
 
@@ -142,88 +141,50 @@ def _score_temperature_candidate(raw_temp: str, temperature: Any) -> float:
 	return score
 
 
-TEXT_LINE_1_ALLOWED_VALUES = (
-	"Setpoint satisfied.",
-	"Setpoint not satisfied.",
-)
-
-TEXT_LINE_2_ALLOWED_VALUES: tuple[str, ...] = ()
-
-TEXT_LINE_3_ALLOWED_VALUES = (
-	"Multiple Faults Detected",
-	"No Active Faults",
-)
-
-
-def _normalize_text_line_for_match(raw_text: str) -> str:
-	"""Keep only stable alphanumeric tokens for fuzzy matching against approved values."""
-	normalized = re.sub(r"[^A-Za-z0-9]+", " ", raw_text.upper())
-	return re.sub(r"\s+", " ", normalized).strip()
-
-
-def _best_text_line_match(raw_text: str, allowed_values: tuple[str, ...]) -> tuple[str, float]:
-	"""Return the closest approved value for a text line plus confidence score."""
-	if not allowed_values:
-		return "", -1.0
-
-	raw_key = _normalize_text_line_for_match(raw_text)
-	if not raw_key:
-		return "", -1.0
-
-	best_value = ""
-	best_score = -1.0
-	for candidate in allowed_values:
-		candidate_key = _normalize_text_line_for_match(candidate)
-		if not candidate_key:
-			continue
-
-		ratio = SequenceMatcher(None, raw_key, candidate_key).ratio()
-		token_overlap = len(set(raw_key.split()) & set(candidate_key.split())) / max(1, len(set(candidate_key.split())))
-		score = (ratio * 0.75) + (token_overlap * 0.25)
-		if score > best_score:
-			best_value = candidate
-			best_score = score
-
-	return best_value, best_score
-
-
-def _build_text_line_parser(
-	allowed_values: tuple[str, ...],
-	min_score: float,
-) -> Callable[[str], str]:
-	"""Create a parser that returns an approved value when confidence is high enough."""
-	def _parser(raw_text: str) -> str:
-		best_match, best_score = _best_text_line_match(raw_text, allowed_values)
-		if best_score >= min_score:
-			return best_match
+def _parse_text_line(raw_text: str) -> str:
+	"""Parse OCR text lines dynamically without fixed phrase lists."""
+	text = re.sub(r"\s+", " ", raw_text).strip()
+	text = text.replace("_", " ")
+	text = re.sub(r"\s+", " ", text).strip(" |:;,_-.")
+	if not text:
 		return ""
 
-	return _parser
+	alpha_count = sum(1 for char in text if char.isalpha())
+	if alpha_count < 3:
+		return ""
+
+	alnum_count = sum(1 for char in text if char.isalnum())
+	if alnum_count <= 0:
+		return ""
+
+	if (alpha_count / max(1, len(text))) < 0.35:
+		return ""
+
+	return text
 
 
-def _build_text_line_scorer(
-	allowed_values: tuple[str, ...],
-) -> Callable[[str, Any], float]:
-	"""Create a scorer that ranks approved matches and rejects unapproved parsed values."""
-	def _scorer(raw_text: str, parsed_value: Any) -> float:
-		if not isinstance(parsed_value, str) or not parsed_value:
-			return -1.0
-
-		best_value, best_score = _best_text_line_match(raw_text, allowed_values)
-		if parsed_value == best_value and best_score >= 0.0:
-			return best_score
+def _score_text_line(raw_text: str, parsed_value: Any) -> float:
+	"""Score dynamic text lines so meaningful text beats symbol noise."""
+	if not isinstance(parsed_value, str) or not parsed_value:
 		return -1.0
 
-	return _scorer
+	alpha_count = sum(1 for char in parsed_value if char.isalpha())
+	word_count = len([word for word in parsed_value.split(" ") if any(char.isalpha() for char in word)])
+	punct_count = sum(1 for char in parsed_value if not char.isalnum() and char != " ")
 
+	if alpha_count < 3 or word_count == 0:
+		return -1.0
 
-PARSE_TEXT_LINE_1 = _build_text_line_parser(TEXT_LINE_1_ALLOWED_VALUES, min_score=0.42)
-PARSE_TEXT_LINE_2 = _build_text_line_parser(TEXT_LINE_2_ALLOWED_VALUES, min_score=0.55)
-PARSE_TEXT_LINE_3 = _build_text_line_parser(TEXT_LINE_3_ALLOWED_VALUES, min_score=0.40)
+	junk_cluster_penalty = 0.8 if re.search(r"[^A-Za-z0-9\s]{3,}", raw_text) else 0.0
 
-SCORE_TEXT_LINE_1 = _build_text_line_scorer(TEXT_LINE_1_ALLOWED_VALUES)
-SCORE_TEXT_LINE_2 = _build_text_line_scorer(TEXT_LINE_2_ALLOWED_VALUES)
-SCORE_TEXT_LINE_3 = _build_text_line_scorer(TEXT_LINE_3_ALLOWED_VALUES)
+	score = 0.0
+	score += min(3.0, alpha_count * 0.10)
+	score += min(2.0, word_count * 0.70)
+	score += min(1.5, len(parsed_value) * 0.04)
+	score -= min(2.0, punct_count * 0.15)
+	score -= junk_cluster_penalty
+
+	return score
 
 MODE_FIELD = OCRField(
 	name="mode",
@@ -248,10 +209,10 @@ DASHBOARD_INFO_LINE_1 = OCRField(
 	ideal=ROIBox(top=0.47, bottom=0.57, left=0.10, right=0.90),
 	fallback=ROIBox(top=0.45, bottom=0.70, left=0.05, right=0.95),
 	tesseract_config="--psm 7 -c tessedit_char_whitelist= abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-",
-	value_parser=PARSE_TEXT_LINE_1,
-	value_scorer=SCORE_TEXT_LINE_1,
+	value_parser=_parse_text_line,
+	value_scorer=_score_text_line,
 	empty_value="",
-	min_alpha_chars=4,
+	min_alpha_chars=0,
 	blank_score_threshold=None,
 	strip_trailing_garbage=False,
 	allowed_pattern=None,
@@ -262,10 +223,10 @@ DASHBOARD_INFO_LINE_2 = OCRField(
 	ideal=ROIBox(top=0.57, bottom=0.66, left=0.10, right=0.90),
 	fallback=ROIBox(top=0.55, bottom=0.75, left=0.05, right=0.95),
 	tesseract_config="--psm 7 -c tessedit_char_whitelist= abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-",
-	value_parser=PARSE_TEXT_LINE_2,
-	value_scorer=SCORE_TEXT_LINE_2,
+	value_parser=_parse_text_line,
+	value_scorer=_score_text_line,
 	empty_value="",
-	min_alpha_chars=5,
+	min_alpha_chars=0,
 	blank_score_threshold=None,
 	strip_trailing_garbage=False,
 	allowed_pattern=None,
@@ -276,10 +237,10 @@ DASHBOARD_INFO_LINE_3 = OCRField(
 	ideal=ROIBox(top=0.66, bottom=0.77, left=0.10, right=0.90),
 	fallback=ROIBox(top=0.65, bottom=0.80, left=0.05, right=0.95),
 	tesseract_config="--psm 7 -c tessedit_char_whitelist= abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-",
-	value_parser=PARSE_TEXT_LINE_3,
-	value_scorer=SCORE_TEXT_LINE_3,
+	value_parser=_parse_text_line,
+	value_scorer=_score_text_line,
 	empty_value="",
-	min_alpha_chars=4,
+	min_alpha_chars=0,
 	blank_score_threshold=None,
 	strip_trailing_garbage=False,
 	allowed_pattern=None,
