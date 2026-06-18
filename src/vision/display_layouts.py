@@ -277,6 +277,10 @@ SCHEDULE_INFO_TEXT = OCRField(
 	tesseract_config="--psm 6",
 )
 
+# Icon ROIs live in layout definitions; detection logic uses these boxes in vision_engine.
+WIFI_ICON_ROI = ROIBox(top=0.91, bottom=1.00, left=0.53, right=0.63)
+CALENDAR_ICON_ROI = ROIBox(top=0.91, bottom=1.00, left=0.40, right=0.50)
+
 CURRENT_LAYOUT = DisplayLayout(
 	name="bwc_water_heater_lcd_v1",
 	menu_tree=ROOT_MENU,
@@ -290,6 +294,8 @@ CURRENT_LAYOUT = DisplayLayout(
 		"dashboard_info_line_3": DASHBOARD_INFO_LINE_3,
 		"time_bar": TIME_BAR,
 		"date_bar": DATE_BAR,
+		"wifi_icon": WIFI_ICON_ROI,
+		"calendar_icon": CALENDAR_ICON_ROI,
 		# "active_fault_text": ACTIVE_FAULT_TEXT,
 		# "schedule_info_text": SCHEDULE_INFO_TEXT,
 	},

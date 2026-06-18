@@ -27,7 +27,7 @@ try:
 except Exception:  # pragma: no cover - environment dependent
 	pytesseract = None
 
-from .display_layouts import CURRENT_LAYOUT
+from .display_layouts import CALENDAR_ICON_ROI, CURRENT_LAYOUT, ROIBox, WIFI_ICON_ROI
 
 
 # Camera object is created lazily so non-Pi environments still run.
@@ -582,73 +582,88 @@ def get_warped_display(frame: np.ndarray) -> Optional[np.ndarray]:
 
 
 def detect_icon(
-    frame: np.ndarray,
-    template_path: str,
-    roi: tuple[int, int, int, int],
-    threshold: float = 0.80,
+	frame: np.ndarray,
+	template_path: str,
+	roi: ROIBox,
+	threshold: float = 0.80,
 ) -> tuple[bool, float]:
 
-    warped = get_warped_display(frame)
+	_require_cv2()
 
-    if warped is None:
-        return False, 0.0
+	warped = get_warped_display(frame)
 
-    gray = cv2.cvtColor(
-        warped,
-        cv2.COLOR_BGR2GRAY
-    )
+	if warped is None:
+		return False, 0.0
 
-    template = cv2.imread(
-        template_path,
-        cv2.IMREAD_GRAYSCALE
-    )
+	gray = cv2.cvtColor(
+		warped,
+		cv2.COLOR_BGR2GRAY
+	)
 
-    top, bottom, left, right = roi
+	template = cv2.imread(
+		template_path,
+		cv2.IMREAD_GRAYSCALE
+	)
+	if template is None:
+		return False, 0.0
 
-    roi_img = gray[top:bottom, left:right]
+	height, width = gray.shape[:2]
+	top = int(height * roi.top)
+	bottom = int(height * roi.bottom)
+	left = int(width * roi.left)
+	right = int(width * roi.right)
 
-    result = cv2.matchTemplate(
-        roi_img,
-        template,
-        cv2.TM_CCOEFF_NORMED
-    )
+	if top >= bottom or left >= right:
+		return False, 0.0
 
-    _, score, _, _ = cv2.minMaxLoc(result)
+	roi_img = gray[top:bottom, left:right]
 
-    return score >= threshold, score
+	if roi_img.size == 0:
+		return False, 0.0
+
+	roi_height, roi_width = roi_img.shape[:2]
+	template_height, template_width = template.shape[:2]
+	if template_height > roi_height or template_width > roi_width:
+		return False, 0.0
+
+	result = cv2.matchTemplate(
+		roi_img,
+		template,
+		cv2.TM_CCOEFF_NORMED
+	)
+
+	_, score, _, _ = cv2.minMaxLoc(result)
+
+	return score >= threshold, score
 
 
 def detect_status_icons(
-    frame: np.ndarray
+ 	frame: np.ndarray
 ) -> dict:
-    
-    results = {}
+	results = {}
 
-    results["wifi_on"] = detect_icon(
-        frame,
-        "vision/templates/wifi_on.png",
-        WIFI_ROI
-    )
+	results["wifi_on"] = detect_icon(
+		frame,
+		"vision/templates/wifi_on.png",
+		WIFI_ICON_ROI
+	)
 
-    results["wifi_off"] = detect_icon(
-        frame,
-        "vision/templates/wifi_off.png",
-        WIFI_ROI
-    )
+	results["wifi_off"] = detect_icon(
+		frame,
+		"vision/templates/wifi_off.png",
+		WIFI_ICON_ROI
+	)
 
-    results["schedule_running"] = detect_icon(
-        frame,
-        "vision/templates/schedule_running.png",
-        SCHEDULE_ROI
-    )
+	results["schedule_running"] = detect_icon(
+		frame,
+		"vision/templates/schedule_running.png",
+		CALENDAR_ICON_ROI
+	)
 
-    results["schedule_not_running"] = detect_icon(
-        frame,
-        "vision/templates/schedule_not_running.png",
-        SCHEDULE_ROI
-    )
+	results["schedule_not_running"] = detect_icon(
+		frame,
+		"vision/templates/schedule_not_running.png",
+		CALENDAR_ICON_ROI
+	)
 
-    return results
-
-WIFI_ROI = (0.91, 1.00, 0.53, 0.63)
-SCHEDULE_ROI = (0.91, 1.00, 0.4, 0.5)
+	return results
