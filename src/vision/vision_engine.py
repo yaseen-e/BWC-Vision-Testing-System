@@ -568,9 +568,9 @@ def detect_icon(
         cv2.IMREAD_GRAYSCALE
     )
 
-    x, y, w, h = roi
+    top, bottom, left, right = roi
 
-    roi_img = gray[y:y+h, x:x+w]
+    roi_img = gray[top:bottom, left:right]
 
     result = cv2.matchTemplate(
         roi_img,
@@ -603,5 +603,5 @@ def detect_status_icons(
 
     return results
 
-WIFI_ROI = (50, 20, 100, 40)
-CALENDAR_ROI = (200, 20, 100, 40)
+WIFI_ROI = (0.91, 1.00, 0.53, 0.63)
+CALENDAR_ROI = (0.91, 1.00, 0.4, 0.5)
