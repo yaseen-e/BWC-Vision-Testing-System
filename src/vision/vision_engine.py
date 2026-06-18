@@ -176,6 +176,26 @@ def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np
 			best_contour = approx
 			best_area = area
 
+	if best_contour is not None:
+		return best_contour
+
+	# Final fallback: fit a rotated rectangle to the largest viable contour.
+	# This recovers detection when contour simplification misses exactly 4 points.
+	largest_contour = None
+	largest_area = 0.0
+	for contour in contours:
+		area = cv2.contourArea(contour)
+		if area < max(600, min_area // 3):
+			continue
+		if area > largest_area:
+			largest_area = area
+			largest_contour = contour
+
+	if largest_contour is not None:
+		rotated = cv2.minAreaRect(largest_contour)
+		points = cv2.boxPoints(rotated)
+		return points.reshape(4, 1, 2).astype("float32")
+
 	return best_contour
 
 
