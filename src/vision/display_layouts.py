@@ -190,18 +190,19 @@ MODE_FIELD = OCRField(
 	name="mode",
 	ideal=ROIBox(top=0.04, bottom=0.12, left=0.12, right=0.88),
 	fallback=ROIBox(top=0.00, bottom=0.18, left=0.18, right=0.82),
-	tesseract_config="--psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+	tesseract_config="--psm 7 -c tessedit_char_whitelist= ABCDEFGHIJKLMNOPQRSTUVWXYZ:",
 	value_parser=_format_mode_text,
+	allowed_pattern=r"[ A-Z:]"
 )
 
 TEMPERATURE_FIELD = OCRField(
 	name="temperature",
 	ideal=ROIBox(top=0.16, bottom=0.42, left=0.32, right=0.64),
 	fallback=ROIBox(top=0.12, bottom=0.52, left=0.24, right=0.68),
-	tesseract_config="--psm 7 -c tessedit_char_whitelist=0123456789O",
+	tesseract_config="--psm 7 -c tessedit_char_whitelist=0123456789",
 	value_parser=_parse_temperature_text,
 	value_scorer=_score_temperature_candidate,
-	empty_value=None,
+	allowed_pattern=r"[0-9]"
 )
 
 DASHBOARD_INFO_LINE_1 = OCRField(
