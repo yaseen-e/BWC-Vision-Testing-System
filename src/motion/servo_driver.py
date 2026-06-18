@@ -13,24 +13,19 @@ import time
 from adafruit_blinka.microcontroller.generic_linux.i2c import I2C as LinuxI2C
 from adafruit_servokit import ServoKit
 
+from dataclasses import dataclass
+
 """CONSTANTS"""
 BUS_NUM = 1
 
 MIN_PULSE = 500
 MAX_PULSE = 2500
 
-HOME_ANGLE = 50
-PRESS_ANGLE = 145
-
-BUTTON_CHANNEL_MAP = {
-    "UP": 0,
-    "LEFT": 1,
-    "SELECT": 2,
-    "RIGHT": 3,
-    "BACK": 4,
-    "DOWN": 5,
-    "MENU": 6,
-}
+@dataclass
+class ServoConfig:
+    channel: int
+    home_angle: float
+    press_angle: float
 
 class Button(Enum):
     """One servo per button on the water heater UI."""
@@ -41,6 +36,16 @@ class Button(Enum):
     BACK = "BACK"
     DOWN = "DOWN"
     MENU = "MENU"
+
+BUTTON_SERVO_CONFIG = {
+    Button.UP: ServoConfig(channel=0, home_angle=50, press_angle=home_angle+55),
+    Button.LEFT: ServoConfig(channel=1, home_angle=155, press_angle=home_angle-55),
+    Button.SELECT: ServoConfig(channel=2, home_angle=50, press_angle=home_angle+55),
+    Button.RIGHT: ServoConfig(channel=3, home_angle=50, press_angle=home_angle+55),
+    Button.BACK: ServoConfig(channel=4, home_angle=50, press_angle=home_angle+55),
+    Button.DOWN: ServoConfig(channel=5, home_angle=50, press_angle=home_angle+55),
+    Button.MENU: ServoConfig(channel=6, home_angle=155, press_angle=home_angle-55),
+}
 
 """I2C Wrapper for Linux-based servo control. Only needed due to bad pins on Pi."""
 class LinuxI2CBus:
@@ -100,7 +105,7 @@ class LinuxI2CBus:
 
 """Module state"""
 _kit = None
-_servos = {}
+_servos: dict[int, any] = {}
 _initialized = False
 
 
@@ -121,30 +126,28 @@ def initialize() -> None:
         i2c=i2c,
     )
 
-    for channel in BUTTON_CHANNEL_MAP.values():
-        servo = _kit.servo[channel]
-        servo.set_pulse_width_range(
-            MIN_PULSE,
-            MAX_PULSE,
-        )
-        _servos[channel] = servo
+    for button, config in BUTTON_SERVO_CONFIG.items():
+        servo = _kit.servo[config.channel]
+        servo.set_pulse_width_range(MIN_PULSE, MAX_PULSE)
+        _servos[config.channel] = servo
 
     _initialized = True
 
 
 def home_all() -> None:
-    """Move every servo to its home position.
-
-    One servo at a time.
-    """
-
     if not _initialized:
         initialize()
 
-    for channel in BUTTON_CHANNEL_MAP.values():
-        _servos[channel].angle = HOME_ANGLE
-        # Interlock startup sequence
-        time.sleep(0.5)
+    for button, config in BUTTON_SERVO_CONFIG.items():
+        servo = _servos.get(config.channel)
+        if servo is None:
+            continue
+
+        try:
+            servo.angle = config.home_angle
+            time.sleep(0.2)
+        except Exception as exc:
+            print(f"[Home Error] {button.value}: {exc}")
 
 
 def shutdown() -> None:
@@ -158,25 +161,25 @@ def shutdown() -> None:
 
 
 def press_button(button: Button) -> bool:
-    """Press a single button.
-
-    Returns:
-        True on success
-        False on failure
-    """
-
     if not _initialized:
         initialize()
 
     try:
-        channel = BUTTON_CHANNEL_MAP[button.value]
-        servo = _servos[channel]
-        servo.angle = PRESS_ANGLE
+        config = BUTTON_SERVO_CONFIG[button]
+        servo = _servos.get(config.channel)
+
+        if servo is None:
+            print(f"[Servo Error] Missing servo for {button.value}")
+            return False
+
+        servo.angle = config.press_angle
         time.sleep(0.5)
-        servo.angle = HOME_ANGLE
+
+        servo.angle = config.home_angle
         time.sleep(0.5)
+
         return True
 
     except Exception as exc:
-        print(f"Servo error: {exc}")
+        print(f"Servo error ({button.value}): {exc}")
         return False
