@@ -9,9 +9,17 @@ from __future__ import annotations
 
 from enum import Enum
 import time
+from typing import Any
 
-from adafruit_blinka.microcontroller.generic_linux.i2c import I2C as LinuxI2C
-from adafruit_servokit import ServoKit
+try:
+    from adafruit_blinka.microcontroller.generic_linux.i2c import I2C as LinuxI2C
+except Exception:  # pragma: no cover - hardware/environment dependent
+    LinuxI2C = None
+
+try:
+    from adafruit_servokit import ServoKit
+except Exception:  # pragma: no cover - hardware/environment dependent
+    ServoKit = None
 
 from dataclasses import dataclass
 
@@ -37,19 +45,25 @@ class Button(Enum):
     DOWN = "DOWN"
     MENU = "MENU"
 
+
+def _build_servo_config(channel: int, home_angle: float, press_delta: float) -> ServoConfig:
+    return ServoConfig(channel=channel, home_angle=home_angle, press_angle=home_angle + press_delta)
+
 BUTTON_SERVO_CONFIG = {
-    Button.UP: ServoConfig(channel=0, home_angle=50, press_angle=home_angle+55),
-    Button.LEFT: ServoConfig(channel=1, home_angle=155, press_angle=home_angle-55),
-    Button.SELECT: ServoConfig(channel=2, home_angle=50, press_angle=home_angle+55),
-    Button.RIGHT: ServoConfig(channel=3, home_angle=50, press_angle=home_angle+55),
-    Button.BACK: ServoConfig(channel=4, home_angle=50, press_angle=home_angle+55),
-    Button.DOWN: ServoConfig(channel=5, home_angle=50, press_angle=home_angle+55),
-    Button.MENU: ServoConfig(channel=6, home_angle=155, press_angle=home_angle-55),
+    Button.UP: _build_servo_config(channel=0, home_angle=50, press_delta=55),
+    Button.LEFT: _build_servo_config(channel=1, home_angle=155, press_delta=-55),
+    Button.SELECT: _build_servo_config(channel=2, home_angle=50, press_delta=55),
+    Button.RIGHT: _build_servo_config(channel=3, home_angle=50, press_delta=55),
+    Button.BACK: _build_servo_config(channel=4, home_angle=50, press_delta=55),
+    Button.DOWN: _build_servo_config(channel=5, home_angle=50, press_delta=55),
+    Button.MENU: _build_servo_config(channel=6, home_angle=155, press_delta=-55),
 }
 
 """I2C Wrapper for Linux-based servo control. Only needed due to bad pins on Pi."""
 class LinuxI2CBus:
     def __init__(self, bus_num):
+        if LinuxI2C is None:
+            raise RuntimeError("adafruit_blinka I2C support is not available")
         self._i2c = LinuxI2C(bus_num)
         self._locked = False
 
@@ -105,8 +119,9 @@ class LinuxI2CBus:
 
 """Module state"""
 _kit = None
-_servos: dict[int, any] = {}
+_servos: dict[int, Any] = {}
 _initialized = False
+_servo_available = True
 
 
 def initialize() -> None:
@@ -115,28 +130,46 @@ def initialize() -> None:
     global _kit
     global _servos
     global _initialized
+    global _servo_available
 
     if _initialized:
         return
 
-    i2c = LinuxI2CBus(BUS_NUM)
+    if not _servo_available:
+        return
 
-    _kit = ServoKit(
-        channels=16,
-        i2c=i2c,
-    )
+    if ServoKit is None or LinuxI2C is None:
+        _servo_available = False
+        print("[WARNING] Servo hardware libraries unavailable; servo control disabled.")
+        return
 
-    for button, config in BUTTON_SERVO_CONFIG.items():
-        servo = _kit.servo[config.channel]
-        servo.set_pulse_width_range(MIN_PULSE, MAX_PULSE)
-        _servos[config.channel] = servo
+    try:
+        i2c = LinuxI2CBus(BUS_NUM)
 
-    _initialized = True
+        _kit = ServoKit(
+            channels=16,
+            i2c=i2c,
+        )
+
+        for button, config in BUTTON_SERVO_CONFIG.items():
+            servo = _kit.servo[config.channel]
+            servo.set_pulse_width_range(MIN_PULSE, MAX_PULSE)
+            _servos[config.channel] = servo
+
+        _initialized = True
+    except Exception as exc:
+        _servo_available = False
+        _kit = None
+        _servos = {}
+        print(f"[WARNING] Servo initialization skipped: {exc}")
 
 
 def home_all() -> None:
     if not _initialized:
         initialize()
+
+    if not _initialized:
+        return
 
     for button, config in BUTTON_SERVO_CONFIG.items():
         servo = _servos.get(config.channel)
@@ -163,6 +196,10 @@ def shutdown() -> None:
 def press_button(button: Button) -> bool:
     if not _initialized:
         initialize()
+
+    if not _initialized:
+        print(f"[WARNING] Servo control unavailable; skipping {button.value} press.")
+        return False
 
     try:
         config = BUTTON_SERVO_CONFIG[button]
