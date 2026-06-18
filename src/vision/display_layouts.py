@@ -45,6 +45,10 @@ class OCRField:
 	value_parser: Callable[[str], Any] | None = None
 	value_scorer: Callable[[str, Any], float] | None = None
 	empty_value: Any = ""
+	min_alpha_chars: int = 0
+	blank_score_threshold: float | None = None
+	strip_trailing_garbage: bool = False
+	allowed_pattern: str | None = None
 
 
 @dataclass(frozen=True)
@@ -136,6 +140,132 @@ def _score_temperature_candidate(raw_temp: str, temperature: Any) -> float:
 		score += 0.1
 	return score
 
+
+def _normalize_ocr_unicode(raw_text: str) -> str:
+	"""Normalize common OCR mojibake and non-printing artifacts."""
+	text = raw_text.strip()
+	replacements = {
+		"â€˜": "'",
+		"â€™": "'",
+		"â€œ": '"',
+		"â€�": '"',
+		"â€“": "-",
+		"â€”": "-",
+		"Â°": "",
+		"Â": "",
+		"€": "",
+	}
+	for old, new in replacements.items():
+		text = text.replace(old, new)
+
+	text = re.sub(r"[\x00-\x1f\x7f]+", " ", text)
+	text = re.sub(r"\s+", " ", text).strip()
+	return text
+
+
+def _strip_non_sentence_noise(raw_text: str, allowed_pattern: str | None = None) -> str:
+	"""Keep sentence-like characters while dropping OCR junk symbols."""
+	if not raw_text:
+		return ""
+
+	if allowed_pattern is not None:
+		filtered = "".join(re.findall(allowed_pattern, raw_text))
+	else:
+		filtered = re.sub(r"[^A-Za-z0-9 .,'\-]", " ", raw_text)
+
+	filtered = re.sub(r"\s+", " ", filtered).strip()
+	return filtered
+
+
+def _trim_trailing_garbage(raw_text: str) -> str:
+	"""Trim suffix artifacts like repeated punctuation and OCR edge marks."""
+	text = re.sub(r"\s+", " ", raw_text).strip()
+	text = re.sub(r"[|~`_^]+$", "", text)
+	text = re.sub(r"(?:\s+[\-_,;:])+$", "", text)
+	text = re.sub(r"([.]){2,}$", ".", text)
+	text = re.sub(r"\s+", " ", text).strip()
+	return text
+
+
+def _is_effectively_blank_text(raw_text: str, min_alpha_chars: int = 3) -> bool:
+	"""Return True when OCR output has too little language signal to trust."""
+	if not raw_text:
+		return True
+
+	text = _normalize_ocr_unicode(raw_text)
+	if not text:
+		return True
+
+	alpha_count = sum(1 for char in text if char.isalpha())
+	if alpha_count < min_alpha_chars:
+		return True
+
+	allowed_count = sum(1 for char in text if char.isalnum() or char in " .,'-")
+	junk_ratio = 1.0 - (allowed_count / max(1, len(text)))
+	if junk_ratio > 0.25:
+		return True
+
+	return False
+
+
+def _parse_text_line(raw_text: str, min_alpha_chars: int = 3, allowed_pattern: str | None = None) -> str:
+	"""Parse generic sentence-style OCR lines while suppressing blank noise."""
+	text = _normalize_ocr_unicode(raw_text)
+	text = _strip_non_sentence_noise(text, allowed_pattern=allowed_pattern)
+	text = _trim_trailing_garbage(text)
+	if _is_effectively_blank_text(text, min_alpha_chars=min_alpha_chars):
+		return ""
+	return text
+
+
+def _parse_text_line_standard(raw_text: str) -> str:
+	"""Parser for non-empty UI text lines."""
+	return _parse_text_line(raw_text, min_alpha_chars=4, allowed_pattern=r"[A-Za-z0-9 .,'\-]")
+
+
+def _parse_text_line_sparse(raw_text: str) -> str:
+	"""Parser for lines that are often blank and should reject weak OCR noise."""
+	return _parse_text_line(raw_text, min_alpha_chars=5, allowed_pattern=r"[A-Za-z0-9 .,'\-]")
+
+
+def _score_text_line_candidate(raw_text: str, parsed_value: Any, min_alpha_chars: int = 3) -> float:
+	"""Score line candidates by language-like signal and penalize OCR junk."""
+	if not isinstance(parsed_value, str) or not parsed_value:
+		return -1.0
+
+	alpha_count = sum(1 for char in parsed_value if char.isalpha())
+	word_count = len([word for word in parsed_value.split(" ") if word])
+	if alpha_count < min_alpha_chars:
+		return -0.8
+
+	raw_normalized = _normalize_ocr_unicode(raw_text)
+	raw_junk_count = sum(1 for char in raw_normalized if not (char.isalnum() or char in " .,'-"))
+	raw_junk_ratio = raw_junk_count / max(1, len(raw_normalized))
+
+	score = 0.0
+	score += min(4.0, alpha_count * 0.12)
+	score += min(3.0, word_count * 0.9)
+	score += min(2.0, len(parsed_value) * 0.05)
+	score -= raw_junk_ratio * 6.0
+
+	if _is_effectively_blank_text(parsed_value, min_alpha_chars=min_alpha_chars):
+		score -= 2.5
+
+	if parsed_value.endswith("."):
+		score += 0.1
+
+	return score
+
+
+def _score_text_line_standard(raw_text: str, parsed_value: Any) -> float:
+	"""Scoring profile for expected populated lines."""
+	return _score_text_line_candidate(raw_text, parsed_value, min_alpha_chars=4)
+
+
+def _score_text_line_sparse(raw_text: str, parsed_value: Any) -> float:
+	"""Stricter scoring profile for usually-empty lines."""
+	return _score_text_line_candidate(raw_text, parsed_value, min_alpha_chars=5)
+
 MODE_FIELD = OCRField(
 	name="mode",
 	ideal=ROIBox(top=0.04, bottom=0.12, left=0.12, right=0.88),
@@ -158,21 +288,42 @@ DASHBOARD_INFO_LINE_1 = OCRField(
 	name="dashboard_info_line_1",
 	ideal=ROIBox(top=0.47, bottom=0.57, left=0.10, right=0.90),
 	fallback=ROIBox(top=0.45, bottom=0.70, left=0.05, right=0.95),
-	tesseract_config="--psm 7 -c tessedit_char_whitelist= abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.",
+	tesseract_config="--psm 7 -c tessedit_char_whitelist= abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.'-",
+	value_parser=_parse_text_line_standard,
+	value_scorer=_score_text_line_standard,
+	empty_value="",
+	min_alpha_chars=4,
+	blank_score_threshold=2.6,
+	strip_trailing_garbage=True,
+	allowed_pattern=r"[A-Za-z0-9 .,'\-]",
 )
 
 DASHBOARD_INFO_LINE_2 = OCRField(
 	name="dashboard_info_line_2",
 	ideal=ROIBox(top=0.57, bottom=0.66, left=0.10, right=0.90),
 	fallback=ROIBox(top=0.55, bottom=0.75, left=0.05, right=0.95),
-	tesseract_config="--psm 7 -c tessedit_char_whitelist= abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
+	tesseract_config="--psm 7 -c tessedit_char_whitelist= abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.'-",
+	value_parser=_parse_text_line_sparse,
+	value_scorer=_score_text_line_sparse,
+	empty_value="",
+	min_alpha_chars=5,
+	blank_score_threshold=3.2,
+	strip_trailing_garbage=True,
+	allowed_pattern=r"[A-Za-z0-9 .,'\-]",
 )
 
 DASHBOARD_INFO_LINE_3 = OCRField(
 	name="dashboard_info_line_3",
 	ideal=ROIBox(top=0.67, bottom=0.76, left=0.10, right=0.90),
 	fallback=ROIBox(top=0.65, bottom=0.80, left=0.05, right=0.95),
-	tesseract_config="--psm 7 -c tessedit_char_whitelist= abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
+	tesseract_config="--psm 7 -c tessedit_char_whitelist= abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.'-",
+	value_parser=_parse_text_line_standard,
+	value_scorer=_score_text_line_standard,
+	empty_value="",
+	min_alpha_chars=4,
+	blank_score_threshold=2.4,
+	strip_trailing_garbage=True,
+	allowed_pattern=r"[A-Za-z0-9 .,'\-]",
 )
 
 TIME_BAR = OCRField(

@@ -32,6 +32,7 @@ from .display_layouts import CURRENT_LAYOUT
 
 # Camera object is created lazily so non-Pi environments still run.
 _CAMERA: Optional[Any] = None
+DEBUG_OCR_CANDIDATES = False
 
 
 @dataclass(frozen=True)
@@ -332,6 +333,26 @@ def _safe_capture_stem(capture_id: Optional[str]) -> str:
 	return cleaned or "roi_ocr"
 
 
+def _apply_allowed_pattern(text: str, allowed_pattern: Optional[str]) -> str:
+	"""Filter text by a field-provided allow-list regex pattern."""
+	if not text:
+		return ""
+	if not allowed_pattern:
+		return text
+	filtered = "".join(re.findall(allowed_pattern, text))
+	return re.sub(r"\s+", " ", filtered).strip()
+
+
+def _trim_text_suffix_artifacts(text: str) -> str:
+	"""Trim common OCR punctuation tails left at line ends."""
+	if not text:
+		return ""
+	trimmed = re.sub(r"[|~`_^]+$", "", text)
+	trimmed = re.sub(r"(?:\s+[\-_,;:])+$", "", trimmed)
+	trimmed = re.sub(r"([.]){2,}$", ".", trimmed)
+	return re.sub(r"\s+", " ", trimmed).strip()
+
+
 def save_roi_ocr_overlay(capture_dir: Path, frame: np.ndarray, capture_id: Optional[str]) -> Optional[Path]:
 	"""Persist a calibration image that shows every OCR ROI on the current frame."""
 	_require_cv2()
@@ -384,6 +405,7 @@ def _read_field_from_variants(field_name: str, variants: list[np.ndarray]) -> tu
 	best_raw = ""
 	best_value: Any = None
 	best_score = -1.0
+	candidate_debug: list[tuple[float, str, Any]] = []
 
 	for variant in variants:
 		raw = pytesseract.image_to_string(variant, config=field.tesseract_config).strip()
@@ -393,7 +415,14 @@ def _read_field_from_variants(field_name: str, variants: list[np.ndarray]) -> tu
 		else:
 			value = raw if raw else ""
 
+		if isinstance(value, str):
+			value = _apply_allowed_pattern(value, field.allowed_pattern)
+			if field.strip_trailing_garbage:
+				value = _trim_text_suffix_artifacts(value)
+
 		score = field.value_scorer(raw, value) if field.value_scorer is not None else len(raw)
+		if DEBUG_OCR_CANDIDATES:
+			candidate_debug.append((score, raw, value))
 		if score > best_score:
 			best_raw = raw
 			best_value = value
@@ -401,6 +430,12 @@ def _read_field_from_variants(field_name: str, variants: list[np.ndarray]) -> tu
 
 	if best_value is None:
 		best_value = field.empty_value
+	elif field.blank_score_threshold is not None and best_score < field.blank_score_threshold:
+		best_value = field.empty_value
+
+	if DEBUG_OCR_CANDIDATES:
+		top = sorted(candidate_debug, key=lambda item: item[0], reverse=True)[:2]
+		print(f"[OCR DEBUG] {field_name} top candidates: {top}")
 
 	return best_raw, best_value
 
