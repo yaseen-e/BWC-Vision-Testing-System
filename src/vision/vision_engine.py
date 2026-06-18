@@ -587,4 +587,75 @@ def shutdown() -> None:
 		pass
 
 	_CAMERA = None
-	
+
+
+def get_warped_display(frame: np.ndarray) -> Optional[np.ndarray]:
+	"""Extract a front-facing view of the display from a camera frame, or None if not found."""
+	mask = _display_mask(frame)
+	display_contour = _find_display_contour(mask)
+
+	if display_contour is None:
+		return None
+
+	return _four_point_transform(frame, _elongate_bottom_edge(display_contour.reshape(4, 2)))
+
+
+def detect_icon(
+    frame: np.ndarray,
+    template_path: str,
+    roi: tuple[int, int, int, int],
+    threshold: float = 0.80,
+) -> tuple[bool, float]:
+
+    warped = get_warped_display(frame)
+
+    if warped is None:
+        return False, 0.0
+
+    gray = cv2.cvtColor(
+        warped,
+        cv2.COLOR_BGR2GRAY
+    )
+
+    template = cv2.imread(
+        template_path,
+        cv2.IMREAD_GRAYSCALE
+    )
+
+    x, y, w, h = roi
+
+    roi_img = gray[y:y+h, x:x+w]
+
+    result = cv2.matchTemplate(
+        roi_img,
+        template,
+        cv2.TM_CCOEFF_NORMED
+    )
+
+    _, score, _, _ = cv2.minMaxLoc(result)
+
+    return score >= threshold, score
+
+
+def detect_status_icons(
+    frame: np.ndarray
+) -> dict:
+    
+    results = {}
+
+    results["wifi"] = detect_icon(
+        frame,
+        "vision/templates/wifi.png",
+        WIFI_ROI
+    )
+
+    results["calendar"] = detect_icon(
+        frame,
+        "vision/templates/calendar.png",
+        CALENDAR_ROI
+    )
+
+    return results
+
+WIFI_ROI = (50, 20, 100, 40)
+CALENDAR_ROI = (200, 20, 100, 40)
