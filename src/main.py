@@ -83,6 +83,22 @@ def _run_capture_cleanup() -> None:
     except Exception as exc:
         print(f"[WARNING] Capture cleanup error: {exc}")
 
+
+def _safe_servo_home_all() -> None:
+    """Attempt to park servos without allowing hardware errors to crash shutdown."""
+    try:
+        servo_driver.home_all()
+    except Exception as exc:
+        print(f"[WARNING] Servo home_all skipped: {exc}")
+
+
+def _safe_servo_shutdown() -> None:
+    """Attempt servo shutdown even when hardware is missing or unavailable."""
+    try:
+        servo_driver.shutdown()
+    except Exception as exc:
+        print(f"[WARNING] Servo shutdown skipped: {exc}")
+
 def main():
     current_state = SystemState.STARTUP
     last_command = ""
@@ -222,8 +238,8 @@ def main():
                     print("[INFO] LabVIEW requested shutdown. Parking servos, exiting.")
                     report_file.flush()
                     report_file.close()
-                    # servo_driver.home_all()
-                    # servo_driver.shutdown()
+                    _safe_servo_home_all()
+                    _safe_servo_shutdown()
                     vision_engine.shutdown()
                     terminal_control_temp.disable_single_key_mode(stdin_fd, previous_termios)
                     break
@@ -236,8 +252,8 @@ def main():
         report_file.flush()
         report_file.close()
         terminal_control_temp.disable_single_key_mode(stdin_fd, previous_termios)
-        servo_driver.home_all()
-        servo_driver.shutdown()
+        _safe_servo_home_all()
+        _safe_servo_shutdown()
         vision_engine.shutdown()
         
         print("[EMERGENCY] System parked safely. Exiting.")
