@@ -113,7 +113,14 @@ DASHBOARD_INFO_LINE_3 = OCRField(
 
 TIME_BAR = OCRField(
 	name="time_bar",
-	ideal=ROIBox(top=0.91, bottom=1.00, left=0.85, right=1.00),
+	ideal=ROIBox(top=0.91, bottom=1.00, left=0.81, right=1.00),
+	fallback=ROIBox(top=0.82, bottom=1.00, left=0.68, right=1.00),
+	tesseract_config="--psm 7 -c tessedit_char_whitelist=0123456789AMP:. ",
+)
+
+DATE_BAR = OCRField(
+	name="date_bar",
+	ideal=ROIBox(top=0.91, bottom=1.00, left=0.71, right=0.79),
 	fallback=ROIBox(top=0.82, bottom=1.00, left=0.68, right=1.00),
 	tesseract_config="--psm 7 -c tessedit_char_whitelist=0123456789AMP:. ",
 )
@@ -146,6 +153,7 @@ CURRENT_LAYOUT = DisplayLayout(
 		"dashboard_info_line_2": DASHBOARD_INFO_LINE_2,
 		"dashboard_info_line_3": DASHBOARD_INFO_LINE_3,
 		"time_bar": TIME_BAR,
+		"date_bar": DATE_BAR,
 		# "active_fault_text": ACTIVE_FAULT_TEXT,
 		# "schedule_info_text": SCHEDULE_INFO_TEXT,
 	},
