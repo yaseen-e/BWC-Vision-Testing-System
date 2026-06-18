@@ -624,31 +624,31 @@ def detect_status_icons(
     
     results = {}
 
-    results["wifion"] = detect_icon(
+    results["wifi_on"] = detect_icon(
         frame,
-        "vision/templates/wifion.png",
+        "vision/templates/wifi_on.png",
         WIFI_ROI
     )
 
-    results["wifioff"] = detect_icon(
+    results["wifi_off"] = detect_icon(
         frame,
-        "vision/templates/wifioff.png",
+        "vision/templates/wifi_off.png",
         WIFI_ROI
     )
 
-    results["scheduleon"] = detect_icon(
+    results["schedule_running"] = detect_icon(
         frame,
-        "vision/templates/scheduleon.png",
-        CALENDAR_ROI
+        "vision/templates/schedule_running.png",
+        SCHEDULE_ROI
     )
 
-    results["scheduleoff"] = detect_icon(
+    results["schedule_not_running"] = detect_icon(
         frame,
-        "vision/templates/scheduleoff.png",
-        CALENDAR_ROI
+        "vision/templates/schedule_not_running.png",
+        SCHEDULE_ROI
     )
 
     return results
 
 WIFI_ROI = (0.91, 1.00, 0.53, 0.63)
-CALENDAR_ROI = (0.91, 1.00, 0.4, 0.5)
+SCHEDULE_ROI = (0.91, 1.00, 0.4, 0.5)
