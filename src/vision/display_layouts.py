@@ -9,7 +9,8 @@ for the LCD UI.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Mapping
+import re
+from typing import Any, Callable, Mapping
 
 try:
 	import numpy as np
@@ -41,46 +42,62 @@ class OCRField:
 	ideal: ROIBox
 	fallback: ROIBox
 	tesseract_config: str
+	value_parser: Callable[[str], Any] | None = None
 
 
 @dataclass(frozen=True)
-class MenuNode:
+class ContextNode:
 	key: str
 	label: str
 	route_here: list[set[str]] = field(default_factory=list)
 	return_route: set[str] = field(default_factory=set)
-	children: tuple["MenuNode", ...] = ()
+	children: tuple["ContextNode", ...] = ()
 
 
 @dataclass(frozen=True)
 class DisplayLayout:
 	name: str
-	menu_tree: MenuNode
+	menu_tree: ContextNode
 	display_aspect_ratio: float
 	temperature_range_f: tuple[int, int]
 	fields: Mapping[str, OCRField] = field(default_factory=dict)
 
 
-ROOT_MENU = MenuNode(
+ROOT_MENU = ContextNode(
 	key="homescreen",
 	label="Home Screen",
 	children=(
-		MenuNode(key="active_faults_screen", label="Active Faults Screen", route_here={"RIGHT"}, return_route={"MENU", "SELECT"}, children=(
-			MenuNode(key="active_faults_list", label="Active Faults List", route_here={"SELECT"}, return_route={"BACK"}, children=()),
+		ContextNode(key="active_faults_screen", label="Active Faults Screen", route_here={"RIGHT"}, return_route={"MENU", "SELECT"}, children=(
+			ContextNode(key="active_faults_list", label="Active Faults List", route_here={"SELECT"}, return_route={"BACK"}, children=()),
 		)),
-        MenuNode(key="system_status_top", label="System Status 1/2", route_here={"MENU", "DOWN", "SELECT"}, return_route={"BACK", "BACK"}, children=(
-			MenuNode(key="system_status_bottom", label="System Status 2/2", route_here={"DOWN"}, return_route={"UP"}),
+        ContextNode(key="system_status_top", label="System Status 1/2", route_here={"MENU", "DOWN", "SELECT"}, return_route={"BACK", "BACK"}, children=(
+			ContextNode(key="system_status_bottom", label="System Status 2/2", route_here={"DOWN"}, return_route={"UP"}),
 		)),
-        MenuNode(key="settings", label="Settings", route_here=[{"MENU", "RIGHT", "DOWN", "SELECT"}, {"MENU", "DOWN", "RIGHT", "SELECT"}], return_route={"MENU"}, children=()),
-		MenuNode(key="schedules", label="Schedules", route_here={"MENU", "RIGHT", "RIGHT", "SELECT"}, return_route={"MENU", "SELECT"}),
+        ContextNode(key="settings", label="Settings", route_here=[{"MENU", "RIGHT", "DOWN", "SELECT"}, {"MENU", "DOWN", "RIGHT", "SELECT"}], return_route={"MENU"}, children=()),
+		ContextNode(key="schedules", label="Schedules", route_here={"MENU", "RIGHT", "RIGHT", "SELECT"}, return_route={"MENU", "SELECT"}),
 	),
 )
+
+
+def _format_mode_text(raw_text: str) -> str:
+	"""Normalize OCR output into the report-friendly mode format."""
+	cleaned = re.sub(r"\s+", " ", raw_text).strip().upper()
+	if not cleaned or cleaned == "UNKNOWN":
+		return "UNKNOWN"
+
+	cleaned = re.sub(r"^MODE\s*:\s*", "", cleaned)
+	cleaned = re.sub(r"^MODE\s+", "", cleaned).strip()
+	if not cleaned:
+		return "UNKNOWN"
+
+	return cleaned
 
 MODE_FIELD = OCRField(
 	name="mode",
 	ideal=ROIBox(top=0.04, bottom=0.12, left=0.12, right=0.88),
 	fallback=ROIBox(top=0.00, bottom=0.18, left=0.18, right=0.82),
 	tesseract_config="--psm 7",
+	value_parser=_format_mode_text,
 )
 
 TEMPERATURE_FIELD = OCRField(

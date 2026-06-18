@@ -96,7 +96,6 @@ def main():
     stdin_fd, previous_termios = terminal_control_temp.enable_single_key_mode()
     
     print("--- Starting BWC Water Heater Vision Testing System ---")
-    #TODO: prompt user to use simulated commands or real LabVIEW connection and update line 104 accordingly
     print(f"[INFO] Test report CSV: {report_path}")
 
     try:

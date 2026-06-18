@@ -388,7 +388,14 @@ def _read_field_from_variants(field_name: str, variants: list[np.ndarray]) -> tu
 	for variant in variants:
 		raw = pytesseract.image_to_string(variant, config=field.tesseract_config).strip()
 
-		if field_name == "temperature":
+		if field.value_parser is not None:
+			value = field.value_parser(raw)
+			score = len(raw)
+			if score > best_score:
+				best_raw = raw
+				best_value = value
+				best_score = score
+		elif field_name == "temperature":
 			value = parse_temperature_text(raw)
 			if value is None:
 				continue
