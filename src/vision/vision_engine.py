@@ -624,15 +624,27 @@ def detect_status_icons(
     
     results = {}
 
-    results["wifi"] = detect_icon(
+    results["wifion"] = detect_icon(
         frame,
-        "vision/templates/wifi.png",
+        "vision/templates/wifion.png",
         WIFI_ROI
     )
 
-    results["calendar"] = detect_icon(
+    results["wifioff"] = detect_icon(
         frame,
-        "vision/templates/calendar.png",
+        "vision/templates/wifioff.png",
+        WIFI_ROI
+    )
+
+    results["scheduleon"] = detect_icon(
+        frame,
+        "vision/templates/scheduleon.png",
+        CALENDAR_ROI
+    )
+
+    results["scheduleoff"] = detect_icon(
+        frame,
+        "vision/templates/scheduleoff.png",
         CALENDAR_ROI
     )
 
