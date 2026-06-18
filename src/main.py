@@ -216,7 +216,14 @@ def main():
                     for field_name in CURRENT_LAYOUT.fields:
                         val = readout.fields.get(field_name, {}).get("value")
                         if field_name == "temperature":
-                            row_data[field_name] = "" if val is None else int(val)
+                            if val is None or val == "":
+                                row_data[field_name] = ""
+                            else:
+                                try:
+                                    row_data[field_name] = int(val)
+                                except (TypeError, ValueError):
+                                    print(f"[WARNING] Invalid temperature value from OCR: {val}")
+                                    row_data[field_name] = ""
                         elif field_name == "mode":
                             row_data[field_name] = "UNKNOWN" if val is None else val
                         else:

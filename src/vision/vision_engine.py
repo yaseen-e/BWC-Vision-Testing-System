@@ -333,6 +333,34 @@ def _safe_capture_stem(capture_id: Optional[str]) -> str:
 	return cleaned or "roi_ocr"
 
 
+def _resolve_template_path(template_path: str) -> Optional[Path]:
+	"""Resolve template paths robustly across differing runtime working directories."""
+	path_obj = Path(template_path)
+	candidates: list[Path] = []
+
+	if path_obj.is_absolute():
+		candidates.append(path_obj)
+	else:
+		module_dir = Path(__file__).resolve().parent
+		src_dir = module_dir.parent
+		repo_root = src_dir.parent
+		candidates.extend(
+			[
+				Path.cwd() / path_obj,
+				module_dir / path_obj,
+				src_dir / path_obj,
+				repo_root / path_obj,
+				module_dir / "templates" / path_obj.name,
+			]
+		)
+
+	for candidate in candidates:
+		if candidate.is_file():
+			return candidate
+
+	return None
+
+
 def _apply_allowed_pattern(text: str, allowed_pattern: Optional[str]) -> str:
 	"""Filter text by a field-provided allow-list regex pattern."""
 	if not text:
@@ -648,7 +676,7 @@ def detect_icon(
 		gray_warped = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
 
 	template = cv2.imread(
-		template_path,
+		str(_resolve_template_path(template_path) or ""),
 		cv2.IMREAD_GRAYSCALE
 	)
 	if template is None:

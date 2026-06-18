@@ -204,6 +204,7 @@ TEMPERATURE_FIELD = OCRField(
 	tesseract_config="--psm 7 -c tessedit_char_whitelist=0123456789",
 	value_parser=_parse_temperature_text,
 	value_scorer=_score_temperature_candidate,
+	empty_value=None,
 	allowed_pattern=r"[0-9]"
 )
 
