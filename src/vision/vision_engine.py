@@ -390,73 +390,19 @@ def _read_field_from_variants(field_name: str, variants: list[np.ndarray]) -> tu
 
 		if field.value_parser is not None:
 			value = field.value_parser(raw)
-			score = len(raw)
-			if score > best_score:
-				best_raw = raw
-				best_value = value
-				best_score = score
-		elif field_name == "temperature":
-			value = parse_temperature_text(raw)
-			if value is None:
-				continue
-			score = _score_temperature_candidate(raw, value)
-			if score > best_score:
-				best_raw = raw
-				best_value = value
-				best_score = score
 		else:
-			score = len(raw)
-			if score > best_score:
-				best_raw = raw
-				best_value = raw if raw else ""
-				best_score = score
+			value = raw if raw else ""
 
-	# Default return values when parsing fully fails
+		score = field.value_scorer(raw, value) if field.value_scorer is not None else len(raw)
+		if score > best_score:
+			best_raw = raw
+			best_value = value
+			best_score = score
+
 	if best_value is None:
-		if field_name != "temperature":
-			best_value = ""
+		best_value = field.empty_value
 
 	return best_raw, best_value
-
-
-def parse_temperature_text(raw_temp: str) -> Optional[int]:
-	"""Extract an integer temperature from OCR text when available."""
-	if not raw_temp:
-		return None
-
-	# Replace common OCR confusion before numeric parsing.
-	normalized = raw_temp.upper()
-	normalized = normalized.replace("O", "0").replace("I", "1").replace("L", "1")
-	normalized = normalized.replace("|", "1").replace("S", "5").replace("B", "8").replace("Z", "2")
-	matches = list(re.finditer(r"\d+", normalized))
-	if not matches:
-		return None
-
-	best_match = max(matches, key=lambda match: (len(match.group()), -match.start()))
-	value = int(best_match.group())
-	if value <= 0:
-		return None
-
-	return value
-
-
-def _score_temperature_candidate(raw_temp: str, temperature: int) -> float:
-	"""Score a candidate temperature by plausibility and OCR shape."""
-	score = 0.0
-	min_temp, max_temp = CURRENT_LAYOUT.temperature_range_f
-	if min_temp <= temperature <= max_temp:
-		score += 2.0
-	if 100 <= temperature <= 199:
-		score += 1.5
-	if len(str(temperature)) == 3:
-		score += 1.0
-	if 60 <= temperature <= 240:
-		score += 0.5
-	if "." in raw_temp:
-		score += 0.2
-	if any(char in raw_temp.upper() for char in ("O", "I", "L", "S", "B", "Z", "|")):
-		score += 0.1
-	return score
 
 
 def read_display(

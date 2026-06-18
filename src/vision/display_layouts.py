@@ -43,6 +43,8 @@ class OCRField:
 	fallback: ROIBox
 	tesseract_config: str
 	value_parser: Callable[[str], Any] | None = None
+	value_scorer: Callable[[str, Any], float] | None = None
+	empty_value: Any = ""
 
 
 @dataclass(frozen=True)
@@ -92,6 +94,48 @@ def _format_mode_text(raw_text: str) -> str:
 
 	return cleaned
 
+
+def _parse_temperature_text(raw_temp: str) -> int | None:
+	"""Extract an integer temperature from OCR text when available."""
+	if not raw_temp:
+		return None
+
+	normalized = raw_temp.upper()
+	normalized = normalized.replace("O", "0").replace("I", "1").replace("L", "1")
+	normalized = normalized.replace("|", "1").replace("S", "5").replace("B", "8").replace("Z", "2")
+	matches = list(re.finditer(r"\d+", normalized))
+	if not matches:
+		return None
+
+	best_match = max(matches, key=lambda match: (len(match.group()), -match.start()))
+	value = int(best_match.group())
+	if value <= 0:
+		return None
+
+	return value
+
+
+def _score_temperature_candidate(raw_temp: str, temperature: Any) -> float:
+	"""Score candidate temperatures by plausibility and OCR shape."""
+	if not isinstance(temperature, int):
+		return -1.0
+
+	score = 0.0
+	min_temp, max_temp = CURRENT_LAYOUT.temperature_range_f
+	if min_temp <= temperature <= max_temp:
+		score += 2.0
+	if 100 <= temperature <= 199:
+		score += 1.5
+	if len(str(temperature)) == 3:
+		score += 1.0
+	if 60 <= temperature <= 240:
+		score += 0.5
+	if "." in raw_temp:
+		score += 0.2
+	if any(char in raw_temp.upper() for char in ("O", "I", "L", "S", "B", "Z", "|")):
+		score += 0.1
+	return score
+
 MODE_FIELD = OCRField(
 	name="mode",
 	ideal=ROIBox(top=0.04, bottom=0.12, left=0.12, right=0.88),
@@ -105,6 +149,9 @@ TEMPERATURE_FIELD = OCRField(
 	ideal=ROIBox(top=0.16, bottom=0.42, left=0.32, right=0.64),
 	fallback=ROIBox(top=0.12, bottom=0.52, left=0.24, right=0.68),
 	tesseract_config="--psm 7 -c tessedit_char_whitelist=0123456789O",
+	value_parser=_parse_temperature_text,
+	value_scorer=_score_temperature_candidate,
+	empty_value=None,
 )
 
 DASHBOARD_INFO_LINE_1 = OCRField(
