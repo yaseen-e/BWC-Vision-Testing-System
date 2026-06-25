@@ -210,7 +210,7 @@ TEMPERATURE_FIELD = OCRField(
 
 DASHBOARD_INFO_LINE_1 = OCRField(
 	name="dashboard_info_line_1",
-	ideal=ROIBox(top=0.49, bottom=0.57, left=0.10, right=0.90),
+	ideal=ROIBox(top=0.45, bottom=0.57, left=0.10, right=0.90),
 	fallback=ROIBox(top=0.45, bottom=0.70, left=0.05, right=0.95),
 	tesseract_config="--psm 7 -c tessedit_char_whitelist= abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.",
 	value_parser=_parse_text_line,
@@ -224,7 +224,7 @@ DASHBOARD_INFO_LINE_1 = OCRField(
 
 DASHBOARD_INFO_LINE_2 = OCRField(
 	name="dashboard_info_line_2",
-	ideal=ROIBox(top=0.59, bottom=0.66, left=0.10, right=0.90),
+	ideal=ROIBox(top=0.55, bottom=0.66, left=0.10, right=0.90),
 	fallback=ROIBox(top=0.55, bottom=0.75, left=0.05, right=0.95),
 	tesseract_config="--psm 7 -c tessedit_char_whitelist= abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.",
 	value_parser=_parse_text_line,
@@ -238,7 +238,7 @@ DASHBOARD_INFO_LINE_2 = OCRField(
 
 DASHBOARD_INFO_LINE_3 = OCRField(
 	name="dashboard_info_line_3",
-	ideal=ROIBox(top=0.68, bottom=0.77, left=0.10, right=0.90),
+	ideal=ROIBox(top=0.64, bottom=0.77, left=0.10, right=0.90),
 	fallback=ROIBox(top=0.65, bottom=0.80, left=0.05, right=0.95),
 	tesseract_config="--psm 7 -c tessedit_char_whitelist= abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.",
 	value_parser=_parse_text_line,
