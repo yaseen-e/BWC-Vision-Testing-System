@@ -1,25 +1,18 @@
 from pathlib import Path
 import json
 
-from servo_driver import (
-    Button,
-    initialize,
-    shutdown,
-    _servos,
-    BUTTON_SERVO_CONFIG,
-    build_servo_config,
-)
+import servo_driver
 
 CAL_FILE = Path(__file__).parent / "servo_calibration.json"
 
 
 def load_current_angles():
 
-    build_servo_config()
+    servo_driver.build_servo_config()
 
     angles = {}
 
-    for button, config in BUTTON_SERVO_CONFIG.items():
+    for button, config in servo_driver.BUTTON_SERVO_CONFIG.items():
         angles[button] = config.home_angle
 
     return angles
@@ -38,11 +31,11 @@ def save_angles(angles):
 
 def main():
 
-    initialize()
+    servo_driver.initialize()
 
     angles = load_current_angles()
 
-    buttons = list(Button)
+    buttons = list(servo_driver.Button)
 
     while True:
 
@@ -69,8 +62,8 @@ def main():
         except Exception:
             continue
 
-        channel = BUTTON_SERVO_CONFIG[button].channel
-        servo = _servos[channel]
+        channel = servo_driver.BUTTON_SERVO_CONFIG[button].channel
+        servo = servo_driver._servos[channel]
 
         current = angles[button]
 
@@ -123,7 +116,7 @@ def main():
             current = max(0, min(180, current))
             servo.angle = current
 
-    shutdown()
+    servo_driver.shutdown()
 
 
 if __name__ == "__main__":
