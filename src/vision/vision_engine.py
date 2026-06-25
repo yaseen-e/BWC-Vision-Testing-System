@@ -116,16 +116,31 @@ def _elongate_bottom_edge(points: np.ndarray, extra_height_ratio: float = 0.12) 
 
 
 def _display_mask(frame: np.ndarray) -> np.ndarray:
-	"""Keep only the orange display area to reduce OCR noise."""
+	"""Keep the back-lit LCD body and its bright edges while suppressing the bezel."""
 	_require_cv2()
 	hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-	lower_orange = np.array([5, 150, 150])
-	upper_orange = np.array([25, 255, 255])
-	mask = cv2.inRange(hsv, lower_orange, upper_orange)
+	gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-	kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-	mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-	mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+	# Orange LCD body.
+	lower_orange = np.array([4, 70, 55])
+	upper_orange = np.array([28, 255, 255])
+	orange_mask = cv2.inRange(hsv, lower_orange, upper_orange)
+
+	# Bright back-lit content and edge glow around the screen border.
+	_, bright_mask = cv2.threshold(gray, 125, 255, cv2.THRESH_BINARY)
+	bright_mask = cv2.GaussianBlur(bright_mask, (3, 3), 0)
+	edge_mask = cv2.Canny(gray, 40, 120)
+	edge_mask = cv2.dilate(edge_mask, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)), iterations=1)
+
+	# Merge all screen evidence, then seal small gaps so the outer LCD body
+	# becomes one connected region even when the status bar or highlights break it.
+	mask = cv2.bitwise_or(orange_mask, bright_mask)
+	mask = cv2.bitwise_or(mask, edge_mask)
+	kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9))
+	kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+	mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel_close)
+	mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel_open)
+	mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)), iterations=1)
 	return mask
 
 
@@ -133,22 +148,34 @@ def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np
 	"""Find the 4-corner shape that best matches the LCD window geometry."""
 	_require_cv2()
 	contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+	if not contours:
+		return None
 
 	best_contour = None
 	best_score = float("inf")
 	target_ratio = CURRENT_LAYOUT.display_aspect_ratio
-	ratio_tolerance = 0.22
+	ratio_tolerance = 0.32
+
+	def _contour_box(candidate: np.ndarray) -> np.ndarray:
+		rotated = cv2.minAreaRect(candidate)
+		points = cv2.boxPoints(rotated)
+		return points.reshape(4, 1, 2).astype("float32")
+
 	for contour in contours:
 		area = cv2.contourArea(contour)
 		if area < min_area:
 			continue
 
-		perimeter = cv2.arcLength(contour, True)
-		approx = cv2.approxPolyDP(contour, 0.02 * perimeter, True)
-		if len(approx) != 4:
-			continue
+		hull = cv2.convexHull(contour)
+		contour_to_score = hull if cv2.contourArea(hull) >= area else contour
 
-		(x, y), (width, height), angle = cv2.minAreaRect(approx)
+		perimeter = cv2.arcLength(contour, True)
+		approx = cv2.approxPolyDP(contour_to_score, 0.018 * perimeter, True)
+		if len(approx) < 4:
+			approx = cv2.approxPolyDP(hull, 0.02 * cv2.arcLength(hull, True), True)
+
+		candidate = approx if len(approx) >= 4 else hull
+		(x, y), (width, height), angle = cv2.minAreaRect(candidate)
 		short_side = min(width, height)
 		long_side = max(width, height)
 		if short_side <= 0 or long_side <= 0:
@@ -159,9 +186,11 @@ def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np
 		if ratio_error > ratio_tolerance:
 			continue
 
+		# Prefer the largest stable outer shell because the LCD border is the
+		# actual warp anchor; the bright interior should not clip the edges.
 		score = ratio_error - (area / 1_000_000.0)
 		if score < best_score:
-			best_contour = approx
+			best_contour = _contour_box(candidate)
 			best_score = score
 
 	if best_contour is not None:
@@ -174,10 +203,12 @@ def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np
 		if area < min_area:
 			continue
 
-		perimeter = cv2.arcLength(contour, True)
-		approx = cv2.approxPolyDP(contour, 0.02 * perimeter, True)
-		if len(approx) == 4 and area > best_area:
-			best_contour = approx
+		hull = cv2.convexHull(contour)
+		perimeter = cv2.arcLength(hull, True)
+		approx = cv2.approxPolyDP(hull, 0.02 * perimeter, True)
+		candidate = approx if len(approx) >= 4 else hull
+		if area > best_area:
+			best_contour = _contour_box(candidate)
 			best_area = area
 
 	if best_contour is not None:
@@ -193,12 +224,10 @@ def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np
 			continue
 		if area > largest_area:
 			largest_area = area
-			largest_contour = contour
+			largest_contour = cv2.convexHull(contour)
 
 	if largest_contour is not None:
-		rotated = cv2.minAreaRect(largest_contour)
-		points = cv2.boxPoints(rotated)
-		return points.reshape(4, 1, 2).astype("float32")
+		return _contour_box(largest_contour)
 
 	return best_contour
 
