@@ -287,7 +287,7 @@ WIFI_ICON_FIELD = OCRField(
 	tesseract_config="",
 	empty_value=False,
 	icon_template_path="vision/templates/wifi_on.png",
-	icon_match_threshold=0.80,
+	icon_match_threshold=0.35,
 )
 
 CALENDAR_ICON_FIELD = OCRField(
@@ -297,7 +297,7 @@ CALENDAR_ICON_FIELD = OCRField(
 	tesseract_config="",
 	empty_value=False,
 	icon_template_path="vision/templates/schedule_running.png",
-	icon_match_threshold=0.80,
+	icon_match_threshold=0.35,
 )
 
 CURRENT_LAYOUT = DisplayLayout(

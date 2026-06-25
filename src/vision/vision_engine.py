@@ -755,29 +755,25 @@ def detect_icon(
 	if t_h <= 0 or t_w <= 0:
 		return False, 0.0
 
-	# Resize ROI to the template's exact dimensions so matchTemplate does a
-	# single direct 1-to-1 comparison instead of a sliding-window search.
-	# A sliding window would find the best *partial* match anywhere in the ROI,
-	# letting both wifi_on and wifi_off score high because they share the arc
-	# structure. Direct comparison forces the whole ROI to be evaluated at once,
-	# so structural differences (diagonal strike-through, checkmark) lower the
-	# score noticeably.
+	# Resize ROI to the template's exact dimensions for a 1-to-1 pixel comparison.
 	roi_resized = cv2.resize(roi_img, (t_w, t_h), interpolation=cv2.INTER_AREA)
 
-	# Normalize brightness so ambient lighting variation doesn't dominate.
-	roi_eq = cv2.equalizeHist(roi_resized)
-	tmpl_eq = cv2.equalizeHist(template)
+	# Binarize both images.  These are white icons on a dark background, so a
+	# fixed mid-point threshold is more stable than Otsu which can drift when
+	# the ROI is mostly dark (as with schedule_not_running's empty interior).
+	_, roi_bin = cv2.threshold(roi_resized, 127, 1, cv2.THRESH_BINARY)
+	_, tmpl_bin = cv2.threshold(template, 127, 1, cv2.THRESH_BINARY)
 
-	# Raw structural similarity via normalized cross-correlation (1×1 result).
-	raw_score = float(cv2.matchTemplate(roi_eq, tmpl_eq, cv2.TM_CCOEFF_NORMED)[0, 0])
+	roi_bin = roi_bin.astype(np.uint8)
+	tmpl_bin = tmpl_bin.astype(np.uint8)
 
-	# Edge-based comparison specifically highlights the distinguishing features
-	# (diagonal strike-through on wifi_off, checkmark on schedule_running).
-	roi_edges = cv2.Canny(roi_eq, 50, 150)
-	tmpl_edges = cv2.Canny(tmpl_eq, 50, 150)
-	edge_score = float(cv2.matchTemplate(roi_edges, tmpl_edges, cv2.TM_CCOEFF_NORMED)[0, 0])
+	# IoU on white pixels.  schedule_running has ~30-40% more white pixels than
+	# schedule_not_running (the checkmark fills the calendar interior).  Cross-
+	# correlation normalises that away; IoU punishes it directly.
+	intersection = int(np.count_nonzero(roi_bin & tmpl_bin))
+	union = int(np.count_nonzero(roi_bin | tmpl_bin))
+	score = intersection / union if union > 0 else 0.0
 
-	score = max(raw_score, edge_score)
 	return score >= threshold, score
 
 
