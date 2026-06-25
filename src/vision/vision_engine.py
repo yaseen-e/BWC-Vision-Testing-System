@@ -546,7 +546,13 @@ def read_display(
 						warped=None,
 						gray_frame=gray_frame,
 					)
-					fields_result[field_name] = {"raw": f"on={on_score:.3f},off={off_score:.3f}", "value": detected}
+					if field_name == "wifi_icon":
+						state_value = "wifi_on" if detected else "wifi_off"
+					elif field_name == "calendar_icon":
+						state_value = "schedule_running" if detected else "schedule_not_running"
+					else:
+						state_value = detected
+					fields_result[field_name] = {"raw": f"on={on_score:.3f},off={off_score:.3f}", "value": state_value}
 				else:
 					detected, score = detect_icon(
 						frame=frame,
@@ -586,7 +592,13 @@ def read_display(
 					gray_frame=gray_frame,
 					gray_warped=gray_warped,
 				)
-				fields_result[field_name] = {"raw": f"on={on_score:.3f},off={off_score:.3f}", "value": detected}
+				if field_name == "wifi_icon":
+					state_value = "wifi_on" if detected else "wifi_off"
+				elif field_name == "calendar_icon":
+					state_value = "schedule_running" if detected else "schedule_not_running"
+				else:
+					state_value = detected
+				fields_result[field_name] = {"raw": f"on={on_score:.3f},off={off_score:.3f}", "value": state_value}
 			else:
 				detected, score = detect_icon(
 					frame=frame,
