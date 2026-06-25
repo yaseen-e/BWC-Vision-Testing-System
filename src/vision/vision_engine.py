@@ -751,35 +751,28 @@ def detect_icon(
 	if roi_img is None:
 		return False, 0.0
 
-	def _variant_pair(image: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-		equalized = cv2.equalizeHist(image)
-		edges = cv2.Canny(equalized, 50, 150)
-		return equalized, edges
+	t_h, t_w = template.shape[:2]
+	if t_h <= 0 or t_w <= 0:
+		return False, 0.0
 
-	def _match_score(roi_variant: np.ndarray, template_variant: np.ndarray) -> float:
-		roi_height, roi_width = roi_variant.shape[:2]
-		template_height, template_width = template_variant.shape[:2]
-		if template_height <= 0 or template_width <= 0:
-			return -1.0
+	# Resize ROI to the template's exact dimensions for a 1-to-1 pixel comparison.
+	roi_resized = cv2.resize(roi_img, (t_w, t_h), interpolation=cv2.INTER_AREA)
 
-		if template_height > roi_height or template_width > roi_width:
-			scale = min(roi_width / template_width, roi_height / template_height)
-			if scale <= 0:
-				return -1.0
-			new_width = max(1, int(round(template_width * scale)))
-			new_height = max(1, int(round(template_height * scale)))
-			template_variant = cv2.resize(template_variant, (new_width, new_height), interpolation=cv2.INTER_AREA)
+	# Binarize both images.  These are white icons on a dark background, so a
+	# fixed mid-point threshold is more stable than Otsu which can drift when
+	# the ROI is mostly dark (as with schedule_not_running's empty interior).
+	_, roi_bin = cv2.threshold(roi_resized, 127, 1, cv2.THRESH_BINARY)
+	_, tmpl_bin = cv2.threshold(template, 127, 1, cv2.THRESH_BINARY)
 
-		result = cv2.matchTemplate(roi_variant, template_variant, cv2.TM_CCOEFF_NORMED)
-		_, max_score, _, _ = cv2.minMaxLoc(result)
-		return float(max_score)
+	roi_bin = roi_bin.astype(np.uint8)
+	tmpl_bin = tmpl_bin.astype(np.uint8)
 
-	roi_eq, roi_edges = _variant_pair(roi_img)
-	template_eq, template_edges = _variant_pair(template)
-	score = max(
-		_match_score(roi_eq, template_eq),
-		_match_score(roi_edges, template_edges),
-	)
+	# IoU on white pixels.  schedule_running has ~30-40% more white pixels than
+	# schedule_not_running (the checkmark fills the calendar interior).  Cross-
+	# correlation normalises that away; IoU punishes it directly.
+	intersection = int(np.count_nonzero(roi_bin & tmpl_bin))
+	union = int(np.count_nonzero(roi_bin | tmpl_bin))
+	score = intersection / union if union > 0 else 0.0
 
 	return score >= threshold, score
 
