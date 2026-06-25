@@ -755,27 +755,81 @@ def detect_icon(
 	if t_h <= 0 or t_w <= 0:
 		return False, 0.0
 
-	# Resize ROI to a common comparison size (use template dims).
-	roi_resized = cv2.resize(roi_img, (t_w, t_h), interpolation=cv2.INTER_AREA)
+	# Work at a normalized size so huge upscaled templates do not amplify camera noise.
+	compare_width = 120
+	compare_height = max(64, int(round(compare_width * (t_h / max(1, t_w)))))
+	compare_size = (compare_width, compare_height)
+	roi_resized = cv2.resize(roi_img, compare_size, interpolation=cv2.INTER_AREA)
+	template_resized = cv2.resize(template, compare_size, interpolation=cv2.INTER_AREA)
 
-	# Binarize template at fixed 127 (clean crisp image).
-	_, tmpl_bin = cv2.threshold(template, 127, 1, cv2.THRESH_BINARY)
-	tmpl_density = float(tmpl_bin.mean())
+	# Normalize contrast and denoise before matching.
+	roi_norm = cv2.GaussianBlur(cv2.equalizeHist(roi_resized), (3, 3), 0)
+	template_norm = cv2.GaussianBlur(cv2.equalizeHist(template_resized), (3, 3), 0)
 
-	# Binarize the live ROI with Otsu — adapts to the actual status-bar
-	# brightness which is much dimmer than a clean template screenshot.
-	# If Otsu collapses (near-uniform ROI), fall back to a low fixed threshold
-	# so dim-but-present icon pixels still register as white.
-	_, roi_bin_otsu = cv2.threshold(roi_resized, 0, 1, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-	_, roi_bin_low = cv2.threshold(roi_resized, 40, 1, cv2.THRESH_BINARY)
-	roi_density = max(float(roi_bin_otsu.mean()), float(roi_bin_low.mean()))
+	_, template_bin = cv2.threshold(template_norm, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+	_, roi_bin_otsu = cv2.threshold(roi_norm, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+	roi_bin_adaptive = cv2.adaptiveThreshold(
+		roi_norm,
+		255,
+		cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+		cv2.THRESH_BINARY,
+		11,
+		2,
+	)
+	template_edges = cv2.Canny(template_norm, 40, 120)
 
-	# Score = how closely the ROI's white-pixel density matches this template's.
-	# schedule_running and wifi_off have significantly more white pixels than
-	# their counterparts (checkmark / diagonal line fill extra area), so this
-	# is robust even when spatial alignment is imperfect.
-	peak = max(roi_density, tmpl_density)
-	score = 1.0 - (abs(roi_density - tmpl_density) / peak) if peak > 0.01 else 1.0
+	def _shift_image(image: np.ndarray, dx: int, dy: int, interpolation: int) -> np.ndarray:
+		transform = np.array([[1, 0, dx], [0, 1, dy]], dtype=np.float32)
+		return cv2.warpAffine(
+			image,
+			transform,
+			compare_size,
+			flags=interpolation,
+			borderMode=cv2.BORDER_CONSTANT,
+			borderValue=0,
+		)
+
+	def _score_variant(roi_bin_variant: np.ndarray) -> float:
+		roi_edges_variant = cv2.Canny(roi_bin_variant, 40, 120)
+		best_variant_score = -1.0
+		for dy in range(-2, 3):
+			for dx in range(-2, 3):
+				shifted_gray = _shift_image(roi_norm, dx, dy, cv2.INTER_LINEAR)
+				shifted_bin = _shift_image(roi_bin_variant, dx, dy, cv2.INTER_NEAREST)
+				shifted_edges = _shift_image(roi_edges_variant, dx, dy, cv2.INTER_NEAREST)
+
+				gray_ncc = float(cv2.matchTemplate(shifted_gray, template_norm, cv2.TM_CCOEFF_NORMED)[0, 0])
+				gray_score = max(0.0, min(1.0, (gray_ncc + 1.0) / 2.0))
+
+				shifted_edges_nz = cv2.countNonZero(shifted_edges)
+				template_edges_nz = cv2.countNonZero(template_edges)
+				if shifted_edges_nz == 0 and template_edges_nz == 0:
+					edge_score = 1.0
+				elif shifted_edges_nz == 0 or template_edges_nz == 0:
+					edge_score = 0.0
+				else:
+					edge_ncc = float(cv2.matchTemplate(shifted_edges, template_edges, cv2.TM_CCOEFF_NORMED)[0, 0])
+					edge_score = max(0.0, min(1.0, (edge_ncc + 1.0) / 2.0))
+
+				intersection = cv2.countNonZero(cv2.bitwise_and(shifted_bin, template_bin))
+				union = cv2.countNonZero(cv2.bitwise_or(shifted_bin, template_bin))
+				binary_iou = float(intersection / union) if union > 0 else 0.0
+
+				xor_pixels = cv2.countNonZero(cv2.bitwise_xor(shifted_bin, template_bin))
+				xor_similarity = 1.0 - (float(xor_pixels) / float(compare_width * compare_height))
+
+				score = (
+					0.40 * gray_score
+					+ 0.25 * binary_iou
+					+ 0.25 * edge_score
+					+ 0.10 * xor_similarity
+				)
+				if score > best_variant_score:
+					best_variant_score = score
+
+		return best_variant_score
+
+	score = max(_score_variant(roi_bin_otsu), _score_variant(roi_bin_adaptive))
 
 	return score >= threshold, score
 
