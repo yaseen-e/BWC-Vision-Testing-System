@@ -122,25 +122,34 @@ def _display_mask(frame: np.ndarray) -> np.ndarray:
 	gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
 	# Orange LCD body.
-	lower_orange = np.array([4, 70, 55])
+	lower_orange = np.array([5, 85, 60])
 	upper_orange = np.array([28, 255, 255])
 	orange_mask = cv2.inRange(hsv, lower_orange, upper_orange)
 
-	# Bright back-lit content and edge glow around the screen border.
-	_, bright_mask = cv2.threshold(gray, 125, 255, cv2.THRESH_BINARY)
+	# Bright pixels are useful for the illuminated border and white text, but
+	# only when they are near the orange LCD body. This prevents bezel glare
+	# from expanding the contour outward into the black frame.
+	_, bright_mask = cv2.threshold(gray, 132, 255, cv2.THRESH_BINARY)
 	bright_mask = cv2.GaussianBlur(bright_mask, (3, 3), 0)
-	edge_mask = cv2.Canny(gray, 40, 120)
-	edge_mask = cv2.dilate(edge_mask, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)), iterations=1)
+	edge_mask = cv2.Canny(gray, 35, 110)
+	edge_mask = cv2.dilate(edge_mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)), iterations=1)
 
-	# Merge all screen evidence, then seal small gaps so the outer LCD body
-	# becomes one connected region even when the status bar or highlights break it.
-	mask = cv2.bitwise_or(orange_mask, bright_mask)
-	mask = cv2.bitwise_or(mask, edge_mask)
-	kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9))
+	anchor = cv2.dilate(
+		orange_mask,
+		cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (19, 19)),
+		iterations=1,
+	)
+	bright_near_anchor = cv2.bitwise_and(bright_mask, anchor)
+	edge_near_anchor = cv2.bitwise_and(edge_mask, anchor)
+
+	# Start from the orange body, then add only nearby bright/edge evidence.
+	mask = cv2.bitwise_or(orange_mask, bright_near_anchor)
+	mask = cv2.bitwise_or(mask, edge_near_anchor)
+	kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
 	kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
 	mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel_close)
 	mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel_open)
-	mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)), iterations=1)
+	mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)), iterations=1)
 	return mask
 
 
@@ -155,6 +164,7 @@ def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np
 	best_score = float("inf")
 	target_ratio = CURRENT_LAYOUT.display_aspect_ratio
 	ratio_tolerance = 0.32
+	area_tolerance = 0.55
 
 	def _contour_box(candidate: np.ndarray) -> np.ndarray:
 		rotated = cv2.minAreaRect(candidate)
@@ -186,9 +196,16 @@ def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np
 		if ratio_error > ratio_tolerance:
 			continue
 
+		box_area = width * height
+		if box_area <= 0:
+			continue
+		fill_ratio = area / box_area
+		if fill_ratio < area_tolerance:
+			continue
+
 		# Prefer the largest stable outer shell because the LCD border is the
 		# actual warp anchor; the bright interior should not clip the edges.
-		score = ratio_error - (area / 1_000_000.0)
+		score = ratio_error - (area / 1_000_000.0) - (fill_ratio * 0.15)
 		if score < best_score:
 			best_contour = _contour_box(candidate)
 			best_score = score
