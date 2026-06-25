@@ -33,6 +33,10 @@ from .display_layouts import CURRENT_LAYOUT, OCRField
 # Camera object is created lazily so non-Pi environments still run.
 _CAMERA: Optional[Any] = None
 DEBUG_OCR_CANDIDATES = False
+ICON_STATE_TEMPLATES: dict[str, tuple[str, str]] = {
+	"wifi_icon": ("vision/templates/wifi_on.png", "vision/templates/wifi_off.png"),
+	"calendar_icon": ("vision/templates/schedule_running.png", "vision/templates/schedule_not_running.png"),
+}
 
 
 @dataclass(frozen=True)
@@ -531,15 +535,28 @@ def read_display(
 		for field_name in CURRENT_LAYOUT.fields:
 			field = CURRENT_LAYOUT.fields[field_name]
 			if field.icon_template_path is not None:
-				detected, score = detect_icon(
-					frame=frame,
-					template_path=field.icon_template_path,
-					field=field,
-					threshold=field.icon_match_threshold,
-					warped=None,
-					gray_frame=gray_frame,
-				)
-				fields_result[field_name] = {"raw": f"{score:.3f}", "value": detected}
+				if field_name in ICON_STATE_TEMPLATES:
+					on_path, off_path = ICON_STATE_TEMPLATES[field_name]
+					detected, on_score, off_score = detect_icon_state(
+						frame=frame,
+						field=field,
+						on_template_path=on_path,
+						off_template_path=off_path,
+						threshold=field.icon_match_threshold,
+						warped=None,
+						gray_frame=gray_frame,
+					)
+					fields_result[field_name] = {"raw": f"on={on_score:.3f},off={off_score:.3f}", "value": detected}
+				else:
+					detected, score = detect_icon(
+						frame=frame,
+						template_path=field.icon_template_path,
+						field=field,
+						threshold=field.icon_match_threshold,
+						warped=None,
+						gray_frame=gray_frame,
+					)
+					fields_result[field_name] = {"raw": f"{score:.3f}", "value": detected}
 			else:
 				raw, val = _read_field_from_variants(field_name, _fallback_field_variants(frame, field_name))
 				fields_result[field_name] = {"raw": raw, "value": val}
@@ -557,16 +574,30 @@ def read_display(
 	for field_name in CURRENT_LAYOUT.fields:
 		field = CURRENT_LAYOUT.fields[field_name]
 		if field.icon_template_path is not None:
-			detected, score = detect_icon(
-				frame=frame,
-				template_path=field.icon_template_path,
-				field=field,
-				threshold=field.icon_match_threshold,
-				warped=warped,
-				gray_frame=gray_frame,
-				gray_warped=gray_warped,
-			)
-			fields_result[field_name] = {"raw": f"{score:.3f}", "value": detected}
+			if field_name in ICON_STATE_TEMPLATES:
+				on_path, off_path = ICON_STATE_TEMPLATES[field_name]
+				detected, on_score, off_score = detect_icon_state(
+					frame=frame,
+					field=field,
+					on_template_path=on_path,
+					off_template_path=off_path,
+					threshold=field.icon_match_threshold,
+					warped=warped,
+					gray_frame=gray_frame,
+					gray_warped=gray_warped,
+				)
+				fields_result[field_name] = {"raw": f"on={on_score:.3f},off={off_score:.3f}", "value": detected}
+			else:
+				detected, score = detect_icon(
+					frame=frame,
+					template_path=field.icon_template_path,
+					field=field,
+					threshold=field.icon_match_threshold,
+					warped=warped,
+					gray_frame=gray_frame,
+					gray_warped=gray_warped,
+				)
+				fields_result[field_name] = {"raw": f"{score:.3f}", "value": detected}
 		else:
 			raw, val = _read_field_from_variants(field_name, _extract_field_variants(binary, field_name))
 			fields_result[field_name] = {"raw": raw, "value": val}
@@ -695,10 +726,7 @@ def detect_icon(
 	if warped is not None and gray_warped is None:
 		gray_warped = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
 
-	template = cv2.imread(
-		str(_resolve_template_path(template_path) or ""),
-		cv2.IMREAD_GRAYSCALE
-	)
+	template = cv2.imread(str(_resolve_template_path(template_path) or ""), cv2.IMREAD_GRAYSCALE)
 	if template is None:
 		return False, 0.0
 
@@ -711,49 +739,115 @@ def detect_icon(
 	if roi_img is None:
 		return False, 0.0
 
-	roi_height, roi_width = roi_img.shape[:2]
-	template_height, template_width = template.shape[:2]
-	if template_height > roi_height or template_width > roi_width:
-		return False, 0.0
+	def _variant_pair(image: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+		equalized = cv2.equalizeHist(image)
+		edges = cv2.Canny(equalized, 50, 150)
+		return equalized, edges
 
-	result = cv2.matchTemplate(
-		roi_img,
-		template,
-		cv2.TM_CCOEFF_NORMED
+	def _match_score(roi_variant: np.ndarray, template_variant: np.ndarray) -> float:
+		roi_height, roi_width = roi_variant.shape[:2]
+		template_height, template_width = template_variant.shape[:2]
+		if template_height <= 0 or template_width <= 0:
+			return -1.0
+
+		if template_height > roi_height or template_width > roi_width:
+			scale = min(roi_width / template_width, roi_height / template_height)
+			if scale <= 0:
+				return -1.0
+			new_width = max(1, int(round(template_width * scale)))
+			new_height = max(1, int(round(template_height * scale)))
+			template_variant = cv2.resize(template_variant, (new_width, new_height), interpolation=cv2.INTER_AREA)
+
+		result = cv2.matchTemplate(roi_variant, template_variant, cv2.TM_CCOEFF_NORMED)
+		_, max_score, _, _ = cv2.minMaxLoc(result)
+		return float(max_score)
+
+	roi_eq, roi_edges = _variant_pair(roi_img)
+	template_eq, template_edges = _variant_pair(template)
+	score = max(
+		_match_score(roi_eq, template_eq),
+		_match_score(roi_edges, template_edges),
 	)
 
-	_, score, _, _ = cv2.minMaxLoc(result)
-
 	return score >= threshold, score
+
+
+def detect_icon_state(
+	frame: np.ndarray,
+	field: OCRField,
+	on_template_path: str,
+	off_template_path: str,
+	threshold: float = 0.80,
+	warped: Optional[np.ndarray] = None,
+	gray_frame: Optional[np.ndarray] = None,
+	gray_warped: Optional[np.ndarray] = None,
+) -> tuple[bool, float, float]:
+	"""Classify icon state by comparing positive and negative template match scores."""
+	on_detected, on_score = detect_icon(
+		frame=frame,
+		template_path=on_template_path,
+		field=field,
+		threshold=threshold,
+		warped=warped,
+		gray_frame=gray_frame,
+		gray_warped=gray_warped,
+	)
+	off_detected, off_score = detect_icon(
+		frame=frame,
+		template_path=off_template_path,
+		field=field,
+		threshold=threshold,
+		warped=warped,
+		gray_frame=gray_frame,
+		gray_warped=gray_warped,
+	)
+
+	if on_detected and not off_detected:
+		return True, on_score, off_score
+	if off_detected and not on_detected:
+		return False, on_score, off_score
+
+	# When both pass or both fail threshold, pick the stronger template score.
+	return on_score >= off_score, on_score, off_score
 
 
 def detect_status_icons(
  	frame: np.ndarray
 ) -> dict:
-	results = {}
+	results: dict[str, Any] = {}
+	gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+	warped = get_warped_display(frame)
+	gray_warped = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY) if warped is not None else None
 
-	results["wifi_on"] = detect_icon(
-		frame,
-		"vision/templates/wifi_on.png",
-		CURRENT_LAYOUT.fields["wifi_icon"]
+	wifi_on, wifi_on_score, wifi_off_score = detect_icon_state(
+		frame=frame,
+		field=CURRENT_LAYOUT.fields["wifi_icon"],
+		on_template_path="vision/templates/wifi_on.png",
+		off_template_path="vision/templates/wifi_off.png",
+		threshold=CURRENT_LAYOUT.fields["wifi_icon"].icon_match_threshold,
+		warped=warped,
+		gray_frame=gray_frame,
+		gray_warped=gray_warped,
 	)
 
-	results["wifi_off"] = detect_icon(
-		frame,
-		"vision/templates/wifi_off.png",
-		CURRENT_LAYOUT.fields["wifi_icon"]
+	calendar_running, calendar_run_score, calendar_not_run_score = detect_icon_state(
+		frame=frame,
+		field=CURRENT_LAYOUT.fields["calendar_icon"],
+		on_template_path="vision/templates/schedule_running.png",
+		off_template_path="vision/templates/schedule_not_running.png",
+		threshold=CURRENT_LAYOUT.fields["calendar_icon"].icon_match_threshold,
+		warped=warped,
+		gray_frame=gray_frame,
+		gray_warped=gray_warped,
 	)
 
-	results["schedule_running"] = detect_icon(
-		frame,
-		"vision/templates/schedule_running.png",
-		CURRENT_LAYOUT.fields["calendar_icon"]
-	)
-
-	results["schedule_not_running"] = detect_icon(
-		frame,
-		"vision/templates/schedule_not_running.png",
-		CURRENT_LAYOUT.fields["calendar_icon"]
-	)
+	results["wifi_on"] = wifi_on
+	results["wifi_off"] = not wifi_on
+	results["schedule_running"] = calendar_running
+	results["schedule_not_running"] = not calendar_running
+	results["scores"] = {
+		"wifi": {"on": wifi_on_score, "off": wifi_off_score},
+		"schedule": {"running": calendar_run_score, "not_running": calendar_not_run_score},
+	}
 
 	return results

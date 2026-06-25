@@ -190,7 +190,7 @@ def _score_text_line(raw_text: str, parsed_value: Any) -> float:
 
 MODE_FIELD = OCRField(
 	name="mode",
-	ideal=ROIBox(top=0.04, bottom=0.12, left=0.12, right=0.88),
+	ideal=ROIBox(top=0.03, bottom=0.14, left=0.12, right=0.88),
 	fallback=ROIBox(top=0.00, bottom=0.18, left=0.18, right=0.82),
 	tesseract_config="--psm 7 -c tessedit_char_whitelist= ABCDEFGHIJKLMNOPQRSTUVWXYZ:",
 	value_parser=_format_mode_text,
@@ -199,7 +199,7 @@ MODE_FIELD = OCRField(
 
 TEMPERATURE_FIELD = OCRField(
 	name="temperature",
-	ideal=ROIBox(top=0.16, bottom=0.42, left=0.32, right=0.64),
+	ideal=ROIBox(top=0.16, bottom=0.42, left=0.30, right=0.64),
 	fallback=ROIBox(top=0.12, bottom=0.52, left=0.24, right=0.68),
 	tesseract_config="--psm 7 -c tessedit_char_whitelist=0123456789",
 	value_parser=_parse_temperature_text,
@@ -210,7 +210,7 @@ TEMPERATURE_FIELD = OCRField(
 
 DASHBOARD_INFO_LINE_1 = OCRField(
 	name="dashboard_info_line_1",
-	ideal=ROIBox(top=0.47, bottom=0.57, left=0.10, right=0.90),
+	ideal=ROIBox(top=0.45, bottom=0.57, left=0.10, right=0.90),
 	fallback=ROIBox(top=0.45, bottom=0.70, left=0.05, right=0.95),
 	tesseract_config="--psm 7 -c tessedit_char_whitelist= abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.",
 	value_parser=_parse_text_line,
@@ -224,7 +224,7 @@ DASHBOARD_INFO_LINE_1 = OCRField(
 
 DASHBOARD_INFO_LINE_2 = OCRField(
 	name="dashboard_info_line_2",
-	ideal=ROIBox(top=0.57, bottom=0.66, left=0.10, right=0.90),
+	ideal=ROIBox(top=0.55, bottom=0.66, left=0.10, right=0.90),
 	fallback=ROIBox(top=0.55, bottom=0.75, left=0.05, right=0.95),
 	tesseract_config="--psm 7 -c tessedit_char_whitelist= abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.",
 	value_parser=_parse_text_line,
@@ -238,7 +238,7 @@ DASHBOARD_INFO_LINE_2 = OCRField(
 
 DASHBOARD_INFO_LINE_3 = OCRField(
 	name="dashboard_info_line_3",
-	ideal=ROIBox(top=0.66, bottom=0.77, left=0.10, right=0.90),
+	ideal=ROIBox(top=0.64, bottom=0.77, left=0.10, right=0.90),
 	fallback=ROIBox(top=0.65, bottom=0.80, left=0.05, right=0.95),
 	tesseract_config="--psm 7 -c tessedit_char_whitelist= abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.",
 	value_parser=_parse_text_line,
@@ -282,7 +282,7 @@ SCHEDULE_INFO_TEXT = OCRField(
 
 WIFI_ICON_FIELD = OCRField(
 	name="wifi_icon",
-	ideal=ROIBox(top=0.91, bottom=1.00, left=0.56, right=0.63),
+	ideal=ROIBox(top=0.91, bottom=1.00, left=0.55, right=0.62),
 	fallback=ROIBox(top=0.82, bottom=1.00, left=0.48, right=0.68),
 	tesseract_config="",
 	empty_value=False,
@@ -292,7 +292,7 @@ WIFI_ICON_FIELD = OCRField(
 
 CALENDAR_ICON_FIELD = OCRField(
 	name="calendar_icon",
-	ideal=ROIBox(top=0.91, bottom=1.00, left=0.49, right=0.56),
+	ideal=ROIBox(top=0.91, bottom=1.00, left=0.48, right=0.55),
 	fallback=ROIBox(top=0.82, bottom=1.00, left=0.34, right=0.56),
 	tesseract_config="",
 	empty_value=False,
