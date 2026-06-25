@@ -751,36 +751,33 @@ def detect_icon(
 	if roi_img is None:
 		return False, 0.0
 
-	def _variant_pair(image: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-		equalized = cv2.equalizeHist(image)
-		edges = cv2.Canny(equalized, 50, 150)
-		return equalized, edges
+	t_h, t_w = template.shape[:2]
+	if t_h <= 0 or t_w <= 0:
+		return False, 0.0
 
-	def _match_score(roi_variant: np.ndarray, template_variant: np.ndarray) -> float:
-		roi_height, roi_width = roi_variant.shape[:2]
-		template_height, template_width = template_variant.shape[:2]
-		if template_height <= 0 or template_width <= 0:
-			return -1.0
+	# Resize ROI to the template's exact dimensions so matchTemplate does a
+	# single direct 1-to-1 comparison instead of a sliding-window search.
+	# A sliding window would find the best *partial* match anywhere in the ROI,
+	# letting both wifi_on and wifi_off score high because they share the arc
+	# structure. Direct comparison forces the whole ROI to be evaluated at once,
+	# so structural differences (diagonal strike-through, checkmark) lower the
+	# score noticeably.
+	roi_resized = cv2.resize(roi_img, (t_w, t_h), interpolation=cv2.INTER_AREA)
 
-		if template_height > roi_height or template_width > roi_width:
-			scale = min(roi_width / template_width, roi_height / template_height)
-			if scale <= 0:
-				return -1.0
-			new_width = max(1, int(round(template_width * scale)))
-			new_height = max(1, int(round(template_height * scale)))
-			template_variant = cv2.resize(template_variant, (new_width, new_height), interpolation=cv2.INTER_AREA)
+	# Normalize brightness so ambient lighting variation doesn't dominate.
+	roi_eq = cv2.equalizeHist(roi_resized)
+	tmpl_eq = cv2.equalizeHist(template)
 
-		result = cv2.matchTemplate(roi_variant, template_variant, cv2.TM_CCOEFF_NORMED)
-		_, max_score, _, _ = cv2.minMaxLoc(result)
-		return float(max_score)
+	# Raw structural similarity via normalized cross-correlation (1×1 result).
+	raw_score = float(cv2.matchTemplate(roi_eq, tmpl_eq, cv2.TM_CCOEFF_NORMED)[0, 0])
 
-	roi_eq, roi_edges = _variant_pair(roi_img)
-	template_eq, template_edges = _variant_pair(template)
-	score = max(
-		_match_score(roi_eq, template_eq),
-		_match_score(roi_edges, template_edges),
-	)
+	# Edge-based comparison specifically highlights the distinguishing features
+	# (diagonal strike-through on wifi_off, checkmark on schedule_running).
+	roi_edges = cv2.Canny(roi_eq, 50, 150)
+	tmpl_edges = cv2.Canny(tmpl_eq, 50, 150)
+	edge_score = float(cv2.matchTemplate(roi_edges, tmpl_edges, cv2.TM_CCOEFF_NORMED)[0, 0])
 
+	score = max(raw_score, edge_score)
 	return score >= threshold, score
 
 
