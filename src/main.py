@@ -125,8 +125,8 @@ def main():
                     print("[INFO] Cleaning up old captures.")
                     _run_capture_cleanup()
                     print("[INFO] Initializing servos.")
-                    # servo_driver.initialize()
-                    # servo_driver.home_all()
+                    servo_driver.initialize()
+                    servo_driver.home_all()
                     print("[INFO] Initializing vision engine.")
                     if vision_engine.is_camera_available():
                         print("[INFO] Camera detected.")
@@ -174,7 +174,7 @@ def main():
                     else:
                         print(f"[MANUAL] Please press the {button.name} button on the water heater.")
                         terminal_control_temp.wait_for_enter()
-                        # servo_driver.press_button(button)
+                        servo_driver.press_button(button)
 
                     current_state = SystemState.WAIT_FOR_COMMAND
                     
