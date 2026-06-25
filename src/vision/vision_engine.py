@@ -755,24 +755,27 @@ def detect_icon(
 	if t_h <= 0 or t_w <= 0:
 		return False, 0.0
 
-	# Resize ROI to the template's exact dimensions for a 1-to-1 pixel comparison.
+	# Resize ROI to a common comparison size (use template dims).
 	roi_resized = cv2.resize(roi_img, (t_w, t_h), interpolation=cv2.INTER_AREA)
 
-	# Binarize both images.  These are white icons on a dark background, so a
-	# fixed mid-point threshold is more stable than Otsu which can drift when
-	# the ROI is mostly dark (as with schedule_not_running's empty interior).
-	_, roi_bin = cv2.threshold(roi_resized, 127, 1, cv2.THRESH_BINARY)
+	# Binarize template at fixed 127 (clean crisp image).
 	_, tmpl_bin = cv2.threshold(template, 127, 1, cv2.THRESH_BINARY)
+	tmpl_density = float(tmpl_bin.mean())
 
-	roi_bin = roi_bin.astype(np.uint8)
-	tmpl_bin = tmpl_bin.astype(np.uint8)
+	# Binarize the live ROI with Otsu — adapts to the actual status-bar
+	# brightness which is much dimmer than a clean template screenshot.
+	# If Otsu collapses (near-uniform ROI), fall back to a low fixed threshold
+	# so dim-but-present icon pixels still register as white.
+	_, roi_bin_otsu = cv2.threshold(roi_resized, 0, 1, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+	_, roi_bin_low = cv2.threshold(roi_resized, 40, 1, cv2.THRESH_BINARY)
+	roi_density = max(float(roi_bin_otsu.mean()), float(roi_bin_low.mean()))
 
-	# IoU on white pixels.  schedule_running has ~30-40% more white pixels than
-	# schedule_not_running (the checkmark fills the calendar interior).  Cross-
-	# correlation normalises that away; IoU punishes it directly.
-	intersection = int(np.count_nonzero(roi_bin & tmpl_bin))
-	union = int(np.count_nonzero(roi_bin | tmpl_bin))
-	score = intersection / union if union > 0 else 0.0
+	# Score = how closely the ROI's white-pixel density matches this template's.
+	# schedule_running and wifi_off have significantly more white pixels than
+	# their counterparts (checkmark / diagonal line fill extra area), so this
+	# is robust even when spatial alignment is imperfect.
+	peak = max(roi_density, tmpl_density)
+	score = 1.0 - (abs(roi_density - tmpl_density) / peak) if peak > 0.01 else 1.0
 
 	return score >= threshold, score
 

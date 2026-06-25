@@ -190,7 +190,7 @@ def _score_text_line(raw_text: str, parsed_value: Any) -> float:
 
 MODE_FIELD = OCRField(
 	name="mode",
-	ideal=ROIBox(top=0.03, bottom=0.14, left=0.12, right=0.88),
+	ideal=ROIBox(top=0.03, bottom=0.14, left=0.10, right=0.88),
 	fallback=ROIBox(top=0.00, bottom=0.18, left=0.18, right=0.82),
 	tesseract_config="--psm 7 -c tessedit_char_whitelist= ABCDEFGHIJKLMNOPQRSTUVWXYZ:",
 	value_parser=_format_mode_text,
