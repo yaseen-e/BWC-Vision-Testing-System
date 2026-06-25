@@ -844,7 +844,7 @@ def detect_icon_state(
 	gray_frame: Optional[np.ndarray] = None,
 	gray_warped: Optional[np.ndarray] = None,
 ) -> tuple[bool, float, float]:
-	"""Classify icon state by comparing positive and negative template match scores."""
+	"""Classify icon state using baseline template scores plus pairwise discriminative scoring."""
 	on_detected, on_score = detect_icon(
 		frame=frame,
 		template_path=on_template_path,
@@ -864,12 +864,94 @@ def detect_icon_state(
 		gray_warped=gray_warped,
 	)
 
+	# Pairwise discriminative comparison focuses on template-difference pixels
+	# (calendar checkmark region, wifi slash region), not shared icon outlines.
+	try:
+		if gray_frame is None:
+			gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+		if warped is None:
+			warped = get_warped_display(frame)
+		if warped is not None and gray_warped is None:
+			gray_warped = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
+
+		roi_img: Optional[np.ndarray]
+		if gray_warped is not None:
+			roi_img = _crop_box_gray(gray_warped, field.ideal)
+		else:
+			roi_img = _crop_box_gray(gray_frame, field.fallback)
+
+		on_template = cv2.imread(str(_resolve_template_path(on_template_path) or ""), cv2.IMREAD_GRAYSCALE)
+		off_template = cv2.imread(str(_resolve_template_path(off_template_path) or ""), cv2.IMREAD_GRAYSCALE)
+
+		if roi_img is not None and on_template is not None and off_template is not None:
+			t_h = max(on_template.shape[0], off_template.shape[0])
+			t_w = max(on_template.shape[1], off_template.shape[1])
+			compare_width = 120
+			compare_height = max(64, int(round(compare_width * (t_h / max(1, t_w)))))
+			compare_size = (compare_width, compare_height)
+
+			roi_resized = cv2.resize(roi_img, compare_size, interpolation=cv2.INTER_AREA)
+			on_resized = cv2.resize(on_template, compare_size, interpolation=cv2.INTER_AREA)
+			off_resized = cv2.resize(off_template, compare_size, interpolation=cv2.INTER_AREA)
+
+			roi_norm = cv2.GaussianBlur(cv2.equalizeHist(roi_resized), (3, 3), 0)
+			on_norm = cv2.GaussianBlur(cv2.equalizeHist(on_resized), (3, 3), 0)
+			off_norm = cv2.GaussianBlur(cv2.equalizeHist(off_resized), (3, 3), 0)
+
+			template_diff = cv2.absdiff(on_norm, off_norm)
+			_, diff_mask = cv2.threshold(template_diff, 24, 255, cv2.THRESH_BINARY)
+			diff_mask = cv2.dilate(diff_mask, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)), iterations=1)
+
+			min_diff_pixels = int(0.015 * compare_width * compare_height)
+			if cv2.countNonZero(diff_mask) < min_diff_pixels:
+				diff_mask = np.full((compare_height, compare_width), 255, dtype=np.uint8)
+
+			mask_idx = diff_mask > 0
+
+			def _shift_gray(image: np.ndarray, dx: int, dy: int) -> np.ndarray:
+				transform = np.array([[1, 0, dx], [0, 1, dy]], dtype=np.float32)
+				return cv2.warpAffine(
+					image,
+					transform,
+					compare_size,
+					flags=cv2.INTER_LINEAR,
+					borderMode=cv2.BORDER_CONSTANT,
+					borderValue=0,
+				)
+
+			best_pair_on = 0.0
+			best_pair_off = 0.0
+			best_objective = -1.0
+
+			for dy in range(-2, 3):
+				for dx in range(-2, 3):
+					shifted = _shift_gray(roi_norm, dx, dy)
+
+					on_error = float(np.mean(np.abs(shifted[mask_idx].astype(np.float32) - on_norm[mask_idx].astype(np.float32))))
+					off_error = float(np.mean(np.abs(shifted[mask_idx].astype(np.float32) - off_norm[mask_idx].astype(np.float32))))
+
+					on_sim = max(0.0, min(1.0, 1.0 - (on_error / 255.0)))
+					off_sim = max(0.0, min(1.0, 1.0 - (off_error / 255.0)))
+
+					objective = max(on_sim, off_sim) + 0.35 * abs(on_sim - off_sim)
+					if objective > best_objective:
+						best_objective = objective
+						best_pair_on = on_sim
+						best_pair_off = off_sim
+
+			on_score = (0.55 * on_score) + (0.45 * best_pair_on)
+			off_score = (0.55 * off_score) + (0.45 * best_pair_off)
+			on_detected = on_score >= threshold
+			off_detected = off_score >= threshold
+	except Exception:
+		# If pairwise enhancement fails, keep baseline detect_icon scores.
+		pass
+
 	if on_detected and not off_detected:
 		return True, on_score, off_score
 	if off_detected and not on_detected:
 		return False, on_score, off_score
 
-	# When both pass or both fail threshold, pick the stronger template score.
 	return on_score >= off_score, on_score, off_score
 
 
