@@ -10,6 +10,8 @@ from __future__ import annotations
 from enum import Enum
 import time
 from typing import Any
+import json
+from pathlib import Path
 
 try:
     from adafruit_blinka.microcontroller.generic_linux.i2c import I2C as LinuxI2C
@@ -49,15 +51,98 @@ class Button(Enum):
 def _build_servo_config(channel: int, home_angle: float, press_delta: float) -> ServoConfig:
     return ServoConfig(channel=channel, home_angle=home_angle, press_angle=home_angle + press_delta)
 
-BUTTON_SERVO_CONFIG = {
-    Button.UP: _build_servo_config(channel=0, home_angle=50, press_delta=55),
-    Button.LEFT: _build_servo_config(channel=1, home_angle=155, press_delta=-55),
-    Button.SELECT: _build_servo_config(channel=2, home_angle=50, press_delta=55),
-    Button.RIGHT: _build_servo_config(channel=3, home_angle=50, press_delta=55),
-    Button.BACK: _build_servo_config(channel=4, home_angle=50, press_delta=55),
-    Button.DOWN: _build_servo_config(channel=5, home_angle=50, press_delta=55),
-    Button.MENU: _build_servo_config(channel=6, home_angle=155, press_delta=-55),
+CAL_FILE = Path(__file__).parent / "servo_calibration.json"
+
+DEFAULT_HOME_ANGLES = {
+    Button.UP: 50,
+    Button.LEFT: 155,
+    Button.SELECT: 50,
+    Button.RIGHT: 50,
+    Button.BACK: 50,
+    Button.DOWN: 50,
+    Button.MENU: 155,
 }
+
+PRESS_DIRECTIONS = {
+    Button.UP: 1,
+    Button.LEFT: -1,
+    Button.SELECT: 1,
+    Button.RIGHT: 1,
+    Button.BACK: 1,
+    Button.DOWN: 1,
+    Button.MENU: -1,
+}
+
+def load_home_angles() -> dict[Button, float]:
+
+    home_angles = DEFAULT_HOME_ANGLES.copy()
+
+    if not CAL_FILE.exists():
+        return home_angles
+
+    try:
+        with open(CAL_FILE, "r") as f:
+            data = json.load(f)
+
+        for name, angle in data.items():
+
+            try:
+                button = Button[name]
+                home_angles[button] = angle
+
+            except KeyError:
+                print(f"[WARNING] Unknown button in calibration file: {name}")
+
+    except Exception as exc:
+        print(f"[WARNING] Failed to load servo calibration: {exc}")
+
+    return home_angles
+
+BUTTON_SERVO_CONFIG = {}
+
+def build_servo_config():
+
+    global BUTTON_SERVO_CONFIG
+
+    home_angles = load_home_angles()
+
+    BUTTON_SERVO_CONFIG = {
+        Button.UP: _build_servo_config(
+            channel=0,
+            home_angle=home_angles[Button.UP],
+            press_delta=55,
+        ),
+        Button.LEFT: _build_servo_config(
+            channel=1,
+            home_angle=home_angles[Button.LEFT],
+            press_delta=-55,
+        ),
+        Button.SELECT: _build_servo_config(
+            channel=2,
+            home_angle=home_angles[Button.SELECT],
+            press_delta=55,
+        ),
+        Button.RIGHT: _build_servo_config(
+            channel=3,
+            home_angle=home_angles[Button.RIGHT],
+            press_delta=55,
+        ),
+        Button.BACK: _build_servo_config(
+            channel=4,
+            home_angle=home_angles[Button.BACK],
+            press_delta=55,
+        ),
+        Button.DOWN: _build_servo_config(
+            channel=5,
+            home_angle=home_angles[Button.DOWN],
+            press_delta=55,
+        ),
+        Button.MENU: _build_servo_config(
+            channel=6,
+            home_angle=home_angles[Button.MENU],
+            press_delta=-55,
+        ),
+    }
 
 """I2C Wrapper for Linux-based servo control. Only needed due to bad pins on Pi."""
 class LinuxI2CBus:
@@ -144,6 +229,7 @@ def initialize() -> None:
         return
 
     try:
+        build_servo_config()
         i2c = LinuxI2CBus(BUS_NUM)
 
         _kit = ServoKit(
