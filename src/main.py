@@ -173,8 +173,10 @@ def main():
                         print(f"[WARNING] Unable to map command to button: {last_command}")
                     else:
                         print(f"[MANUAL] Please press the {button.name} button on the water heater.")
-                        terminal_control_temp.wait_for_enter()
-                        servo_driver.press_button(button)
+                        if use_simulated_commands:
+                            terminal_control_temp.wait_for_enter()
+                        else:
+                            servo_driver.press_button(button)
 
                     current_state = SystemState.WAIT_FOR_COMMAND
                     
