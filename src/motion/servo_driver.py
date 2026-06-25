@@ -88,8 +88,6 @@ def load_home_angles() -> dict[Button, float]:
 
     return home_angles
 
-BUTTON_SERVO_CONFIG = {}
-
 def build_servo_config():
 
     global BUTTON_SERVO_CONFIG
