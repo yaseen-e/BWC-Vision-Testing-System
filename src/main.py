@@ -13,7 +13,7 @@ import traceback
 from src import data_manager
 from src.motion import servo_driver
 from src.vision import vision_engine
-from src.vision.display_layouts import CURRENT_LAYOUT
+from src.vision.display_layouts import HOME_MENU, ContextNode, apply_navigation_command
 
 from src.network.labview_protocol import LabViewCommand, parse_labview_command
 from src.network import labview_tcp
@@ -106,6 +106,9 @@ def main():
     ocr_result = ""
     error_message = ""
     step_counter = 0
+    current_menu: ContextNode = HOME_MENU
+    transition_buffer: tuple[str, ...] = ()
+    sequence_broken = False
     use_simulated_commands = _prompt_for_command_mode()
 
     report_file, report_csv_writer, report_path = report_writer.open_test_report()
@@ -113,6 +116,7 @@ def main():
     
     print("--- Starting BWC Water Heater Vision Testing System ---")
     print(f"[INFO] Test report CSV: {report_path}")
+    print(f"[INFO] Initial menu context: {current_menu.label}")
 
     try:
         while True:
@@ -157,6 +161,8 @@ def main():
                             if get_button_for_command(pending_command) is not None:
                                 current_state = SystemState.PRESS_BUTTON
                             elif pending_command is LabViewCommand.RUN_OCR:
+                                transition_buffer = ()
+                                sequence_broken = False
                                 current_state = SystemState.READ_DISPLAY
                             elif pending_command is LabViewCommand.SHUTDOWN:
                                 current_state = SystemState.SHUTDOWN
@@ -178,6 +184,23 @@ def main():
                         else:
                             servo_driver.press_button(button)
 
+                        if sequence_broken:
+                            print("[NAV] Sequence locked after mismatch; waiting for RUN_OCR reset.")
+                        else:
+                            previous_menu_key = current_menu.key
+                            current_menu, transition_buffer, sequence_broken = apply_navigation_command(
+                                HOME_MENU,
+                                current_menu,
+                                transition_buffer,
+                                pending_command.value,
+                            )
+                            if sequence_broken:
+                                print(f"[NAV] Sequence mismatch on {transition_buffer}; route tracking locked until RUN_OCR.")
+                            elif current_menu.key != previous_menu_key:
+                                print(f"[NAV] Current menu updated: {current_menu.label}")
+                            elif transition_buffer:
+                                print(f"[NAV] Partial sequence: {transition_buffer}")
+
                     current_state = SystemState.WAIT_FOR_COMMAND
                     
                 case SystemState.READ_DISPLAY:
@@ -186,10 +209,14 @@ def main():
                     frame = vision_engine.capture_frame()
                     if frame is None:
                         print("[WARNING] No camera frame available; skipping image save.")
+                        empty_fields = {
+                            field.name: {"raw": "", "value": ("UNKNOWN" if field.name == "mode" else None if field.name == "temperature" else "")}
+                            for field in current_menu.fields
+                        }
                         readout = vision_engine.OCRReadout(
                             display_found=False,
-                            current_menu_key="dashboard",
-                            fields={"mode": {"raw": "", "value": "UNKNOWN"}, "temperature": {"raw": "", "value": None}},
+                            current_menu_key=current_menu.key,
+                            fields=empty_fields,
                         )
                     else:
                         saved_path = data_manager.save_capture_frame(CAPTURE_DIR, frame, capture_id)
@@ -198,24 +225,32 @@ def main():
                         else:
                             print(f"[INFO] Saved capture frame: {saved_path}")
 
-                        roi_overlay_path = vision_engine.save_roi_ocr_overlay(CAPTURE_DIR, frame, capture_id)
+                        roi_overlay_path = vision_engine.save_roi_ocr_overlay(CAPTURE_DIR, frame, capture_id, current_menu.fields)
                         if roi_overlay_path is None:
                             print("[WARNING] ROI calibration image could not be saved.")
                         else:
                             print(f"[INFO] Saved ROI calibration image: {roi_overlay_path}")
                         
-                        readout = vision_engine.read_display(frame, "dashboard")
+                        readout = vision_engine.read_display(frame, current_menu.key, current_menu.fields)
                     
-                    fields_str = ";".join(f"{k.upper()}={v.get('value', '')}" for k, v in readout.fields.items())
-                    ocr_result = (
-                        f"DISPLAY_FOUND={readout.display_found};"
-                        f"MENU={readout.current_menu_key};"
-                        f"{fields_str}"
-                    )
+                    field_pairs: list[str] = []
+                    for field in current_menu.fields:
+                        raw_value = readout.fields.get(field.name, {}).get("value", "")
+                        field_value = "" if raw_value is None else raw_value
+                        field_pairs.append(f"{field.name.upper()}={field_value}")
+
+                    fields_str = ";".join(field_pairs)
+                    ocr_result = f"DISPLAY_FOUND={readout.display_found};MENU={current_menu.label}"
+                    if fields_str:
+                        ocr_result = f"{ocr_result};{fields_str}"
                     step_counter += 1
                     
-                    row_data = {"step": step_counter, "menu": readout.current_menu_key}
-                    for field_name in CURRENT_LAYOUT.fields:
+                    row_data = {"step": step_counter, "menu": current_menu.label}
+                    for field_name in report_writer.get_report_field_names():
+                        row_data[field_name] = ""
+
+                    for field in current_menu.fields:
+                        field_name = field.name
                         val = readout.fields.get(field_name, {}).get("value")
                         if field_name == "temperature":
                             if val is None or val == "":

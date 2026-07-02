@@ -26,7 +26,7 @@ try:
 except Exception:  # pragma: no cover - environment dependent
 	pytesseract = None
 
-from .display_layouts import CURRENT_LAYOUT
+from .display_layouts import DISPLAY_ASPECT_RATIO, OCRField, TEMPERATURE_RANGE_F
 
 
 # Camera object is created lazily so non-Pi environments still run.
@@ -157,7 +157,7 @@ def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np
 
 	best_contour = None
 	best_score = float("inf")
-	target_ratio = CURRENT_LAYOUT.display_aspect_ratio
+	target_ratio = DISPLAY_ASPECT_RATIO
 	ratio_tolerance = 0.32
 	area_tolerance = 0.55
 
@@ -253,10 +253,10 @@ def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
 	return thresh
 
 
-def _extract_warped_variants(binary: np.ndarray, field_name: str) -> list[np.ndarray]:
+def _extract_warped_variants(binary: np.ndarray, field: OCRField) -> list[np.ndarray]:
 	"""Build OCR variants for any field using its ROI definitions."""
 	_require_cv2()
-	field = CURRENT_LAYOUT.fields[field_name]
+	field_name = field.name
 	roi = field.ideal.crop(binary)
 	roi = cv2.bitwise_not(roi)
 	roi = cv2.GaussianBlur(roi, (3, 3), 0)
@@ -278,12 +278,11 @@ def _extract_warped_variants(binary: np.ndarray, field_name: str) -> list[np.nda
 	return variants
 
 
-def _extract_fallback_variants(frame: np.ndarray, field_name: str) -> list[np.ndarray]:
+def _extract_fallback_variants(frame: np.ndarray, field: OCRField) -> list[np.ndarray]:
 	"""Build conservative OCR variants when the display contour is not found."""
 	_require_cv2()
 	gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 	gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-	field = CURRENT_LAYOUT.fields[field_name]
 	roi = field.fallback.crop(gray)
 	roi = cv2.GaussianBlur(roi, (3, 3), 0)
 	_, otsu = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
@@ -365,7 +364,7 @@ def _score_temperature(raw_text: str, value: Any) -> float:
 		return -1.0
 
 	score = 0.0
-	min_temp, max_temp = CURRENT_LAYOUT.temperature_range_f
+	min_temp, max_temp = TEMPERATURE_RANGE_F
 	if min_temp <= value <= max_temp:
 		score += 2.0
 	if 100 <= value <= 199:
@@ -414,10 +413,10 @@ def _score_field_candidate(field_name: str, raw_text: str, value: Any) -> float:
 	return 0.0
 
 
-def _ocr_field(field_name: str, variants: list[np.ndarray]) -> tuple[str, Any]:
+def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 	"""OCR a field from multiple variants and keep the best-scoring candidate."""
 	_require_pytesseract()
-	field = CURRENT_LAYOUT.fields[field_name]
+	field_name = field.name
 	best_raw = ""
 	best_value: Any = _field_empty_value(field_name)
 	best_score = -1.0
@@ -443,12 +442,11 @@ def _ocr_field(field_name: str, variants: list[np.ndarray]) -> tuple[str, Any]:
 	return best_raw, best_value
 
 
-def _draw_roi_overlay(image: np.ndarray, use_fallback_rois: bool) -> np.ndarray:
+def _draw_roi_overlay(image: np.ndarray, fields: tuple[OCRField, ...], use_fallback_rois: bool) -> np.ndarray:
 	"""Draw every OCR ROI on a frame for calibration and debugging."""
 	_require_cv2()
 	overlay = image.copy()
 	height, width = overlay.shape[:2]
-	fields = list(CURRENT_LAYOUT.fields.values())
 
 	for index, field in enumerate(fields):
 		box = field.fallback if use_fallback_rois else field.ideal
@@ -551,7 +549,12 @@ def _safe_capture_stem(capture_id: Optional[str]) -> str:
 	return cleaned or "roi_ocr"
 
 
-def save_roi_ocr_overlay(capture_dir: Path, frame: np.ndarray, capture_id: Optional[str]) -> Optional[Path]:
+def save_roi_ocr_overlay(
+	capture_dir: Path,
+	frame: np.ndarray,
+	capture_id: Optional[str],
+	menu_fields: tuple[OCRField, ...],
+) -> Optional[Path]:
 	"""Persist a calibration image that shows every OCR ROI on the current frame."""
 	_require_cv2()
 	if frame is None:
@@ -562,7 +565,7 @@ def save_roi_ocr_overlay(capture_dir: Path, frame: np.ndarray, capture_id: Optio
 	display_contour = _find_display_contour(mask)
 
 	if display_contour is None:
-		overlay = _draw_roi_overlay(frame, use_fallback_rois=True)
+		overlay = _draw_roi_overlay(frame, menu_fields, use_fallback_rois=True)
 	else:
 		source_points = _expand_display_bottom(display_contour.reshape(4, 2))
 		width_a = np.linalg.norm(source_points[2] - source_points[3])
@@ -585,7 +588,7 @@ def save_roi_ocr_overlay(capture_dir: Path, frame: np.ndarray, capture_id: Optio
 		overlay = frame.copy()
 		_draw_polygon_outline(overlay, source_points, "DETECTED SCREEN BORDER")
 
-		for field in CURRENT_LAYOUT.fields.values():
+		for field in menu_fields:
 			projected = _project_roi_box(field.ideal, inverse_transform, warped_width, warped_height)
 			_draw_polygon_outline(overlay, projected, field.name.upper())
 
@@ -598,7 +601,8 @@ def save_roi_ocr_overlay(capture_dir: Path, frame: np.ndarray, capture_id: Optio
 
 def read_display(
 	frame: np.ndarray,
-	current_menu_key: str = "dashboard",
+	current_menu_key: str,
+	menu_fields: tuple[OCRField, ...],
 ) -> OCRReadout:
 	"""
 	Read fields from the display in one frame based on current context.
@@ -617,9 +621,9 @@ def read_display(
 	fields_result: dict[str, dict[str, Any]] = {}
 
 	if display_contour is None:
-		for field_name in CURRENT_LAYOUT.fields:
-			raw, val = _ocr_field(field_name, _extract_fallback_variants(frame, field_name))
-			fields_result[field_name] = {"raw": raw, "value": val}
+		for field in menu_fields:
+			raw, val = _ocr_field(field, _extract_fallback_variants(frame, field))
+			fields_result[field.name] = {"raw": raw, "value": val}
 		
 		return OCRReadout(
 			display_found=False,
@@ -630,9 +634,9 @@ def read_display(
 	warped = _warp_image(frame, _expand_display_bottom(display_contour.reshape(4, 2)))
 	binary = _prepare_ocr_binary(warped)
 
-	for field_name in CURRENT_LAYOUT.fields:
-		raw, val = _ocr_field(field_name, _extract_warped_variants(binary, field_name))
-		fields_result[field_name] = {"raw": raw, "value": val}
+	for field in menu_fields:
+		raw, val = _ocr_field(field, _extract_warped_variants(binary, field))
+		fields_result[field.name] = {"raw": raw, "value": val}
 
 	return OCRReadout(
 		display_found=True,
@@ -651,14 +655,15 @@ def capture_frame() -> Optional[np.ndarray]:
 
 
 def capture_and_read_display(
-	current_menu_key: str = "dashboard",
+	current_menu_key: str,
+	menu_fields: tuple[OCRField, ...],
 ) -> OCRReadout:
 	"""One-call helper used by main: capture frame then run OCR pipeline."""
 	frame = capture_frame()
 	if frame is None:
 		empty_fields = {
-			name: {"raw": "", "value": _field_empty_value(name)}
-			for name in CURRENT_LAYOUT.fields
+			field.name: {"raw": "", "value": _field_empty_value(field.name)}
+			for field in menu_fields
 		}
 		return OCRReadout(
 			display_found=False,
@@ -669,6 +674,7 @@ def capture_and_read_display(
 	return read_display(
 		frame,
 		current_menu_key,
+		menu_fields,
 	)
 
 
