@@ -91,17 +91,17 @@ DASHBOARD_INFO_LINE_3 = OCRField(
 	tesseract_config="--psm 7 -c tessedit_char_whitelist= abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.",
 )
 
-TIME_BAR = OCRField(
-	name="time_bar",
+TIME_FIELD = OCRField(
+	name="time_field",
 	ideal=ROIBox(top=0.91, bottom=1.00, left=0.83, right=1.00),
 	fallback=ROIBox(top=0.82, bottom=1.00, left=0.68, right=1.00),
 	tesseract_config="--psm 7 -c tessedit_char_whitelist= 0123456789AMP:",
 )
 
-DATE_BAR = OCRField(
-	name="date_bar",
+DATE_FIELD = OCRField(
+	name="date_field",
 	ideal=ROIBox(top=0.91, bottom=1.00, left=0.63, right=0.82),
-	fallback=ROIBox(top=0.82, bottom=1.00, left=0.68, right=1.00),
+	fallback=ROIBox(top=0.82, bottom=1.00, left=0.63, right=0.82),
 	tesseract_config="--psm 7 -c tessedit_char_whitelist=0123456789/",
 )
 
@@ -133,6 +133,13 @@ CALENDAR_ICON_FIELD = OCRField(
 	tesseract_config="",
 )
 
+STATUS_BAR = tuple((
+	TIME_FIELD,
+	DATE_FIELD,
+	WIFI_ICON_FIELD,
+	CALENDAR_ICON_FIELD,
+))
+
 HOME_MENU = ContextNode(
 	key="homescreen",
 	label="Home Screen",
@@ -142,6 +149,7 @@ HOME_MENU = ContextNode(
 		DASHBOARD_INFO_LINE_1,
 		DASHBOARD_INFO_LINE_2,
 		DASHBOARD_INFO_LINE_3,
+		*STATUS_BAR,
 	),
 	children=(
 		ContextNode(key="active_faults_screen", label="Active Faults Screen", route_here=(("RIGHT",),), return_route=(("MENU", "SELECT"),), children=(
