@@ -93,7 +93,7 @@ def _warp_image(image: np.ndarray, points: np.ndarray) -> np.ndarray:
 	return cv2.warpPerspective(image, transform, (max_width, max_height))
 
 
-def _expand_display_bottom(points: np.ndarray, extra_height_ratio: float = 0.12) -> np.ndarray:
+def _expand_display_bottom(points: np.ndarray, extra_height_ratio: float = 0) -> np.ndarray:
 	"""Extend the detected border downward so bottom-row content stays inside the warp."""
 	rect = _order_points(points).copy()
 	top_left, top_right, bottom_right, bottom_left = rect
