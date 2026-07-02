@@ -9,6 +9,8 @@ _SIMULATED_COMMANDS = collections.deque(
     [
         # MENU TRAVERSAL VERIFICATION (PASS)
         # "RIGHT", "RUN_OCR", "SELECT", "RUN_OCR", "BACK", "BACK", "MENU", "SELECT", "RUN_OCR", "RIGHT", "RUN_OCR", "MENU", "SELECT", "RUN_OCR",
+        # CHECK OUT ACTIVE FAULTS LIST
+        "RIGHT", "SELECT", "RUN_OCR",
         # HEAT_PUMP
         "BACK", "MENU", "SELECT", "LEFT", "LEFT", "SELECT", "DOWN", "DOWN", "SELECT", "RIGHT", "RIGHT", "RUN_OCR",
         # HYBRID_STANDARD
