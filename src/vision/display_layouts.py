@@ -5,7 +5,7 @@ Team 14 - Senior Project
 Defines the ordered menu tree and OCR regions of interest (ROIs) 
 for the LCD UI.
 """
-
+# commit test
 from __future__ import annotations
 
 from dataclasses import dataclass
