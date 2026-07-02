@@ -549,7 +549,7 @@ def save_roi_ocr_overlay(
 	if display_contour is None:
 		overlay = _draw_roi_overlay(frame, menu_fields, use_fallback_rois=True)
 	else:
-		source_points = display_contour.reshape(4, 2)
+		source_points = _order_points(display_contour.reshape(4, 2))
 		width_a = np.linalg.norm(source_points[2] - source_points[3])
 		width_b = np.linalg.norm(source_points[1] - source_points[0])
 		warped_width = max(int(width_a), int(width_b))
