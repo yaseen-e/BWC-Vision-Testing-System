@@ -58,7 +58,7 @@ TEMPERATURE_RANGE_F = (80, 220)
 
 MODE_FIELD = OCRField(
 	name="mode",
-	ideal=ROIBox(top=0.03, bottom=0.14, left=0.10, right=0.88),
+	ideal=ROIBox(top=0.03, bottom=0.14, left=0.20, right=0.70),
 	fallback=ROIBox(top=0.00, bottom=0.18, left=0.18, right=0.82),
 	tesseract_config="--psm 7 -c tessedit_char_whitelist= ABCDEFGHIJKLMNOPQRSTUVWXYZ:",
 )
@@ -91,20 +91,6 @@ DASHBOARD_INFO_LINE_3 = OCRField(
 	tesseract_config="--psm 7 -c tessedit_char_whitelist= abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.",
 )
 
-TIME_FIELD = OCRField(
-	name="time_field",
-	ideal=ROIBox(top=0.91, bottom=1.00, left=0.83, right=1.00),
-	fallback=ROIBox(top=0.82, bottom=1.00, left=0.68, right=1.00),
-	tesseract_config="--psm 7 -c tessedit_char_whitelist= 0123456789AMP:",
-)
-
-DATE_FIELD = OCRField(
-	name="date_field",
-	ideal=ROIBox(top=0.91, bottom=1.00, left=0.65, right=0.82),
-	fallback=ROIBox(top=0.82, bottom=1.00, left=0.63, right=0.82),
-	tesseract_config="--psm 7 -c tessedit_char_whitelist=0123456789/",
-)
-
 ACTIVE_FAULT_TEXT = OCRField(
 	name="active_fault_text",
 	ideal=ROIBox(top=0.20, bottom=0.80, left=0.10, right=0.90),
@@ -119,16 +105,30 @@ SCHEDULE_INFO_TEXT = OCRField(
 	tesseract_config="--psm 6",
 )
 
+TIME_FIELD = OCRField(
+	name="time_field",
+	ideal=ROIBox(top=0.91, bottom=1.00, left=0.83, right=1.00),
+	fallback=ROIBox(top=0.82, bottom=1.00, left=0.68, right=1.00),
+	tesseract_config="--psm 7 -c tessedit_char_whitelist= 0123456789AMP:",
+)
+
+DATE_FIELD = OCRField(
+	name="date_field",
+	ideal=ROIBox(top=0.91, bottom=1.00, left=0.64, right=0.82),
+	fallback=ROIBox(top=0.82, bottom=1.00, left=0.63, right=0.82),
+	tesseract_config="--psm 7 -c tessedit_char_whitelist=0123456789/",
+)
+
 WIFI_ICON_FIELD = OCRField(
 	name="wifi_icon",
-	ideal=ROIBox(top=0.91, bottom=1.00, left=0.58, right=0.64),
+	ideal=ROIBox(top=0.91, bottom=1.00, left=0.57, right=0.63),
 	fallback=ROIBox(top=0.82, bottom=1.00, left=0.48, right=0.68),
 	tesseract_config="",
 )
 
 CALENDAR_ICON_FIELD = OCRField(
 	name="calendar_icon",
-	ideal=ROIBox(top=0.91, bottom=1.00, left=0.50, right=0.56),
+	ideal=ROIBox(top=0.91, bottom=1.00, left=0.49, right=0.55),
 	fallback=ROIBox(top=0.82, bottom=1.00, left=0.34, right=0.56),
 	tesseract_config="",
 )
