@@ -92,24 +92,6 @@ def _warp_image(image: np.ndarray, points: np.ndarray) -> np.ndarray:
 	transform = cv2.getPerspectiveTransform(rect, dst)
 	return cv2.warpPerspective(image, transform, (max_width, max_height))
 
-
-def _expand_display_bottom(points: np.ndarray, extra_height_ratio: float = 0) -> np.ndarray:
-	"""Extend the detected border downward so bottom-row content stays inside the warp."""
-	rect = _order_points(points).copy()
-	top_left, top_right, bottom_right, bottom_left = rect
-	display_height = max(
-		np.linalg.norm(top_right - bottom_right),
-		np.linalg.norm(top_left - bottom_left),
-	)
-	if display_height <= 0:
-		return rect
-
-	extension = max(1, int(round(display_height * extra_height_ratio)))
-	rect[2][1] += extension
-	rect[3][1] += extension
-	return rect
-
-
 def _build_display_mask(frame: np.ndarray) -> np.ndarray:
 	"""Keep the LCD body and near-edge signal while suppressing bezel noise."""
 	_require_cv2()
@@ -567,7 +549,7 @@ def save_roi_ocr_overlay(
 	if display_contour is None:
 		overlay = _draw_roi_overlay(frame, menu_fields, use_fallback_rois=True)
 	else:
-		source_points = _expand_display_bottom(display_contour.reshape(4, 2))
+		source_points = display_contour.reshape(4, 2)
 		width_a = np.linalg.norm(source_points[2] - source_points[3])
 		width_b = np.linalg.norm(source_points[1] - source_points[0])
 		warped_width = max(int(width_a), int(width_b))
@@ -631,7 +613,7 @@ def read_display(
 			fields=fields_result,
 		)
 
-	warped = _warp_image(frame, _expand_display_bottom(display_contour.reshape(4, 2)))
+	warped = _warp_image(frame, display_contour.reshape(4, 2))
 	binary = _prepare_ocr_binary(warped)
 
 	for field in menu_fields:
@@ -741,4 +723,4 @@ def get_warped_display(frame: np.ndarray) -> Optional[np.ndarray]:
 	if display_contour is None:
 		return None
 
-	return _warp_image(frame, _expand_display_bottom(display_contour.reshape(4, 2)))
+	return _warp_image(frame, display_contour.reshape(4, 2))
