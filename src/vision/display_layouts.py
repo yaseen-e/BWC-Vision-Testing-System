@@ -100,7 +100,7 @@ TIME_FIELD = OCRField(
 
 DATE_FIELD = OCRField(
 	name="date_field",
-	ideal=ROIBox(top=0.91, bottom=1.00, left=0.63, right=0.82),
+	ideal=ROIBox(top=0.91, bottom=1.00, left=0.65, right=0.82),
 	fallback=ROIBox(top=0.82, bottom=1.00, left=0.63, right=0.82),
 	tesseract_config="--psm 7 -c tessedit_char_whitelist=0123456789/",
 )
@@ -121,14 +121,14 @@ SCHEDULE_INFO_TEXT = OCRField(
 
 WIFI_ICON_FIELD = OCRField(
 	name="wifi_icon",
-	ideal=ROIBox(top=0.91, bottom=1.00, left=0.55, right=0.62),
+	ideal=ROIBox(top=0.91, bottom=1.00, left=0.58, right=0.64),
 	fallback=ROIBox(top=0.82, bottom=1.00, left=0.48, right=0.68),
 	tesseract_config="",
 )
 
 CALENDAR_ICON_FIELD = OCRField(
 	name="calendar_icon",
-	ideal=ROIBox(top=0.91, bottom=1.00, left=0.48, right=0.55),
+	ideal=ROIBox(top=0.91, bottom=1.00, left=0.50, right=0.56),
 	fallback=ROIBox(top=0.82, bottom=1.00, left=0.34, right=0.56),
 	tesseract_config="",
 )
