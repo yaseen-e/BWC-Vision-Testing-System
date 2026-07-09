@@ -104,11 +104,13 @@ def _build_display_mask(frame: np.ndarray) -> np.ndarray:
 	hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
 	# A broad blue/cyan hue range captures the emissive backlight while staying
-	# tolerant to varying brightness and white balance.
-	blue_mask = cv2.inRange(hsv, np.array([80, 25, 35]), np.array([145, 255, 255]))
+	# tolerant to varying brightness and white balance. Keep it fairly tight so it
+	# does not bloom over the bezel.
+	blue_mask = cv2.inRange(hsv, np.array([80, 35, 35]), np.array([140, 255, 255]))
 
 	# Brightness segmentation helps pick up the glowing display body and the white
-	# text/icons in the status bar even when the backlight is dim.
+	# text/icons in the status bar even when the backlight is dim, but only where
+	# the blue/cyan anchor is already present.
 	_, otsu_mask = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 	adaptive_mask = cv2.adaptiveThreshold(
 		gray,
@@ -120,28 +122,28 @@ def _build_display_mask(frame: np.ndarray) -> np.ndarray:
 	)
 	bright_mask = cv2.bitwise_or(otsu_mask, adaptive_mask)
 
-	# Expand the blue/cyan region so nearby bright pixels (status bar text/icons)
-	# bridge into the main display body and form a single rectangle.
+	# Expand the blue/cyan region only a little so nearby bright pixels (status bar
+	# text/icons) bridge into the main display body without consuming the whole bezel.
 	anchor_kernel = cv2.getStructuringElement(
 		cv2.MORPH_RECT,
-		(max(25, frame.shape[1] // 12), max(18, frame.shape[0] // 12)),
+		(max(12, frame.shape[1] // 24), max(8, frame.shape[0] // 20)),
 	)
 	authority_mask = cv2.dilate(blue_mask, anchor_kernel, iterations=1)
 	bright_near_anchor = cv2.bitwise_and(bright_mask, authority_mask)
 
 	mask = cv2.bitwise_or(blue_mask, bright_near_anchor)
 
-	# Close the gaps between the display body and the bottom status bar so that the
-	# resulting contour stays as a single rectangular display region.
+	# Close the gaps between the display body and the bottom status bar, but avoid
+	# merging with the surrounding frame.
 	close_kernel = cv2.getStructuringElement(
 		cv2.MORPH_RECT,
-		(max(30, frame.shape[1] // 8), max(18, frame.shape[0] // 10)),
+		(max(14, frame.shape[1] // 20), max(8, frame.shape[0] // 16)),
 	)
-	mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, close_kernel)
+	mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, close_kernel, iterations=1)
 
 	# Remove small specks of noise from the bezel and keep only the dominant shell.
-	open_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-	mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, open_kernel)
+	open_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+	mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, open_kernel, iterations=1)
 	return mask
 
 
@@ -160,6 +162,7 @@ def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np
 	best_score = float("inf")
 	target_ratio = DISPLAY_ASPECT_RATIO
 	ratio_tolerance = 0.35
+	margin = max(8, int(min(mask.shape[0], mask.shape[1]) * 0.08))
 
 	def _contour_box(candidate: np.ndarray) -> np.ndarray:
 		rotated = cv2.minAreaRect(candidate)
@@ -168,7 +171,7 @@ def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np
 
 	for contour in contours:
 		area = cv2.contourArea(contour)
-		if area < min_area:
+		if area < min_area or area > frame_area * 0.75:
 			continue
 
 		hull = cv2.convexHull(contour)
@@ -197,6 +200,20 @@ def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np
 		if ratio_error > ratio_tolerance:
 			continue
 
+		box = _contour_box(candidate)
+		x_vals = box[:, 0]
+		y_vals = box[:, 1]
+		if x_vals.min() < margin or x_vals.max() > mask.shape[1] - margin:
+			continue
+		if y_vals.min() < margin or y_vals.max() > mask.shape[0] - margin:
+			continue
+		center_x = float(x_vals.mean())
+		center_y = float(y_vals.mean())
+		if center_x < 0.12 * mask.shape[1] or center_x > 0.88 * mask.shape[1]:
+			continue
+		if center_y < 0.12 * mask.shape[0] or center_y > 0.88 * mask.shape[0]:
+			continue
+
 		score = ratio_error - (area / 1_000_000.0) - (solidity * 0.25)
 		if score < best_score:
 			best_contour = _contour_box(candidate)
@@ -205,10 +222,9 @@ def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np
 	if best_contour is not None:
 		return best_contour
 
-	# Fallback: use the largest solid contour when the strict filter misses.
-	largest_contour = contours[0]
-	if cv2.contourArea(largest_contour) >= min_area:
-		return _contour_box(cv2.convexHull(largest_contour))
+	# Fallback: do not accept border-hugging blobs as a display. When the strict
+	# filter misses, fail closed so OCR can fall back to the full-frame ROI instead
+	# of reporting a false positive display.
 	return None
 
 
@@ -710,4 +726,3 @@ def get_warped_display(frame: np.ndarray) -> Optional[np.ndarray]:
 		return None
 
 	return _warp_image(frame, display_contour.reshape(4, 2))
-	
