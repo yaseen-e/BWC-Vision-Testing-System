@@ -32,6 +32,7 @@ from .display_layouts import DISPLAY_ASPECT_RATIO, OCRField, TEMPERATURE_RANGE_F
 # Camera object is created lazily so non-Pi environments still run.
 _CAMERA: Optional[Any] = None
 DEBUG_OCR_CANDIDATES = False
+_TESSERACT_WARNED = False
 
 
 @dataclass(frozen=True)
@@ -431,7 +432,15 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 	candidate_debug: list[tuple[float, str, Any]] = []
 
 	for variant in variants:
-		raw = _clean_text(pytesseract.image_to_string(variant, config=field.tesseract_config))
+		# Guard Tesseract runtime errors so the caller can continue.
+		global _TESSERACT_WARNED
+		try:
+			raw = _clean_text(pytesseract.image_to_string(variant, config=field.tesseract_config))
+		except Exception as exc:  # pragma: no cover - environment dependent
+			if not _TESSERACT_WARNED:
+				print(f"[WARNING] Tesseract OCR failed: {exc}")
+				_TESSERACT_WARNED = True
+			raw = ""
 		value = _parse_field_value(field_name, raw)
 		score = _score_field_candidate(field_name, raw, value)
 
@@ -629,6 +638,16 @@ def read_display(
 	fields_result: dict[str, dict[str, Any]] = {}
 
 	if display_contour is None:
+		if DEBUG_OCR_CANDIDATES:
+			# dump mask to debug folder for inspection
+			try:
+				from datetime import datetime
+				p = Path.cwd() / "data" / "captures" / "debug"
+				p.mkdir(parents=True, exist_ok=True)
+				ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+				cv2.imwrite(str(p / f"mask_{ts}.png"), mask)
+			except Exception:
+				pass
 		for field in menu_fields:
 			raw, val = _ocr_field(field, _extract_fallback_variants(frame, field))
 			fields_result[field.name] = {"raw": raw, "value": val}
