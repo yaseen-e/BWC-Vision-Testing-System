@@ -103,14 +103,14 @@ def _build_display_mask(frame: np.ndarray) -> np.ndarray:
 	gray = cv2.GaussianBlur(gray, (5, 5), 0)
 	hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-	# A broad blue/cyan hue range captures the emissive backlight while staying
-	# tolerant to varying brightness and white balance. Keep it fairly tight so it
-	# does not bloom over the bezel.
-	blue_mask = cv2.inRange(hsv, np.array([80, 35, 35]), np.array([140, 255, 255]))
+	# UPDATED: The display in the attached images is distinctly orange/amber.
+	# OpenCV Hue range is 0-179. We use a broad 0-35 range to safely catch the 
+	# emissive red/orange/amber backlight while ignoring the dark bezels.
+	orange_mask = cv2.inRange(hsv, np.array([0, 40, 40]), np.array([35, 255, 255]))
 
 	# Brightness segmentation helps pick up the glowing display body and the white
 	# text/icons in the status bar even when the backlight is dim, but only where
-	# the blue/cyan anchor is already present.
+	# the orange anchor is already present.
 	_, otsu_mask = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 	adaptive_mask = cv2.adaptiveThreshold(
 		gray,
@@ -122,16 +122,16 @@ def _build_display_mask(frame: np.ndarray) -> np.ndarray:
 	)
 	bright_mask = cv2.bitwise_or(otsu_mask, adaptive_mask)
 
-	# Expand the blue/cyan region only a little so nearby bright pixels (status bar
+	# Expand the orange region only a little so nearby bright pixels (status bar
 	# text/icons) bridge into the main display body without consuming the whole bezel.
 	anchor_kernel = cv2.getStructuringElement(
 		cv2.MORPH_RECT,
 		(max(12, frame.shape[1] // 24), max(8, frame.shape[0] // 20)),
 	)
-	authority_mask = cv2.dilate(blue_mask, anchor_kernel, iterations=1)
+	authority_mask = cv2.dilate(orange_mask, anchor_kernel, iterations=1)
 	bright_near_anchor = cv2.bitwise_and(bright_mask, authority_mask)
 
-	mask = cv2.bitwise_or(blue_mask, bright_near_anchor)
+	mask = cv2.bitwise_or(orange_mask, bright_near_anchor)
 
 	# Close the gaps between the display body and the bottom status bar, but avoid
 	# merging with the surrounding frame.
@@ -155,14 +155,13 @@ def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np
 		return None
 
 	frame_area = max(1, mask.shape[0] * mask.shape[1])
-	min_area = max(min_area, int(frame_area * 0.06))
+	min_area = max(min_area, int(frame_area * 0.05))
 	contours = sorted(contours, key=cv2.contourArea, reverse=True)
 
 	best_contour: Optional[np.ndarray] = None
 	best_score = float("inf")
 	target_ratio = DISPLAY_ASPECT_RATIO
-	ratio_tolerance = 0.35
-	frame_w, frame_h = mask.shape[1], mask.shape[0]
+	ratio_tolerance = 0.45 # UPDATED: Relaxed to allow for closer, skewed camera angles
 
 	def _contour_box(candidate: np.ndarray) -> np.ndarray:
 		rotated = cv2.minAreaRect(candidate)
@@ -171,7 +170,10 @@ def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np
 
 	for contour in contours:
 		area = cv2.contourArea(contour)
-		if area < min_area or area > frame_area * 0.75:
+		
+		# UPDATED: Area upper bound raised from 75% to 95% because attached images 
+		# show the screen taking up a massive portion of the cropped frame.
+		if area < min_area or area > frame_area * 0.95:
 			continue
 
 		hull = cv2.convexHull(contour)
@@ -180,7 +182,7 @@ def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np
 			continue
 
 		solidity = area / hull_area
-		if solidity < 0.70:
+		if solidity < 0.65: # UPDATED: Relaxed from 0.70 to account for screen glare slicing boundaries
 			continue
 
 		perimeter = cv2.arcLength(hull, True)
@@ -203,23 +205,17 @@ def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np
 		box = _contour_box(candidate)
 		x_vals = box[:, 0]
 		y_vals = box[:, 1]
-		margin_x = max(8, int(frame_w * 0.03))
-		margin_y = max(8, int(frame_h * 0.03))
-		if x_vals.min() < -margin_x or x_vals.max() > frame_w + margin_x:
-			continue
-		if y_vals.min() < -margin_y or y_vals.max() > frame_h + margin_y:
-			continue
-		# Reject contours that span almost the whole frame, but allow display boxes
-		# that sit flush to an edge (e.g. the Pi capture uses the left edge).
-		if (x_vals.min() <= 2 and x_vals.max() >= frame_w - 2) or (y_vals.min() <= 2 and y_vals.max() >= frame_h - 2):
-			continue
-		# Allow left-edge or right-edge displays, but still prefer candidates away from
-		# the very center of the frame where bezel glare is more likely to dominate.
+		frame_w, frame_h = mask.shape[1], mask.shape[0]
+
+		# UPDATED: Removed strict off-frame margin checks and edge-touching rejections.
+		# When the camera is zoomed heavily on the display, bounding boxes often 
+		# span edge-to-edge or project slightly out of frame during rotation calculation.
+		
 		center_x = float(x_vals.mean())
 		center_y = float(y_vals.mean())
-		if center_x < 0.02 * frame_w or center_x > 0.98 * frame_w:
+		if center_x < 0.01 * frame_w or center_x > 0.99 * frame_w:
 			continue
-		if center_y < 0.02 * frame_h or center_y > 0.98 * frame_h:
+		if center_y < 0.01 * frame_h or center_y > 0.99 * frame_h:
 			continue
 
 		score = ratio_error - (area / 1_000_000.0) - (solidity * 0.25)
@@ -230,9 +226,6 @@ def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np
 	if best_contour is not None:
 		return best_contour
 
-	# Fallback: do not accept border-hugging blobs as a display. When the strict
-	# filter misses, fail closed so OCR can fall back to the full-frame ROI instead
-	# of reporting a false positive display.
 	return None
 
 
