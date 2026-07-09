@@ -47,25 +47,10 @@ def save_capture_frame(capture_dir: Path, frame: np.ndarray, capture_id: Optiona
     capture_dir.mkdir(parents=True, exist_ok=True)
     file_stem = _safe_capture_stem(capture_id)
     output_path = capture_dir / f"{file_stem}.jpg"
-    try:
-        ok = cv2.imwrite(str(output_path), frame)
-        if ok:
-            return output_path
-    except Exception as exc:  # pragma: no cover - OS dependent
-        print(f"[ERROR] cv2.imwrite failed for {output_path}: {exc}")
+    if not cv2.imwrite(str(output_path), frame):
+        return None
 
-    # Fallback: try saving with PIL in case OpenCV's writer is not available
-    try:
-        from PIL import Image
-
-        # OpenCV uses BGR; PIL expects RGB
-        img = Image.fromarray(frame[:, :, ::-1])
-        img.save(str(output_path), format="JPEG")
-        return output_path
-    except Exception as exc:  # pragma: no cover - OS dependent
-        print(f"[ERROR] PIL fallback save failed for {output_path}: {exc}")
-
-    return None
+    return output_path
 
 
 def cleanup_captures(
