@@ -162,7 +162,7 @@ def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np
 	best_score = float("inf")
 	target_ratio = DISPLAY_ASPECT_RATIO
 	ratio_tolerance = 0.35
-	margin = max(8, int(min(mask.shape[0], mask.shape[1]) * 0.08))
+	frame_w, frame_h = mask.shape[1], mask.shape[0]
 
 	def _contour_box(candidate: np.ndarray) -> np.ndarray:
 		rotated = cv2.minAreaRect(candidate)
@@ -203,15 +203,23 @@ def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np
 		box = _contour_box(candidate)
 		x_vals = box[:, 0]
 		y_vals = box[:, 1]
-		if x_vals.min() < margin or x_vals.max() > mask.shape[1] - margin:
+		margin_x = max(8, int(frame_w * 0.03))
+		margin_y = max(8, int(frame_h * 0.03))
+		if x_vals.min() < -margin_x or x_vals.max() > frame_w + margin_x:
 			continue
-		if y_vals.min() < margin or y_vals.max() > mask.shape[0] - margin:
+		if y_vals.min() < -margin_y or y_vals.max() > frame_h + margin_y:
 			continue
+		# Reject contours that span almost the whole frame, but allow display boxes
+		# that sit flush to an edge (e.g. the Pi capture uses the left edge).
+		if (x_vals.min() <= 2 and x_vals.max() >= frame_w - 2) or (y_vals.min() <= 2 and y_vals.max() >= frame_h - 2):
+			continue
+		# Allow left-edge or right-edge displays, but still prefer candidates away from
+		# the very center of the frame where bezel glare is more likely to dominate.
 		center_x = float(x_vals.mean())
 		center_y = float(y_vals.mean())
-		if center_x < 0.12 * mask.shape[1] or center_x > 0.88 * mask.shape[1]:
+		if center_x < 0.02 * frame_w or center_x > 0.98 * frame_w:
 			continue
-		if center_y < 0.12 * mask.shape[0] or center_y > 0.88 * mask.shape[0]:
+		if center_y < 0.02 * frame_h or center_y > 0.98 * frame_h:
 			continue
 
 		score = ratio_error - (area / 1_000_000.0) - (solidity * 0.25)
