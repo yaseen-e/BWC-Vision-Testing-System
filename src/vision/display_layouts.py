@@ -148,7 +148,7 @@ STATUS_BAR = tuple((
 ))
 
 HOME_MENU = ContextNode(
-	key="home_screen",
+	key="homescreen",
 	label="Home Screen",
 	fields=(
 		MODE_FIELD,
