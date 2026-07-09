@@ -137,11 +137,8 @@ def _build_display_mask(frame: np.ndarray) -> np.ndarray:
 	# Combine luminance-derived mask and structural fills
 	mask = cv2.bitwise_or(bright_mask, filled)
 
-	# Include blue/cyan HSV anchor only when it contributes meaningfully
-	hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-	blue_mask = cv2.inRange(hsv, np.array([80, 25, 35]), np.array([145, 255, 255]))
-	if cv2.countNonZero(blue_mask) > (h * w) * 0.01:
-		mask = cv2.bitwise_or(mask, blue_mask)
+	# Do not rely on a hard-coded color anchor (blue/orange); the luminance+
+	# structural path is sufficient and more robust to white balance shifts.
 
 	# Close gaps (important to fuse status bar icons into the main body)
 	close_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(25, w // 12), max(15, h // 12)))
@@ -161,6 +158,17 @@ def _build_display_mask(frame: np.ndarray) -> np.ndarray:
 
 	if cv2.countNonZero(final) == 0:
 		# Fallback to the looser mask if nothing passed the size filter
+		final = mask
+
+	# Avoid selecting the absolute image border as the display; require a small
+	# inner margin so reflections or full-frame thresholding don't become the mask.
+	margin = max(4, int(min(h, w) * 0.03))
+	interior = np.zeros_like(final)
+	cv2.rectangle(interior, (margin, margin), (w - margin - 1, h - margin - 1), 255, thickness=cv2.FILLED)
+	final = cv2.bitwise_and(final, interior)
+
+	if cv2.countNonZero(final) == 0:
+		# If interior cropping removed everything, fall back to the previous final
 		final = mask
 
 	return final
