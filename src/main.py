@@ -22,7 +22,7 @@ from src.network import terminal_control_temp
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-CAPTURE_DIR = PROJECT_ROOT / "data" / "captures"
+CAPTURE_DIR = Path.home() / "data" / "captures"
 CLEANUP_RETENTION_DAYS = 14
 
 
@@ -116,6 +116,7 @@ def main():
     
     print("--- Starting BWC Water Heater Vision Testing System ---")
     print(f"[INFO] Test report CSV: {report_path}")
+    print(f"[INFO] Capture directory: {CAPTURE_DIR}")
     print(f"[INFO] Initial menu context: {current_menu.label}")
 
     try:

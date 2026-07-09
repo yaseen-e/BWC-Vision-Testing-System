@@ -613,6 +613,9 @@ def save_roi_ocr_overlay(
 	if not cv2.imwrite(str(output_path), overlay):
 		return None
 
+	if DEBUG_OCR_CANDIDATES:
+		print(f"[DEBUG] Saved ROI overlay to {output_path}")
+
 	return output_path
 
 
@@ -639,10 +642,10 @@ def read_display(
 
 	if display_contour is None:
 		if DEBUG_OCR_CANDIDATES:
-			# dump mask to debug folder for inspection
+			# dump mask to debug folder for inspection under the home capture directory
 			try:
 				from datetime import datetime
-				p = Path.cwd() / "data" / "captures" / "debug"
+				p = Path.home() / "data" / "captures" / "debug"
 				p.mkdir(parents=True, exist_ok=True)
 				ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
 				cv2.imwrite(str(p / f"mask_{ts}.png"), mask)
