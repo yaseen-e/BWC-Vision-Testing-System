@@ -94,77 +94,99 @@ def _warp_image(image: np.ndarray, points: np.ndarray) -> np.ndarray:
 	return cv2.warpPerspective(image, transform, (max_width, max_height))
 
 def _build_display_mask(frame: np.ndarray) -> np.ndarray:
-	"""Build a single mask for the emissive display window across both layout states."""
+	"""Build a single binary mask for the display window that is robust
+	across both layout states (with/without bottom status bar) and
+	color/white-balance variations.
+
+	Strategy:
+	- Use luminance (grayscale + Otsu/adaptive) and edge grouping to find
+	  the glowing region of the UI (works whether the screen looks blue or
+	  orange to the camera).
+	- Optionally include a blue/cyan HSV mask when it provides clear signal.
+	- Morphological closing fuses the bottom status bar (icons/text) to the
+	  main display body so the contour becomes a single rectangle.
+	"""
 	_require_cv2()
 	if frame is None or frame.size == 0:
 		raise ValueError("frame must be a non-empty image")
 
+	h, w = frame.shape[:2]
+
+	# Grayscale luminance path (blur -> Otsu + adaptive) to capture glowing UI
 	gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-	gray = cv2.GaussianBlur(gray, (5, 5), 0)
-	hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+	blur = cv2.GaussianBlur(gray, (5, 5), 0)
+	_, otsu_mask = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-	# A broad blue/cyan hue range captures the emissive backlight while staying
-	# tolerant to varying brightness and white balance.
-	blue_mask = cv2.inRange(hsv, np.array([80, 25, 35]), np.array([145, 255, 255]))
-
-	# Brightness segmentation helps pick up the glowing display body and the white
-	# text/icons in the status bar even when the backlight is dim.
-	_, otsu_mask = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-	adaptive_mask = cv2.adaptiveThreshold(
-		gray,
-		255,
-		cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-		cv2.THRESH_BINARY,
-		31,
-		10,
-	)
+	# Adaptive threshold helps when illumination is non-uniform
+	adaptive_mask = cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+		cv2.THRESH_BINARY, 31, 10)
 	bright_mask = cv2.bitwise_or(otsu_mask, adaptive_mask)
 
-	# Expand the blue/cyan region so nearby bright pixels (status bar text/icons)
-	# bridge into the main display body and form a single rectangle.
-	anchor_kernel = cv2.getStructuringElement(
-		cv2.MORPH_RECT,
-		(max(25, frame.shape[1] // 12), max(18, frame.shape[0] // 12)),
-	)
-	authority_mask = cv2.dilate(blue_mask, anchor_kernel, iterations=1)
-	bright_near_anchor = cv2.bitwise_and(bright_mask, authority_mask)
+	# Edge-based structural mask to get the strong rectangular boundary
+	edges = cv2.Canny(blur, 50, 150)
+	edges = cv2.dilate(edges, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)), iterations=2)
 
-	mask = cv2.bitwise_or(blue_mask, bright_near_anchor)
+	# Fill edge contours to produce solid regions
+	filled = np.zeros((h, w), dtype=np.uint8)
+	contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+	for c in contours:
+		if cv2.contourArea(c) < (h * w) * 0.002:
+			continue
+		cv2.drawContours(filled, [c], -1, 255, thickness=cv2.FILLED)
 
-	# Close the gaps between the display body and the bottom status bar so that the
-	# resulting contour stays as a single rectangular display region.
-	close_kernel = cv2.getStructuringElement(
-		cv2.MORPH_RECT,
-		(max(30, frame.shape[1] // 8), max(18, frame.shape[0] // 10)),
-	)
-	mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, close_kernel)
+	# Combine luminance-derived mask and structural fills
+	mask = cv2.bitwise_or(bright_mask, filled)
 
-	# Remove small specks of noise from the bezel and keep only the dominant shell.
-	open_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-	mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, open_kernel)
-	return mask
+	# Include blue/cyan HSV anchor only when it contributes meaningfully
+	hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+	blue_mask = cv2.inRange(hsv, np.array([80, 25, 35]), np.array([145, 255, 255]))
+	if cv2.countNonZero(blue_mask) > (h * w) * 0.01:
+		mask = cv2.bitwise_or(mask, blue_mask)
+
+	# Close gaps (important to fuse status bar icons into the main body)
+	close_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(25, w // 12), max(15, h // 12)))
+	mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, close_kernel, iterations=2)
+
+	# Remove small noise
+	mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)), iterations=1)
+
+	# Keep only dominant filled regions (drop tiny spec fragments on bezel)
+	final = np.zeros_like(mask)
+	contours, _ = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+	for c in contours:
+		area = cv2.contourArea(c)
+		if area < (h * w) * 0.01:
+			continue
+		cv2.drawContours(final, [c], -1, 255, thickness=cv2.FILLED)
+
+	if cv2.countNonZero(final) == 0:
+		# Fallback to the looser mask if nothing passed the size filter
+		final = mask
+
+	return final
+
 
 
 def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np.ndarray]:
-	"""Find the display rectangle by preferring large, solid, nearly-rectangular contours."""
+	"""Detect and return the display rectangle (4x2 float32 points).
+
+	The routine prefers large, high-solidity contours and tolerates both
+	color and illumination variations. It attempts to return a polygon with
+	4 corners (approximation) and falls back to the min-area bounding box.
+	"""
 	_require_cv2()
 	contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 	if not contours:
 		return None
 
-	frame_area = max(1, mask.shape[0] * mask.shape[1])
-	min_area = max(min_area, int(frame_area * 0.06))
+	h, w = mask.shape[:2]
+	frame_area = max(1, h * w)
+	min_area = max(min_area, int(frame_area * 0.04))
+
 	contours = sorted(contours, key=cv2.contourArea, reverse=True)
 
-	best_contour: Optional[np.ndarray] = None
+	best_candidate: Optional[np.ndarray] = None
 	best_score = float("inf")
-	target_ratio = DISPLAY_ASPECT_RATIO
-	ratio_tolerance = 0.35
-
-	def _contour_box(candidate: np.ndarray) -> np.ndarray:
-		rotated = cv2.minAreaRect(candidate)
-		points = cv2.boxPoints(rotated)
-		return points.astype("float32")
 
 	for contour in contours:
 		area = cv2.contourArea(contour)
@@ -176,40 +198,50 @@ def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np
 		if hull_area <= 0:
 			continue
 
-		solidity = area / hull_area
-		if solidity < 0.70:
+		solidity = float(area) / float(hull_area)
+		# allow somewhat lower solidity for real-world scenes
+		if solidity < 0.5:
 			continue
 
 		perimeter = cv2.arcLength(hull, True)
 		approx = cv2.approxPolyDP(hull, max(4.0, 0.018 * perimeter), True)
-		candidate = approx if len(approx) in (4, 5, 6) else hull
-		if len(candidate) < 4:
-			continue
 
-		_, (width, height), _ = cv2.minAreaRect(candidate)
-		short_side = min(width, height)
-		long_side = max(width, height)
-		if short_side <= 0:
-			continue
+		# Prefer rectangular approximations
+		if len(approx) == 4:
+			box = approx.reshape(4, 2).astype("float32")
+		else:
+			# Use minAreaRect as fallback to produce a stable 4-point box
+			rect = cv2.minAreaRect(hull)
+			box = cv2.boxPoints(rect).astype("float32")
 
-		ratio = short_side / long_side
-		ratio_error = abs(ratio - target_ratio)
-		if ratio_error > ratio_tolerance:
+		# Score by area closeness and solidity (smaller is better)
+		rect_w = np.linalg.norm(box[0] - box[1])
+		rect_h = np.linalg.norm(box[1] - box[2])
+		if rect_w <= 0 or rect_h <= 0:
 			continue
+		ratio = min(rect_w, rect_h) / max(rect_w, rect_h)
 
-		score = ratio_error - (area / 1_000_000.0) - (solidity * 0.25)
+		# Penalize shapes wildly different from expected display aspect, but
+		# allow wide tolerance because camera perspective may distort it.
+		ratio_error = abs(ratio - DISPLAY_ASPECT_RATIO)
+
+		score = ratio_error - (area / float(frame_area)) - (solidity * 0.2)
 		if score < best_score:
-			best_contour = _contour_box(candidate)
 			best_score = score
+			best_candidate = box
 
-	if best_contour is not None:
-		return best_contour
+	if best_candidate is not None:
+		return best_candidate.astype("float32")
 
-	# Fallback: use the largest solid contour when the strict filter misses.
-	largest_contour = contours[0]
-	if cv2.contourArea(largest_contour) >= min_area:
-		return _contour_box(cv2.convexHull(largest_contour))
+	# Final fallback: largest contour's min-area box
+	largest = contours[0]
+	if cv2.contourArea(largest) >= min_area:
+		rect = cv2.minAreaRect(cv2.convexHull(largest))
+		box = cv2.boxPoints(rect).astype("float32")
+		return box
+
 	return None
+
 
 
 def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
