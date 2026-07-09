@@ -93,45 +93,52 @@ def _warp_image(image: np.ndarray, points: np.ndarray) -> np.ndarray:
 	return cv2.warpPerspective(image, transform, (max_width, max_height))
 
 def _build_display_mask(frame: np.ndarray) -> np.ndarray:
-	"""Keep the LCD body and near-edge signal while suppressing bezel noise."""
+	"""
+	Isolate the glowing blue/cyan display and fuse the bottom status bar elements 
+	into a single solid rectangular mask.
+	"""
 	_require_cv2()
-	hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 	gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+	hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-	# Orange LCD body.
-	lower_orange = np.array([5, 85, 60])
-	upper_orange = np.array([28, 255, 255])
-	orange_mask = cv2.inRange(hsv, lower_orange, upper_orange)
+	# 1. Primary Anchor: Isolate the main blue/cyan emissive body
+	# Broad HSV range to account for varying exposure and backlight levels
+	lower_blue = np.array([85, 40, 40])
+	upper_blue = np.array([140, 255, 255])
+	blue_mask = cv2.inRange(hsv, lower_blue, upper_blue)
 
-	# Bright pixels are useful for the illuminated border and white text, but
-	# only when they are near the orange LCD body. This prevents bezel glare
-	# from expanding the contour outward into the black frame.
-	_, bright_mask = cv2.threshold(gray, 132, 255, cv2.THRESH_BINARY)
-	bright_mask = cv2.GaussianBlur(bright_mask, (3, 3), 0)
-	edge_mask = cv2.Canny(gray, 35, 110)
-	edge_mask = cv2.dilate(edge_mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)), iterations=1)
+	# 2. Structural Brightness: Capture all glowing elements (white text, icons)
+	_, bright_mask = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
+	# 3. Anchor Expansion: Expand the blue region to overlap with the adjacent status bar
+	# This ensures we only keep bright pixels that are immediately next to the screen
 	anchor = cv2.dilate(
-		orange_mask,
-		cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (19, 19)),
+		blue_mask,
+		cv2.getStructuringElement(cv2.MORPH_RECT, (45, 45)),
 		iterations=1,
 	)
 	bright_near_anchor = cv2.bitwise_and(bright_mask, anchor)
-	edge_near_anchor = cv2.bitwise_and(edge_mask, anchor)
 
-	# Start from the orange body, then add only nearby bright/edge evidence.
-	mask = cv2.bitwise_or(orange_mask, bright_near_anchor)
-	mask = cv2.bitwise_or(mask, edge_near_anchor)
-	kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
-	kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+	# 4. Combine and Solidify
+	mask = cv2.bitwise_or(blue_mask, bright_near_anchor)
+
+	# Morphological Close: This is the critical step to fuse the white icons 
+	# inside the black status bar with the main blue display body.
+	kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (35, 35))
 	mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel_close)
+
+	# Morphological Open: Clean up small specs of noise on the matte bezel
+	kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
 	mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel_open)
-	mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)), iterations=1)
+
 	return mask
 
 
 def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np.ndarray]:
-	"""Find the 4-corner shape that best matches the LCD window geometry."""
+	"""
+	Find the 4-corner bounding box of the display using convex hulls and 
+	geometric aspect ratio filtering.
+	"""
 	_require_cv2()
 	contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 	if not contours:
@@ -140,49 +147,52 @@ def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np
 	best_contour = None
 	best_score = float("inf")
 	target_ratio = DISPLAY_ASPECT_RATIO
-	ratio_tolerance = 0.32
-	area_tolerance = 0.55
+	ratio_tolerance = 0.35
 
 	def _contour_box(candidate: np.ndarray) -> np.ndarray:
 		rotated = cv2.minAreaRect(candidate)
 		points = cv2.boxPoints(rotated)
 		return points.reshape(4, 1, 2).astype("float32")
 
+	# Sort contours by area descending to prioritize the largest valid UI block
+	contours = sorted(contours, key=cv2.contourArea, reverse=True)
+
 	for contour in contours:
 		area = cv2.contourArea(contour)
 		if area < min_area:
 			continue
 
+		# Use the convex hull to smooth out jagged edges caused by text/icons
 		hull = cv2.convexHull(contour)
-		contour_to_score = hull if cv2.contourArea(hull) >= area else contour
+		hull_area = cv2.contourArea(hull)
+		if hull_area <= 0:
+			continue
 
-		perimeter = cv2.arcLength(contour, True)
-		approx = cv2.approxPolyDP(contour_to_score, 0.018 * perimeter, True)
-		if len(approx) < 4:
-			approx = cv2.approxPolyDP(hull, 0.02 * cv2.arcLength(hull, True), True)
+		# Geometric Filtering: The fused screen should be a highly solid rectangle
+		solidity = area / hull_area
+		if solidity < 0.70:
+			continue
 
-		candidate = approx if len(approx) >= 4 else hull
+		# Evaluate the bounding geometry
+		perimeter = cv2.arcLength(hull, True)
+		approx = cv2.approxPolyDP(hull, 0.02 * perimeter, True)
+		candidate = approx if len(approx) == 4 else hull
+		
 		(x, y), (width, height), angle = cv2.minAreaRect(candidate)
 		short_side = min(width, height)
 		long_side = max(width, height)
-		if short_side <= 0 or long_side <= 0:
+		if short_side <= 0:
 			continue
 
 		ratio = short_side / long_side
 		ratio_error = abs(ratio - target_ratio)
+
 		if ratio_error > ratio_tolerance:
 			continue
 
-		box_area = width * height
-		if box_area <= 0:
-			continue
-		fill_ratio = area / box_area
-		if fill_ratio < area_tolerance:
-			continue
+		# Score: Favor large areas, high solidity, and close aspect ratios
+		score = ratio_error - (area / 1_000_000.0) - (solidity * 0.5)
 
-		# Prefer the largest stable outer shell because the LCD border is the
-		# actual warp anchor; the bright interior should not clip the edges.
-		score = ratio_error - (area / 1_000_000.0) - (fill_ratio * 0.15)
 		if score < best_score:
 			best_contour = _contour_box(candidate)
 			best_score = score
@@ -190,40 +200,13 @@ def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np
 	if best_contour is not None:
 		return best_contour
 
-	# Fallback: choose the largest quadrilateral if nothing fit the expected shape.
-	best_area = 0.0
-	for contour in contours:
-		area = cv2.contourArea(contour)
-		if area < min_area:
-			continue
+	# Fallback: If strict geometry tolerances failed (e.g., heavy glare distortion),
+	# forcefully extract the minimum bounding rectangle of the largest contour.
+	largest_contour = contours[0]
+	if cv2.contourArea(largest_contour) >= min_area:
+		return _contour_box(cv2.convexHull(largest_contour))
 
-		hull = cv2.convexHull(contour)
-		perimeter = cv2.arcLength(hull, True)
-		approx = cv2.approxPolyDP(hull, 0.02 * perimeter, True)
-		candidate = approx if len(approx) >= 4 else hull
-		if area > best_area:
-			best_contour = _contour_box(candidate)
-			best_area = area
-
-	if best_contour is not None:
-		return best_contour
-
-	# Final fallback: fit a rotated rectangle to the largest viable contour.
-	# This recovers detection when contour simplification misses exactly 4 points.
-	largest_contour = None
-	largest_area = 0.0
-	for contour in contours:
-		area = cv2.contourArea(contour)
-		if area < max(600, min_area // 3):
-			continue
-		if area > largest_area:
-			largest_area = area
-			largest_contour = cv2.convexHull(contour)
-
-	if largest_contour is not None:
-		return _contour_box(largest_contour)
-
-	return best_contour
+	return None
 
 
 def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
