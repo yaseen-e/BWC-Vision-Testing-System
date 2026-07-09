@@ -100,55 +100,43 @@ def _build_display_mask(frame: np.ndarray) -> np.ndarray:
 		raise ValueError("frame must be a non-empty image")
 
 	gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-	gray = cv2.GaussianBlur(gray, (5, 5), 0)
 	hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-	# UPDATED: The display in the attached images is distinctly orange/amber.
-	# OpenCV Hue range is 0-179. We use a broad 0-35 range to safely catch the 
-	# emissive red/orange/amber backlight while ignoring the dark bezels.
-	orange_mask = cv2.inRange(hsv, np.array([0, 40, 40]), np.array([35, 255, 255]))
+	# 1. Secure the vibrant orange/amber background.
+	# This captures the physical screen area while cleanly ignoring dark bezels.
+	orange_mask = cv2.inRange(hsv, np.array([0, 50, 50]), np.array([35, 255, 255]))
 
-	# Brightness segmentation helps pick up the glowing display body and the white
-	# text/icons in the status bar even when the backlight is dim, but only where
-	# the orange anchor is already present.
+	# 2. Extract bright pixels (which catches the white status bar icons/text).
 	_, otsu_mask = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-	adaptive_mask = cv2.adaptiveThreshold(
-		gray,
-		255,
-		cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-		cv2.THRESH_BINARY,
-		31,
-		10,
-	)
-	bright_mask = cv2.bitwise_or(otsu_mask, adaptive_mask)
+	
+	# 3. Create an "authority" region by dilating the orange mask vertically.
+	# This ensures we only accept bright pixels located directly below the main screen,
+	# rejecting any rogue glare on the side bezels.
+	authority_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, int(frame.shape[0] * 0.25)))
+	authority_mask = cv2.dilate(orange_mask, authority_kernel, iterations=1)
+	
+	bright_near_orange = cv2.bitwise_and(otsu_mask, authority_mask)
+	
+	# 4. Combine the stable orange core with the validated status bar elements.
+	mask = cv2.bitwise_or(orange_mask, bright_near_orange)
 
-	# Expand the orange region only a little so nearby bright pixels (status bar
-	# text/icons) bridge into the main display body without consuming the whole bezel.
-	anchor_kernel = cv2.getStructuringElement(
-		cv2.MORPH_RECT,
-		(max(12, frame.shape[1] // 24), max(8, frame.shape[0] // 20)),
-	)
-	authority_mask = cv2.dilate(orange_mask, anchor_kernel, iterations=1)
-	bright_near_anchor = cv2.bitwise_and(bright_mask, authority_mask)
+	# 5. Bridge gaps WITHOUT expanding outward into the bezels.
+	# A tall, narrow morphological close connects the status bar to the screen vertically.
+	vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, max(15, int(frame.shape[0] * 0.15))))
+	mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, vertical_kernel)
 
-	mask = cv2.bitwise_or(orange_mask, bright_near_anchor)
+	# A wide, short close fuses the text horizontally into a single solid block.
+	horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(15, int(frame.shape[1] * 0.10)), 5))
+	mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, horizontal_kernel)
 
-	# Close the gaps between the display body and the bottom status bar, but avoid
-	# merging with the surrounding frame.
-	close_kernel = cv2.getStructuringElement(
-		cv2.MORPH_RECT,
-		(max(14, frame.shape[1] // 20), max(8, frame.shape[0] // 16)),
-	)
-	mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, close_kernel, iterations=1)
-
-	# Remove small specks of noise from the bezel and keep only the dominant shell.
-	open_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-	mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, open_kernel, iterations=1)
+	# 6. Clean up any lingering tiny noise specs.
+	mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)))
+	
 	return mask
 
 
 def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np.ndarray]:
-	"""Find the display rectangle by preferring large, solid, nearly-rectangular contours."""
+	"""Find the display rectangle ignoring strict aspect ratio, optimized for bezel rejection."""
 	_require_cv2()
 	contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 	if not contours:
@@ -156,12 +144,9 @@ def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np
 
 	frame_area = max(1, mask.shape[0] * mask.shape[1])
 	min_area = max(min_area, int(frame_area * 0.05))
-	contours = sorted(contours, key=cv2.contourArea, reverse=True)
-
+	
 	best_contour: Optional[np.ndarray] = None
-	best_score = float("inf")
-	target_ratio = DISPLAY_ASPECT_RATIO
-	ratio_tolerance = 0.45 # UPDATED: Relaxed to allow for closer, skewed camera angles
+	best_score = float("-inf")
 
 	def _contour_box(candidate: np.ndarray) -> np.ndarray:
 		rotated = cv2.minAreaRect(candidate)
@@ -171,9 +156,8 @@ def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np
 	for contour in contours:
 		area = cv2.contourArea(contour)
 		
-		# UPDATED: Area upper bound raised from 75% to 95% because attached images 
-		# show the screen taking up a massive portion of the cropped frame.
-		if area < min_area or area > frame_area * 0.95:
+		# Allow almost the full frame to accommodate extremely tight physical crops
+		if area < min_area or area > frame_area * 0.99:
 			continue
 
 		hull = cv2.convexHull(contour)
@@ -182,51 +166,21 @@ def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np
 			continue
 
 		solidity = area / hull_area
-		if solidity < 0.65: # UPDATED: Relaxed from 0.70 to account for screen glare slicing boundaries
-			continue
-
-		perimeter = cv2.arcLength(hull, True)
-		approx = cv2.approxPolyDP(hull, max(4.0, 0.018 * perimeter), True)
-		candidate = approx if len(approx) in (4, 5, 6) else hull
-		if len(candidate) < 4:
-			continue
-
-		_, (width, height), _ = cv2.minAreaRect(candidate)
-		short_side = min(width, height)
-		long_side = max(width, height)
-		if short_side <= 0:
-			continue
-
-		ratio = short_side / long_side
-		ratio_error = abs(ratio - target_ratio)
-		if ratio_error > ratio_tolerance:
-			continue
-
-		box = _contour_box(candidate)
-		x_vals = box[:, 0]
-		y_vals = box[:, 1]
-		frame_w, frame_h = mask.shape[1], mask.shape[0]
-
-		# UPDATED: Removed strict off-frame margin checks and edge-touching rejections.
-		# When the camera is zoomed heavily on the display, bounding boxes often 
-		# span edge-to-edge or project slightly out of frame during rotation calculation.
 		
-		center_x = float(x_vals.mean())
-		center_y = float(y_vals.mean())
-		if center_x < 0.01 * frame_w or center_x > 0.99 * frame_w:
-			continue
-		if center_y < 0.01 * frame_h or center_y > 0.99 * frame_h:
+		# Relaxed to allow for empty space within the status bar
+		if solidity < 0.50: 
 			continue
 
-		score = ratio_error - (area / 1_000_000.0) - (solidity * 0.25)
-		if score < best_score:
-			best_contour = _contour_box(candidate)
+		# Score is strictly based on finding the largest valid contour.
+		# Dropping the aspect ratio constraint handles both the standard layout 
+		# (tall) and Active Faults layout (wide).
+		score = area * solidity
+		
+		if score > best_score:
 			best_score = score
+			best_contour = _contour_box(contour)
 
-	if best_contour is not None:
-		return best_contour
-
-	return None
+	return best_contour
 
 
 def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
