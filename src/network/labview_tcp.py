@@ -7,8 +7,10 @@ from xmlrpc import server
 # These mimic what LabVIEW would send over TCP/IP during automated mode testing.
 _SIMULATED_COMMANDS = collections.deque(
     [
-        # MENU TRAVERSAL VERIFICATION (PASS)
-        "RIGHT", "SELECT", "RUN_OCR", "DOWN", "RUN_OCR", "SHUTDOWN", "RUN_OCR", "RIGHT", "RUN_OCR", "MENU", "SELECT", "RUN_OCR",
+        # MENU TRAVERSAL
+        "RIGHT", "SELECT", "RUN_OCR", "DOWN", "RUN_OCR", "SHUTDOWN",
+        # LOCATION
+        "MENU", "RIGHT", "DOWN", "SELECT", "DOWN", "DOWN", "SELECT", "DOWN", "DOWN", "SELECT", "RUN_OCR", "LEFT", "RUN_OCR", "SHUTDOWN",
         # CHECK OUT ACTIVE FAULTS LIST
         "RIGHT", "SELECT", "RUN_OCR",
         # HEAT_PUMP
