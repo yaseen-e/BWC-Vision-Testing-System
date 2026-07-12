@@ -305,7 +305,7 @@ LOCATION_FIELD = OCRField(
 
 USER_SCHEDULE_NAME_1 = OCRField(
 	name="user_schedule_name_1",
-	ideal=ROIBox(top=0.28, bottom=0.36, left=0.08, right=0.67),
+	ideal=ROIBox(top=0.28, bottom=0.38, left=0.08, right=0.67),
 	fallback=ROIBox(top=0.08, bottom=0.35, left=0.05, right=0.95),
 	tesseract_config="--psm 6",
 )
