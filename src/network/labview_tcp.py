@@ -8,7 +8,7 @@ from xmlrpc import server
 _SIMULATED_COMMANDS = collections.deque(
     [
         # MENU TRAVERSAL
-        "RIGHT", "SELECT", "RUN_OCR", "DOWN", "RUN_OCR", "SHUTDOWN",
+        # "RIGHT", "SELECT", "RUN_OCR", "DOWN", "RUN_OCR", "SHUTDOWN",
         # LOCATION
         "MENU", "RIGHT", "DOWN", "SELECT", "DOWN", "DOWN", "SELECT", "DOWN", "DOWN", "SELECT", "RUN_OCR", "LEFT", "RUN_OCR", "SHUTDOWN",
         # CHECK OUT ACTIVE FAULTS LIST
