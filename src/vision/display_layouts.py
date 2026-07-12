@@ -219,14 +219,14 @@ SCHEDULE_INFO_TEXT = OCRField(
 
 ACTIVE_FAULTS_ERROR_CODE_1 = OCRField(
 	name="active_faults_error_code_1",
-	ideal=ROIBox(top=0.15, bottom=0.25, left=0.05, right=0.85),
+	ideal=ROIBox(top=0.15, bottom=0.30, left=0.05, right=0.85),
 	fallback=ROIBox(top=0.15, bottom=0.35, left=0.05, right=0.95),
 	tesseract_config="--psm 7 -c tessedit_char_whitelist=abcdefgheijklmnopqrstuvwxyz0123456789. ",
 )
 
 ACTIVE_FAULTS_ERROR_CODE_2 = OCRField(
 	name="active_faults_error_code_2",
-	ideal=ROIBox(top=0.30, bottom=0.40, left=0.05, right=0.85),
+	ideal=ROIBox(top=0.30, bottom=0.45, left=0.05, right=0.85),
 	fallback=ROIBox(top=0.15, bottom=0.35, left=0.05, right=0.95),
 	tesseract_config="--psm 7 -c tessedit_char_whitelist=abcdefgheijklmnopqrstuvwxyz0123456789. ",
 )
