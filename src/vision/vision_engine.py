@@ -663,7 +663,16 @@ def _get_camera() -> Optional[Any]:
 		config = camera.create_preview_configuration(main={"size": (1280, 720)})
 		camera.configure(config)
 		camera.start()
-		camera.set_controls({"AfMode": 2})
+		
+		# --- THE FIX ---
+		# AfMode 0: Manual Focus (Locks the lens in place so it stops hunting)
+		# LensPosition: Focus distance measured in diopters (1 / distance_in_meters).
+		# Example: 10.0 = 10cm away. 5.0 = 20cm away. 0.0 = Infinity.
+		camera.set_controls({
+			"AfMode": 0,          
+			"LensPosition": 8.5   # <-- TUNE THIS NUMBER FOR YOUR RIG'S EXACT DISTANCE
+		})
+		
 		_CAMERA = camera
 	except Exception:
 		return None
