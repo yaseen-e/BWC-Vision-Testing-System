@@ -56,6 +56,83 @@ class ContextNode:
 DISPLAY_ASPECT_RATIO = 1.75 / 2.25
 TEMPERATURE_RANGE_F = (80, 220)
 
+def iter_context_nodes(root: ContextNode) -> tuple[ContextNode, ...]:
+	"""Return nodes in pre-order traversal for deterministic iteration."""
+	nodes: list[ContextNode] = []
+
+	def _walk(node: ContextNode) -> None:
+		nodes.append(node)
+		for child in node.children:
+			_walk(child)
+
+	_walk(root)
+	return tuple(nodes)
+
+
+def find_context_node(root: ContextNode, key: str) -> Optional[ContextNode]:
+	for node in iter_context_nodes(root):
+		if node.key == key:
+			return node
+	return None
+
+
+def find_parent_context(root: ContextNode, child_key: str) -> Optional[ContextNode]:
+	def _walk(node: ContextNode, parent: Optional[ContextNode]) -> Optional[ContextNode]:
+		if node.key == child_key:
+			return parent
+		for child in node.children:
+			result = _walk(child, node)
+			if result is not None:
+				return result
+		return None
+
+	return _walk(root, None)
+
+
+def collect_field_names(root: ContextNode) -> tuple[str, ...]:
+	"""Collect unique OCR field names in tree traversal order."""
+	names: list[str] = []
+	for node in iter_context_nodes(root):
+		for field_def in node.fields:
+			if field_def.name not in names:
+				names.append(field_def.name)
+	return tuple(names)
+
+
+def apply_navigation_command(
+	root: ContextNode,
+	current_menu: ContextNode,
+	transition_buffer: tuple[str, ...],
+	command_token: str,
+) -> tuple[ContextNode, tuple[str, ...], bool]:
+	"""
+	Apply one command token to menu navigation.
+
+	Returns:
+		(new_menu, new_transition_buffer, sequence_broken)
+	"""
+	working_buffer = transition_buffer + (command_token,)
+	parent = find_parent_context(root, current_menu.key)
+
+	candidates: list[tuple[tuple[str, ...], ContextNode]] = []
+	for child in current_menu.children:
+		for route in child.route_here:
+			candidates.append((route, child))
+
+	if parent is not None:
+		for route in current_menu.return_route:
+			candidates.append((route, parent))
+
+	for route, destination in candidates:
+		if route == working_buffer:
+			return destination, (), False
+
+	for route, _ in candidates:
+		if len(working_buffer) <= len(route) and route[:len(working_buffer)] == working_buffer:
+			return current_menu, working_buffer, False
+
+	return current_menu, working_buffer, True
+
 MODE_FIELD = OCRField(
 	name="mode",
 	ideal=ROIBox(top=0.03, bottom=0.14, left=0.25, right=0.75),
@@ -171,80 +248,3 @@ HOME_MENU = ContextNode(
 		ContextNode(key="schedules", label="Schedules", route_here=(("MENU", "RIGHT", "RIGHT", "SELECT"),), return_route=(("MENU", "SELECT"),)),
 	),
 )
-
-def iter_context_nodes(root: ContextNode) -> tuple[ContextNode, ...]:
-	"""Return nodes in pre-order traversal for deterministic iteration."""
-	nodes: list[ContextNode] = []
-
-	def _walk(node: ContextNode) -> None:
-		nodes.append(node)
-		for child in node.children:
-			_walk(child)
-
-	_walk(root)
-	return tuple(nodes)
-
-
-def find_context_node(root: ContextNode, key: str) -> Optional[ContextNode]:
-	for node in iter_context_nodes(root):
-		if node.key == key:
-			return node
-	return None
-
-
-def find_parent_context(root: ContextNode, child_key: str) -> Optional[ContextNode]:
-	def _walk(node: ContextNode, parent: Optional[ContextNode]) -> Optional[ContextNode]:
-		if node.key == child_key:
-			return parent
-		for child in node.children:
-			result = _walk(child, node)
-			if result is not None:
-				return result
-		return None
-
-	return _walk(root, None)
-
-
-def collect_field_names(root: ContextNode) -> tuple[str, ...]:
-	"""Collect unique OCR field names in tree traversal order."""
-	names: list[str] = []
-	for node in iter_context_nodes(root):
-		for field_def in node.fields:
-			if field_def.name not in names:
-				names.append(field_def.name)
-	return tuple(names)
-
-
-def apply_navigation_command(
-	root: ContextNode,
-	current_menu: ContextNode,
-	transition_buffer: tuple[str, ...],
-	command_token: str,
-) -> tuple[ContextNode, tuple[str, ...], bool]:
-	"""
-	Apply one command token to menu navigation.
-
-	Returns:
-		(new_menu, new_transition_buffer, sequence_broken)
-	"""
-	working_buffer = transition_buffer + (command_token,)
-	parent = find_parent_context(root, current_menu.key)
-
-	candidates: list[tuple[tuple[str, ...], ContextNode]] = []
-	for child in current_menu.children:
-		for route in child.route_here:
-			candidates.append((route, child))
-
-	if parent is not None:
-		for route in current_menu.return_route:
-			candidates.append((route, parent))
-
-	for route, destination in candidates:
-		if route == working_buffer:
-			return destination, (), False
-
-	for route, _ in candidates:
-		if len(working_buffer) <= len(route) and route[:len(working_buffer)] == working_buffer:
-			return current_menu, working_buffer, False
-
-	return current_menu, working_buffer, True
