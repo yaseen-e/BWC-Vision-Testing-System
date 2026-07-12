@@ -254,7 +254,7 @@ ACTIVE_FAULTS_ERROR_CODE_5 = OCRField(
 
 LOCATION_FIELD = OCRField(
 	name="location_field",
-	ideal=ROIBox(top=0.40, bottom=0.55, left=0.10, right=0.90),
+	ideal=ROIBox(top=0.35, bottom=0.50, left=0.30, right=0.70),
 	fallback=ROIBox(top=0.25, bottom=0.75, left=0.05, right=0.95),
 	tesseract_config="--psm 6",
 )
