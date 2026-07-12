@@ -184,45 +184,49 @@ def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np
 
 
 def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
-	"""Convert to a high-contrast black/white image for OCR."""
+	"""Convert to grayscale, enhance edges, and scale for OCR."""
 	_require_cv2()
 	gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
 	
-	# 1. Smooth out the LCD pixel grid BEFORE resizing or thresholding.
-	# Median blur is highly effective against screen grids and Moiré patterns.
-	blurred = cv2.medianBlur(gray, 3)
+	# 1. Bilateral Filter: Melts away the LCD pixel grid noise but PRESERVES hard edges.
+	# This is much safer than Median Blur for images that are already out of focus.
+	filtered = cv2.bilateralFilter(gray, d=5, sigmaColor=50, sigmaSpace=50)
 	
-	# 2. Resize to give Tesseract higher resolution characters (target ~30px height).
-	scaled = cv2.resize(blurred, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
+	# 2. Unsharp Masking: Artificially sharpen the image to combat camera lens blur.
+	gaussian_blur = cv2.GaussianBlur(filtered, (0, 0), 2.0)
+	sharpened = cv2.addWeighted(filtered, 1.5, gaussian_blur, -0.5, 0)
 	
-	# 3. Apply Otsu's thresholding for crisp binarization.
-	_, thresh = cv2.threshold(scaled, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-	return thresh
+	# 3. Moderate Upscaling: 2.5x gives Tesseract enough pixel density without bloating.
+	scaled = cv2.resize(sharpened, None, fx=2.5, fy=2.5, interpolation=cv2.INTER_CUBIC)
+	
+	return scaled
 
 
 def _extract_warped_variants(binary: np.ndarray, field: OCRField) -> list[np.ndarray]:
-	"""Build OCR variants for any field using its ROI definitions."""
+	"""Build robust OCR variants utilizing adaptive thresholding."""
 	_require_cv2()
-	field_name = field.name
 	roi = field.ideal.crop(binary)
 	
-	# Tesseract expects dark text on a light background. 
-	# Our UI is bright text on a dark background, so we invert.
-	roi = cv2.bitwise_not(roi)
+	# Tesseract expects dark text on a light background.
+	inverted_roi = cv2.bitwise_not(roi)
 	
-	variants = [roi]
+	variants = []
 	
-	# Create morphological variants for robustness (without extreme over-scaling)
+	# Variant 1: Standard Otsu's (Works best when backlight brightness is perfectly even)
+	_, otsu = cv2.threshold(inverted_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+	variants.append(otsu)
+	
+	# Variant 2: Adaptive Thresholding (Crucial for the center-screen backlight glare)
+	# This looks at local neighborhoods of pixels rather than the whole image at once.
+	adaptive = cv2.adaptiveThreshold(
+		inverted_roi, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 15, 4
+	)
+	variants.append(adaptive)
+	
+	# Variant 3: Slight erosion on the adaptive threshold to thin out "bloated" glowing text
 	kernel_small = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-	kernel_med = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+	variants.append(cv2.erode(adaptive, kernel_small, iterations=1))
 	
-	if field_name == "temperature":
-		roi_closed = cv2.morphologyEx(roi, cv2.MORPH_CLOSE, kernel_med)
-		variants.append(roi_closed)
-		variants.append(cv2.dilate(roi, kernel_small, iterations=1))
-	else:
-		variants.append(cv2.morphologyEx(roi, cv2.MORPH_OPEN, kernel_small))
-		
 	return variants
 
 
