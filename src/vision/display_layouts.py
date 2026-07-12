@@ -410,7 +410,7 @@ HOME_MENU = ContextNode(
 								ContextNode(
 									key="user_schedule_deleted_confirmation",
 									label="User Schedule Deleted Confirmation",
-									route_here=(("DOWN*", "SELECT", "DOWN", "SELECT") + ("DOWN",) * 7 + ("SELECT", "SELECT"),),
+									route_here=(("DOWN*", "SELECT") + ("DOWN",) * 7 + ("SELECT", "SELECT"),),
 									return_route=(("BACK",),),
 									fields=(
 										USER_SCHEDULE_DELETED_TEXT,

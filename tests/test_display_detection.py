@@ -53,7 +53,7 @@ def test_apply_navigation_command_supports_optional_leading_downs_in_route():
     child = ContextNode(
         key="child",
         label="child",
-        route_here=(("DOWN*", "SELECT", "DOWN", "SELECT") + ("DOWN",) * 7 + ("SELECT", "SELECT"),),
+        route_here=(("DOWN*", "SELECT") + ("DOWN") * 7 + ("SELECT", "SELECT"),),
         children=(confirmation,),
     )
     root = ContextNode(key="root", label="root", children=(child,))
