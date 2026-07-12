@@ -283,13 +283,13 @@ HOME_MENU = ContextNode(
 			children=()),
 		)),
 		ContextNode(key="system_status_top", label="System Status 1/2", route_here=(("MENU", "DOWN", "SELECT"),), return_route=(("BACK", "BACK"),), children=(
-			ContextNode(key="system_status_bottom", label="System Status 2/2", route_here=(("DOWN",),), return_route=(("UP",),)),
+			ContextNode(key="system_status_bottom", label="System Status 2/2", route_here=(("DOWN",),), return_route=(("UP",),), ),
 		)),
 		ContextNode(key="settings", label="Settings", route_here=(("MENU", "RIGHT", "DOWN", "SELECT"), ("MENU", "DOWN", "RIGHT", "SELECT")), return_route=(("MENU",),), children=(
-			ContextNode(key="location", label="Location", route_here=(("DOWN", "DOWN", "SELECT", "DOWN", "DOWN", "SELECT"),), return_route=(("BACK", "BACK"),), children=(
+			ContextNode(key="location", label="Location", route_here=(("DOWN", "DOWN", "SELECT", "DOWN", "DOWN", "SELECT"),), return_route=(("BACK", "BACK"),), fields=(
 				LOCATION_FIELD,
 			)),
 		)),
-		ContextNode(key="schedules", label="Schedules", route_here=(("MENU", "RIGHT", "RIGHT", "SELECT"),), return_route=(("MENU", "SELECT"),)),
+		ContextNode(key="schedules", label="Schedules", route_here=(("MENU", "RIGHT", "RIGHT", "SELECT"),), return_route=(("MENU", "SELECT"),), children=()),
 	),
 )
