@@ -14,9 +14,9 @@ _SIMULATED_COMMANDS = collections.deque(
         # DELETE SCHEDULE
         "MENU", "RIGHT", "RIGHT", "SELECT",
         "SELECT", 
-        'SELECT',
+        "SELECT",
         "DOWN", "SELECT", "DOWN", "SELECT", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", 
-        "SELECT", "SELECT", "RUN_OCR",
+        "SELECT", "SELECT", "RUN_OCR", "SHUTDOWN",
 
         # CHECK OUT ACTIVE FAULTS LIST
         "RIGHT", "SELECT", "RUN_OCR",
