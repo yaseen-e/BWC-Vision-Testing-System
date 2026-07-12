@@ -312,7 +312,14 @@ USER_SCHEDULE_NAME_1 = OCRField(
 
 USER_SCHEDULE_DELETED_TEXT = OCRField(
 	name="user_schedule_deleted_text",
-	ideal=ROIBox(top=0.03, bottom=0.14, left=0.25, right=0.75),
+	ideal=ROIBox(top=0.03, bottom=0.14, left=0.23, right=0.77),
+	fallback=ROIBox(top=0.00, bottom=0.18, left=0.18, right=0.82),
+	tesseract_config="--psm 7 -c tessedit_char_whitelist= ABCDEFGHIJKLMNOPQRSTUVWXYZ:",
+)
+
+TOU_SCHEDULE_DELETED_TEXT = OCRField(
+	name="tou_schedule_deleted_text",
+	ideal=ROIBox(top=0.03, bottom=0.14, left=0.23, right=0.77),
 	fallback=ROIBox(top=0.00, bottom=0.18, left=0.18, right=0.82),
 	tesseract_config="--psm 7 -c tessedit_char_whitelist= ABCDEFGHIJKLMNOPQRSTUVWXYZ:",
 )
@@ -419,9 +426,28 @@ HOME_MENU = ContextNode(
 								),
 							),
 						),
+						ContextNode(
+							key="tou_schedules_list",
+							label="TOU Schedules List",
+							route_here=(("DOWN", "DOWN", "SELECT"),),
+							return_route=(("BACK",),),
+							fields=(),
+							children=(
+								ContextNode(
+									key="tou_schedule_deleted_confirmation",
+									label="TOU Schedule Deleted Confirmation",
+									route_here=(("DOWN*", "SELECT") + ("DOWN",) * 7 + ("SELECT", "SELECT"),),
+									return_route=(("BACK",),),
+									fields=(
+										TOU_SCHEDULE_DELETED_TEXT,
+									),
+									children=(),
+								),
+							),
+						),
 					),
 				),
 			),
-        ),
-    ),
+		),
+	),
 )

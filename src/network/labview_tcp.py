@@ -15,6 +15,7 @@ _SIMULATED_COMMANDS = collections.deque(
         "MENU", "RIGHT", "RIGHT", "SELECT",
         "SELECT", 
         "SELECT",
+        "RUN_OCR", "SHUTDOWN", # For user schedule 1 name
         "DOWN", "SELECT", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", 
         "SELECT", "SELECT", "RUN_OCR", "SHUTDOWN",
 
