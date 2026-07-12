@@ -107,14 +107,12 @@ def _matches_route_exact(route: tuple[str, ...], stream: tuple[str, ...]) -> boo
 	token = route[0]
 	if token.endswith("*"):
 		base_token = token[:-1]
-		if not stream:
-			return _matches_route_exact(route[1:], ())
-		if stream[0] != base_token:
-			return _matches_route_exact(route[1:], stream)
-		for index in range(1, len(stream) + 1):
-			if stream[:index] and all(item == base_token for item in stream[:index]):
-				if _matches_route_exact(route[1:], stream[index:]):
-					return True
+		repeat_count = 0
+		while repeat_count < len(stream) and stream[repeat_count] == base_token:
+			repeat_count += 1
+		for consumed_count in range(repeat_count + 1):
+			if _matches_route_exact(route[1:], stream[consumed_count:]):
+				return True
 		return False
 
 	if not stream or stream[0] != token:
@@ -126,30 +124,23 @@ def _matches_route_prefix(route: tuple[str, ...], stream: tuple[str, ...]) -> bo
 	"""Return True when the stream is a valid prefix of the route pattern."""
 	if not stream:
 		return True
+	if not route:
+		return False
 
-	route_index = 0
-	stream_index = 0
-	while stream_index < len(stream):
-		if route_index >= len(route):
-			return False
+	token = route[0]
+	if token.endswith("*"):
+		base_token = token[:-1]
+		repeat_count = 0
+		while repeat_count < len(stream) and stream[repeat_count] == base_token:
+			repeat_count += 1
+		for consumed_count in range(repeat_count + 1):
+			if _matches_route_prefix(route[1:], stream[consumed_count:]):
+				return True
+		return False
 
-		token = route[route_index]
-		if token.endswith("*"):
-			base_token = token[:-1]
-			if stream[stream_index] != base_token:
-				route_index += 1
-				continue
-			while stream_index < len(stream) and stream[stream_index] == base_token:
-				stream_index += 1
-			route_index += 1
-			continue
-
-		if stream[stream_index] != token:
-			return False
-		stream_index += 1
-		route_index += 1
-
-	return True
+	if stream[0] != token:
+		return False
+	return _matches_route_prefix(route[1:], stream[1:])
 
 
 def apply_navigation_command(
@@ -419,7 +410,7 @@ HOME_MENU = ContextNode(
 								ContextNode(
 									key="user_schedule_deleted_confirmation",
 									label="User Schedule Deleted Confirmation",
-									route_here=(("DOWN*", "SELECT",) + ("DOWN",) * 7 + ("SELECT", "SELECT"),),
+									route_here=(("DOWN*", "SELECT", "DOWN", "SELECT") + ("DOWN",) * 7 + ("SELECT", "SELECT"),),
 									return_route=(("BACK",),),
 									fields=(
 										USER_SCHEDULE_DELETED_TEXT,
