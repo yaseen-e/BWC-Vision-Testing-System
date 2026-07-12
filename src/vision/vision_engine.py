@@ -187,8 +187,16 @@ def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
 	"""Convert to a high-contrast black/white image for OCR."""
 	_require_cv2()
 	gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
-	gray = cv2.resize(gray, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
-	_, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+	
+	# 1. Smooth out the LCD pixel grid BEFORE resizing or thresholding.
+	# Median blur is highly effective against screen grids and Moiré patterns.
+	blurred = cv2.medianBlur(gray, 3)
+	
+	# 2. Resize to give Tesseract higher resolution characters (target ~30px height).
+	scaled = cv2.resize(blurred, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
+	
+	# 3. Apply Otsu's thresholding for crisp binarization.
+	_, thresh = cv2.threshold(scaled, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 	return thresh
 
 
@@ -197,22 +205,23 @@ def _extract_warped_variants(binary: np.ndarray, field: OCRField) -> list[np.nda
 	_require_cv2()
 	field_name = field.name
 	roi = field.ideal.crop(binary)
-	roi = cv2.bitwise_not(roi)
-	roi = cv2.GaussianBlur(roi, (3, 3), 0)
 	
-	kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-	if field_name == "temperature":
-		roi = cv2.morphologyEx(roi, cv2.MORPH_CLOSE, kernel)
-		
-	roi = cv2.resize(roi, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
+	# Tesseract expects dark text on a light background. 
+	# Our UI is bright text on a dark background, so we invert.
+	roi = cv2.bitwise_not(roi)
+	
 	variants = [roi]
 	
-	_, otsu_inverse = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-	variants.append(otsu_inverse)
-	variants.append(cv2.morphologyEx(roi, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))))
+	# Create morphological variants for robustness (without extreme over-scaling)
+	kernel_small = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+	kernel_med = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
 	
 	if field_name == "temperature":
-		variants.append(cv2.dilate(roi, cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2)), iterations=1))
+		roi_closed = cv2.morphologyEx(roi, cv2.MORPH_CLOSE, kernel_med)
+		variants.append(roi_closed)
+		variants.append(cv2.dilate(roi, kernel_small, iterations=1))
+	else:
+		variants.append(cv2.morphologyEx(roi, cv2.MORPH_OPEN, kernel_small))
 		
 	return variants
 
