@@ -231,6 +231,27 @@ ACTIVE_FAULTS_ERROR_CODE_2 = OCRField(
 	tesseract_config="--psm 7 -c tessedit_char_whitelist=abcdefgheijklmnopqrstuvwxyz0123456789. ",
 )
 
+ACTIVE_FAULTS_ERROR_CODE_3 = OCRField(
+	name="active_faults_error_code_3",
+	ideal=ROIBox(top=0.45, bottom=0.60, left=0.05, right=0.85),
+	fallback=ROIBox(top=0.15, bottom=0.35, left=0.05, right=0.95),
+	tesseract_config="--psm 7 -c tessedit_char_whitelist=abcdefgheijklmnopqrstuvwxyz0123456789. ",
+)
+
+ACTIVE_FAULTS_ERROR_CODE_4 = OCRField(
+	name="active_faults_error_code_4",
+	ideal=ROIBox(top=0.60, bottom=0.75, left=0.05, right=0.85),
+	fallback=ROIBox(top=0.15, bottom=0.35, left=0.05, right=0.95),
+	tesseract_config="--psm 7 -c tessedit_char_whitelist=abcdefgheijklmnopqrstuvwxyz0123456789. ",
+)
+
+ACTIVE_FAULTS_ERROR_CODE_5 = OCRField(
+	name="active_faults_error_code_5",
+	ideal=ROIBox(top=0.75, bottom=0.90, left=0.05, right=0.85),
+	fallback=ROIBox(top=0.15, bottom=0.35, left=0.05, right=0.95),
+	tesseract_config="--psm 7 -c tessedit_char_whitelist=abcdefgheijklmnopqrstuvwxyz0123456789. ",
+)
+
 HOME_MENU = ContextNode(
 	key="homescreen",
 	label="Home Screen",
@@ -248,6 +269,9 @@ HOME_MENU = ContextNode(
 			fields=(
 				ACTIVE_FAULTS_ERROR_CODE_1,
 				ACTIVE_FAULTS_ERROR_CODE_2,
+				ACTIVE_FAULTS_ERROR_CODE_3,
+				ACTIVE_FAULTS_ERROR_CODE_4,
+				ACTIVE_FAULTS_ERROR_CODE_5,
 			),
 			children=()),
 		)),
