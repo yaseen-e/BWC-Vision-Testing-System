@@ -15,7 +15,7 @@ _SIMULATED_COMMANDS = collections.deque(
         "MENU", "RIGHT", "RIGHT", "SELECT",
         "SELECT", 
         "SELECT",
-        "DOWN", "SELECT", "DOWN", "SELECT", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", 
+        "DOWN", "SELECT", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", 
         "SELECT", "SELECT", "RUN_OCR", "SHUTDOWN",
 
         # CHECK OUT ACTIVE FAULTS LIST
