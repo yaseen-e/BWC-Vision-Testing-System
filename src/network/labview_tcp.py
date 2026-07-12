@@ -13,7 +13,10 @@ _SIMULATED_COMMANDS = collections.deque(
         # "MENU", "RIGHT", "DOWN", "SELECT", "DOWN", "DOWN", "SELECT", "DOWN", "DOWN", "SELECT", "RUN_OCR", "LEFT", "RUN_OCR", "SHUTDOWN",
         # DELETE SCHEDULE
         "MENU", "RIGHT", "RIGHT", "SELECT",
-        "SELECT", "SELECT", "DOWN", "SELECT", "DOWN", "SELECT", "SELECT", "RUN_OCR",
+        "SELECT", 
+        'SELECT',
+        "DOWN", "SELECT", "DOWN", "SELECT", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", 
+        "SELECT", "SELECT", "RUN_OCR",
 
         # CHECK OUT ACTIVE FAULTS LIST
         "RIGHT", "SELECT", "RUN_OCR",
