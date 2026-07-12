@@ -168,27 +168,6 @@ DASHBOARD_INFO_LINE_3 = OCRField(
 	tesseract_config="--psm 7 -c tessedit_char_whitelist= abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.",
 )
 
-ACTIVE_FAULT_TEXT = OCRField(
-	name="active_fault_text",
-	ideal=ROIBox(top=0.20, bottom=0.80, left=0.10, right=0.90),
-	fallback=ROIBox(top=0.15, bottom=0.85, left=0.05, right=0.95),
-	tesseract_config="--psm 6",
-)
-
-SCHEDULE_INFO_TEXT = OCRField(
-	name="schedule_info_text",
-	ideal=ROIBox(top=0.30, bottom=0.70, left=0.10, right=0.90),
-	fallback=ROIBox(top=0.25, bottom=0.75, left=0.05, right=0.95),
-	tesseract_config="--psm 6",
-)
-
-ACTIVE_FAULTS_ERROR_CODE_1 = OCRField(
-	name="active_faults_error_code_1",
-	ideal=ROIBox(top=0.20, bottom=0.30, left=0.10, right=0.90),
-	fallback=ROIBox(top=0.15, bottom=0.35, left=0.05, right=0.95),
-	tesseract_config="--psm 7 -c tessedit_char_whitelist=abcdefgheijklmnopqrstuvwxyz0123456789. ",
-)
-
 TIME_FIELD = OCRField(
 	name="time_field",
 	ideal=ROIBox(top=0.91, bottom=1.00, left=0.83, right=1.00),
@@ -224,6 +203,34 @@ STATUS_BAR = tuple((
 	CALENDAR_ICON_FIELD,
 ))
 
+ACTIVE_FAULT_TEXT = OCRField(
+	name="active_fault_text",
+	ideal=ROIBox(top=0.20, bottom=0.80, left=0.10, right=0.90),
+	fallback=ROIBox(top=0.15, bottom=0.85, left=0.05, right=0.95),
+	tesseract_config="--psm 6",
+)
+
+SCHEDULE_INFO_TEXT = OCRField(
+	name="schedule_info_text",
+	ideal=ROIBox(top=0.30, bottom=0.70, left=0.10, right=0.90),
+	fallback=ROIBox(top=0.25, bottom=0.75, left=0.05, right=0.95),
+	tesseract_config="--psm 6",
+)
+
+ACTIVE_FAULTS_ERROR_CODE_1 = OCRField(
+	name="active_faults_error_code_1",
+	ideal=ROIBox(top=0.15, bottom=0.25, left=0.05, right=0.85),
+	fallback=ROIBox(top=0.15, bottom=0.35, left=0.05, right=0.95),
+	tesseract_config="--psm 7 -c tessedit_char_whitelist=abcdefgheijklmnopqrstuvwxyz0123456789. ",
+)
+
+ACTIVE_FAULTS_ERROR_CODE_2 = OCRField(
+	name="active_faults_error_code_2",
+	ideal=ROIBox(top=0.30, bottom=0.40, left=0.05, right=0.85),
+	fallback=ROIBox(top=0.15, bottom=0.35, left=0.05, right=0.95),
+	tesseract_config="--psm 7 -c tessedit_char_whitelist=abcdefgheijklmnopqrstuvwxyz0123456789. ",
+)
+
 HOME_MENU = ContextNode(
 	key="homescreen",
 	label="Home Screen",
@@ -238,7 +245,10 @@ HOME_MENU = ContextNode(
 	children=(
 		ContextNode(key="active_faults_screen", label="Active Faults Screen", route_here=(("RIGHT",),), return_route=(("MENU", "SELECT"),), children=(
 			ContextNode(key="active_faults_list", label="Active Faults List", route_here=(("SELECT",),), return_route=(("BACK",),),
-			fields=(ACTIVE_FAULTS_ERROR_CODE_1,),
+			fields=(
+				ACTIVE_FAULTS_ERROR_CODE_1,
+				ACTIVE_FAULTS_ERROR_CODE_2,
+			),
 			children=()),
 		)),
 		ContextNode(key="system_status_top", label="System Status 1/2", route_here=(("MENU", "DOWN", "SELECT"),), return_route=(("BACK", "BACK"),), children=(
