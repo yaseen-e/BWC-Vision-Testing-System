@@ -2,6 +2,7 @@ from pathlib import Path
 
 import cv2
 
+from src.vision.display_layouts import ContextNode, apply_navigation_command
 from src.vision.vision_engine import _build_display_mask, _find_display_contour
 
 
@@ -20,3 +21,28 @@ def test_display_detector_recovers_real_samples():
             hits += 1
 
     assert hits >= 2, f"expected at least 2 detected displays, got {hits}"
+
+
+def test_apply_navigation_command_supports_starred_repeat_tokens():
+    child = ContextNode(key="child", label="child", route_here=(("DOWN*", "SELECT"),))
+    root = ContextNode(key="root", label="root", children=(child,))
+
+    current_menu, transition_buffer, sequence_broken = apply_navigation_command(root, root, (), "SELECT")
+    assert current_menu is child
+    assert transition_buffer == ()
+    assert sequence_broken is False
+
+    current_menu, transition_buffer, sequence_broken = apply_navigation_command(root, root, (), "DOWN")
+    assert current_menu is root
+    assert transition_buffer == ("DOWN",)
+    assert sequence_broken is False
+
+    current_menu, transition_buffer, sequence_broken = apply_navigation_command(root, root, ("DOWN",), "DOWN")
+    assert current_menu is root
+    assert transition_buffer == ("DOWN", "DOWN")
+    assert sequence_broken is False
+
+    current_menu, transition_buffer, sequence_broken = apply_navigation_command(root, root, ("DOWN", "DOWN"), "SELECT")
+    assert current_menu is child
+    assert transition_buffer == ()
+    assert sequence_broken is False

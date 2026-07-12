@@ -99,6 +99,59 @@ def collect_field_names(root: ContextNode) -> tuple[str, ...]:
 	return tuple(names)
 
 
+def _matches_route_exact(route: tuple[str, ...], stream: tuple[str, ...]) -> bool:
+	"""Return True when the stream matches the route pattern exactly."""
+	if not route:
+		return not stream
+
+	token = route[0]
+	if token.endswith("*"):
+		base_token = token[:-1]
+		if not stream:
+			return _matches_route_exact(route[1:], ())
+		if stream[0] != base_token:
+			return _matches_route_exact(route[1:], stream)
+		for index in range(1, len(stream) + 1):
+			if stream[:index] and all(item == base_token for item in stream[:index]):
+				if _matches_route_exact(route[1:], stream[index:]):
+					return True
+		return False
+
+	if not stream or stream[0] != token:
+		return False
+	return _matches_route_exact(route[1:], stream[1:])
+
+
+def _matches_route_prefix(route: tuple[str, ...], stream: tuple[str, ...]) -> bool:
+	"""Return True when the stream is a valid prefix of the route pattern."""
+	if not stream:
+		return True
+
+	route_index = 0
+	stream_index = 0
+	while stream_index < len(stream):
+		if route_index >= len(route):
+			return False
+
+		token = route[route_index]
+		if token.endswith("*"):
+			base_token = token[:-1]
+			if stream[stream_index] != base_token:
+				route_index += 1
+				continue
+			while stream_index < len(stream) and stream[stream_index] == base_token:
+				stream_index += 1
+			route_index += 1
+			continue
+
+		if stream[stream_index] != token:
+			return False
+		stream_index += 1
+		route_index += 1
+
+	return True
+
+
 def apply_navigation_command(
 	root: ContextNode,
 	current_menu: ContextNode,
@@ -124,11 +177,11 @@ def apply_navigation_command(
 			candidates.append((route, parent))
 
 	for route, destination in candidates:
-		if route == working_buffer:
+		if _matches_route_exact(route, working_buffer):
 			return destination, (), False
 
 	for route, _ in candidates:
-		if len(working_buffer) <= len(route) and route[:len(working_buffer)] == working_buffer:
+		if _matches_route_prefix(route, working_buffer):
 			return current_menu, working_buffer, False
 
 	return current_menu, working_buffer, True
@@ -259,6 +312,13 @@ LOCATION_FIELD = OCRField(
 	tesseract_config="--psm 6",
 )
 
+USER_SCHEDULE_NAME_1 = OCRField(
+	name="user_schedule_name_1",
+	ideal=ROIBox(top=0.12, bottom=0.28, left=0.05, right=0.90),
+	fallback=ROIBox(top=0.08, bottom=0.35, left=0.05, right=0.95),
+	tesseract_config="--psm 6",
+)
+
 USER_SCHEDULE_DELETED_TEXT = OCRField(
 	name="user_schedule_deleted_text",
 	ideal=ROIBox(top=0.03, bottom=0.14, left=0.25, right=0.75),
@@ -304,7 +364,7 @@ HOME_MENU = ContextNode(
             key="system_status_top",
             label="System Status 1/2",
             route_here=(("MENU", "DOWN", "SELECT"),),
-            return_route=(("BACK", "BACK"),),
+            return_route=(("BACK", "BACK"), ("BACK", "UP", "SELECT"),),
             children=(
                 ContextNode(
                     key="system_status_bottom",
@@ -339,27 +399,38 @@ HOME_MENU = ContextNode(
             route_here=(("MENU", "RIGHT", "RIGHT", "SELECT"),),
             return_route=(("MENU", "SELECT"),),
             fields=(),
-            children=(
-                ContextNode(
-                    key="user_schedules_list",
-                    label="User Schedules List",
-                    route_here=(("SELECT",),),
-                    return_route=(("BACK",),),
-                    fields=(),
-                    children=(
-                        ContextNode(
-                            key="user_schedule_deleted_confirmation",
-                            label="User Schedule Deleted Confirmation",
-                            route_here=(("SELECT",),),
-                            return_route=(("BACK",),),
-                            fields=(
-                                USER_SCHEDULE_DELETED_TEXT,
-                            ),
-                            children=(),
-                        ),
-                    ),
-                ),
-            ),
+			children=(
+				ContextNode(
+					key="manage_schedules",
+					label="Manage Schedules",
+					route_here=(("SELECT",),),
+					return_route=(("BACK",),),
+					fields=(),
+					children=(
+						ContextNode(
+							key="user_schedules_list",
+							label="User Schedules List",
+							route_here=(("SELECT",),),
+							return_route=(("BACK",),),
+							fields=(
+								USER_SCHEDULE_NAME_1,
+							),
+							children=(
+								ContextNode(
+									key="user_schedule_deleted_confirmation",
+									label="User Schedule Deleted Confirmation",
+									route_here=(("DOWN*", "SELECT",) + ("DOWN",) * 7 + ("SELECT", "SELECT"),),
+									return_route=(("BACK",),),
+									fields=(
+										USER_SCHEDULE_DELETED_TEXT,
+									),
+									children=(),
+								),
+							),
+						),
+					),
+				),
+			),
         ),
     ),
 )
