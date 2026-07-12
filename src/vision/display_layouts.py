@@ -259,38 +259,107 @@ LOCATION_FIELD = OCRField(
 	tesseract_config="--psm 6",
 )
 
+USER_SCHEDULE_DELETED_TEXT = OCRField(
+	name="user_schedule_deleted_text",
+	ideal=ROIBox(top=0.03, bottom=0.14, left=0.25, right=0.75),
+	fallback=ROIBox(top=0.00, bottom=0.18, left=0.18, right=0.82),
+	tesseract_config="--psm 7 -c tessedit_char_whitelist= ABCDEFGHIJKLMNOPQRSTUVWXYZ:",
+)
+
 HOME_MENU = ContextNode(
-	key="homescreen",
-	label="Home Screen",
-	fields=(
-		MODE_FIELD,
-		TEMPERATURE_FIELD,
-		DASHBOARD_INFO_LINE_1,
-		DASHBOARD_INFO_LINE_2,
-		DASHBOARD_INFO_LINE_3,
-		*STATUS_BAR,
-	),
-	children=(
-		ContextNode(key="active_faults_screen", label="Active Faults Screen", route_here=(("RIGHT",),), return_route=(("MENU", "SELECT"),), children=(
-			ContextNode(key="active_faults_list", label="Active Faults List", route_here=(("SELECT",),), return_route=(("BACK",),),
-			fields=(
-				ACTIVE_FAULTS_ERROR_CODE_1,
-				ACTIVE_FAULTS_ERROR_CODE_2,
-				ACTIVE_FAULTS_ERROR_CODE_3,
-				ACTIVE_FAULTS_ERROR_CODE_4,
-				ACTIVE_FAULTS_ERROR_CODE_5,
-			),
-			children=()),
-		)),
-		ContextNode(key="system_status_top", label="System Status 1/2", route_here=(("MENU", "DOWN", "SELECT"),), return_route=(("BACK", "BACK"),), children=(
-			ContextNode(key="system_status_bottom", label="System Status 2/2", route_here=(("DOWN",),), return_route=(("UP",),), ),
-		)),
-		ContextNode(key="settings", label="Settings", route_here=(("MENU", "RIGHT", "DOWN", "SELECT"), ("MENU", "DOWN", "RIGHT", "SELECT")), return_route=(("MENU",),), children=(
-			ContextNode(key="location", label="Location", route_here=(("DOWN", "DOWN", "SELECT", "DOWN", "DOWN", "SELECT"),), return_route=(("BACK", "BACK"),), fields=(
-				LOCATION_FIELD,
-				),
-				children=()),
-		)),
-		ContextNode(key="schedules", label="Schedules", route_here=(("MENU", "RIGHT", "RIGHT", "SELECT"),), return_route=(("MENU", "SELECT"),), fields=(), children=()),
-	),
+    key="homescreen",
+    label="Home Screen",
+    fields=(
+        MODE_FIELD,
+        TEMPERATURE_FIELD,
+        DASHBOARD_INFO_LINE_1,
+        DASHBOARD_INFO_LINE_2,
+        DASHBOARD_INFO_LINE_3,
+        *STATUS_BAR,
+    ),
+    children=(
+        ContextNode(
+            key="active_faults_screen",
+            label="Active Faults Screen",
+            route_here=(("RIGHT",),),
+            return_route=(("MENU", "SELECT"),),
+            children=(
+                ContextNode(
+                    key="active_faults_list",
+                    label="Active Faults List",
+                    route_here=(("SELECT",),),
+                    return_route=(("BACK",),),
+                    fields=(
+                        ACTIVE_FAULTS_ERROR_CODE_1,
+                        ACTIVE_FAULTS_ERROR_CODE_2,
+                        ACTIVE_FAULTS_ERROR_CODE_3,
+                        ACTIVE_FAULTS_ERROR_CODE_4,
+                        ACTIVE_FAULTS_ERROR_CODE_5,
+                    ),
+                    children=(),
+                ),
+            ),
+        ),
+        ContextNode(
+            key="system_status_top",
+            label="System Status 1/2",
+            route_here=(("MENU", "DOWN", "SELECT"),),
+            return_route=(("BACK", "BACK"),),
+            children=(
+                ContextNode(
+                    key="system_status_bottom",
+                    label="System Status 2/2",
+                    route_here=(("DOWN",),),
+                    return_route=(("UP",),),
+                    children=(),
+                ),
+            ),
+        ),
+        ContextNode(
+            key="settings",
+            label="Settings",
+            route_here=(("MENU", "RIGHT", "DOWN", "SELECT"), ("MENU", "DOWN", "RIGHT", "SELECT")),
+            return_route=(("MENU",),),
+            children=(
+                ContextNode(
+                    key="location",
+                    label="Location",
+                    route_here=(("DOWN", "DOWN", "SELECT", "DOWN", "DOWN", "SELECT"),),
+                    return_route=(("BACK", "BACK"),),
+                    fields=(
+                        LOCATION_FIELD,
+                    ),
+                    children=(),
+                ),
+            ),
+        ),
+        ContextNode(
+            key="schedules",
+            label="Schedules",
+            route_here=(("MENU", "RIGHT", "RIGHT", "SELECT"),),
+            return_route=(("MENU", "SELECT"),),
+            fields=(),
+            children=(
+                ContextNode(
+                    key="user_schedules_list",
+                    label="User Schedules List",
+                    route_here=(("SELECT",),),
+                    return_route=(("BACK",),),
+                    fields=(),
+                    children=(
+                        ContextNode(
+                            key="user_schedule_deleted_confirmation",
+                            label="User Schedule Deleted Confirmation",
+                            route_here=(("SELECT",),),
+                            return_route=(("BACK",),),
+                            fields=(
+                                USER_SCHEDULE_DELETED_TEXT,
+                            ),
+                            children=(),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    ),
 )
