@@ -8,7 +8,7 @@ from xmlrpc import server
 _SIMULATED_COMMANDS = collections.deque(
     [
         # MENU TRAVERSAL VERIFICATION (PASS)
-        # "RIGHT", "RUN_OCR", "SELECT", "RUN_OCR", "BACK", "BACK", "MENU", "SELECT", "RUN_OCR", "RIGHT", "RUN_OCR", "MENU", "SELECT", "RUN_OCR",
+        "RIGHT", "SELECT", "RUN_OCR", "DOWN", "BACK", "RUN_OCR", "SHUTDOWN", "RUN_OCR", "RIGHT", "RUN_OCR", "MENU", "SELECT", "RUN_OCR",
         # CHECK OUT ACTIVE FAULTS LIST
         "RIGHT", "SELECT", "RUN_OCR",
         # HEAT_PUMP
