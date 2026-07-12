@@ -252,6 +252,13 @@ ACTIVE_FAULTS_ERROR_CODE_5 = OCRField(
 	tesseract_config="--psm 7 -c tessedit_char_whitelist=abcdefgheijklmnopqrstuvwxyz0123456789. ",
 )
 
+LOCATION_FIELD = OCRField(
+	name="location_field",
+	ideal=ROIBox(top=0.30, bottom=0.70, left=0.10, right=0.90),
+	fallback=ROIBox(top=0.25, bottom=0.75, left=0.05, right=0.95),
+	tesseract_config="--psm 6",
+)
+
 HOME_MENU = ContextNode(
 	key="homescreen",
 	label="Home Screen",
@@ -278,7 +285,11 @@ HOME_MENU = ContextNode(
 		ContextNode(key="system_status_top", label="System Status 1/2", route_here=(("MENU", "DOWN", "SELECT"),), return_route=(("BACK", "BACK"),), children=(
 			ContextNode(key="system_status_bottom", label="System Status 2/2", route_here=(("DOWN",),), return_route=(("UP",),)),
 		)),
-		ContextNode(key="settings", label="Settings", route_here=(("MENU", "RIGHT", "DOWN", "SELECT"), ("MENU", "DOWN", "RIGHT", "SELECT")), return_route=(("MENU",),), children=()),
+		ContextNode(key="settings", label="Settings", route_here=(("MENU", "RIGHT", "DOWN", "SELECT"), ("MENU", "DOWN", "RIGHT", "SELECT")), return_route=(("MENU",),), children=(
+			ContextNode(key="location", label="Location", route_here=(("DOWN", "DOWN", "SELECT", "DOWN", "DOWN", "SELECT"),), return_route=(("BACK", "BACK"),), children=(
+				LOCATION_FIELD,
+			)),
+		)),
 		ContextNode(key="schedules", label="Schedules", route_here=(("MENU", "RIGHT", "RIGHT", "SELECT"),), return_route=(("MENU", "SELECT"),)),
 	),
 )
