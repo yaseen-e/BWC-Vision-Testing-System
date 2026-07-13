@@ -670,7 +670,7 @@ def _get_camera() -> Optional[Any]:
 		# Example: 10.0 = 10cm away. 5.0 = 20cm away. 0.0 = Infinity.
 		camera.set_controls({
 			"AfMode": 0,          
-			"LensPosition": 10   # <-- TUNE THIS NUMBER FOR YOUR RIG'S EXACT DISTANCE
+			"LensPosition": 9   # <-- TUNE THIS NUMBER FOR YOUR RIG'S EXACT DISTANCE
 		})
 		
 		_CAMERA = camera
