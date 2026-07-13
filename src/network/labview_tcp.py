@@ -12,22 +12,22 @@ _SIMULATED_COMMANDS = collections.deque(
         # LOCATION
         # "MENU", "RIGHT", "DOWN", "SELECT", "DOWN", "DOWN", "SELECT", "DOWN", "DOWN", "SELECT", "RUN_OCR", "LEFT", "RUN_OCR", "SHUTDOWN",
         # DELETE SCHEDULE
-        "MENU", "RIGHT", "RIGHT", "SELECT",
-        "SELECT", 
-        "SELECT",
-        "RUN_OCR", "SHUTDOWN", # For user schedule 1 name
-        "DOWN", "SELECT", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", 
-        "SELECT", "SELECT", "RUN_OCR", "SHUTDOWN",
+        # "MENU", "RIGHT", "RIGHT", "SELECT",
+        # "SELECT", 
+        # "SELECT",
+        # "RUN_OCR", "SHUTDOWN", # For user schedule 1 name
+        # "DOWN", "SELECT", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", 
+        # "SELECT", "SELECT", "RUN_OCR", "SHUTDOWN",
 
         # CHECK OUT ACTIVE FAULTS LIST
-        "RIGHT", "SELECT", "RUN_OCR",
+        # "RIGHT", "SELECT", "RUN_OCR",
         # HEAT_PUMP
         "BACK", "MENU", "SELECT", "LEFT", "LEFT", "SELECT", "DOWN", "DOWN", "SELECT", "RIGHT", "RIGHT", "RUN_OCR",
         # HYBRID_STANDARD
         "BACK", "MENU", "SELECT", "LEFT", "LEFT", "SELECT", "SELECT", "RIGHT", "RIGHT", "RUN_OCR",
         # HYBRID_PLUS
         "BACK", "MENU", "SELECT", "LEFT", "LEFT", "SELECT", "DOWN", "SELECT", "RIGHT", "RIGHT", "RUN_OCR",
-        # ELECTRIC(ONLY)
+        # ELECTRIC
         "BACK", "MENU", "SELECT", "LEFT", "LEFT", "SELECT", "DOWN", "DOWN", "DOWN", "SELECT", "RIGHT", "RIGHT", "RUN_OCR",
         # VACATION
         "BACK", "MENU", "SELECT", "LEFT", "LEFT", "SELECT", "DOWN", "DOWN", "DOWN", "DOWN", "SELECT", "RIGHT", "RIGHT", "RUN_OCR",
