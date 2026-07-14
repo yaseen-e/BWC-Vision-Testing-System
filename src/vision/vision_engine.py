@@ -15,6 +15,7 @@ import numpy as np
 import cv2
 import pytesseract
 from .display_layouts import OCRField, TEMPERATURE_RANGE_F
+import time
 
 # Camera is assumed to be connected and initialized directly.
 _CAMERA: Any = None
@@ -672,18 +673,21 @@ def capture_and_read_display(
 
 
 def warm_up() -> None:
-	"""Hook for camera warmup work."""
+	"""Hook for camera warmup work to fully flush the hardware pipeline."""
 	camera = _get_camera()
 	if camera is not None:
 		import time
-		# 1. Allow the physical focus motor and auto-exposure time to stabilize
+		# 1. Allow the physical focus motor and auto-exposure time to settle
 		time.sleep(0.5)
 		
-		# 2. Capture and discard an initial frame to flush the stale pipeline buffer
-		try:
-			camera.capture_array()
-		except Exception:
-			pass
+		# 2. Deep-flush the camera's internal multi-frame ring buffer backlog.
+		# Reading 8 frames in rapid succession guarantees that all pre-focus/stale 
+		# frames are completely cleared out of the pipeline.
+		for _ in range(8):
+			try:
+				camera.capture_array()
+			except Exception:
+				pass
 
 
 def is_camera_available() -> bool:
