@@ -21,6 +21,10 @@ _SIMULATED_COMMANDS = collections.deque(
 
         # CHECK OUT ACTIVE FAULTS LIST
         # "RIGHT", "SELECT", "RUN_OCR",
+        "RUN_OCR",
+        # Test System Status 3 rois
+        "MENU", "DOWN", "SELECT", "RUN_OCR", "DOWN", "RUN_OCR", "SHUTDOWN",
+
         # HEAT_PUMP
         "BACK", "MENU", "SELECT", "LEFT", "LEFT", "SELECT", "DOWN", "DOWN", "SELECT", "RIGHT", "RIGHT", "RUN_OCR",
         # HYBRID_STANDARD
