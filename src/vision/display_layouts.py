@@ -231,7 +231,7 @@ WIFI_ICON_FIELD = OCRField(
 
 CALENDAR_ICON_FIELD = OCRField(
 	name="calendar_icon",
-	ideal=ROIBox(top=0.91, bottom=1.00, left=0.49, right=0.56),
+	ideal=ROIBox(top=0.91, bottom=1.00, left=0.48, right=0.55),
 	fallback=ROIBox(top=0.82, bottom=1.00, left=0.34, right=0.56),
 	tesseract_config="",
 )
