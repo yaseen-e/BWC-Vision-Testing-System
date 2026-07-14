@@ -366,7 +366,7 @@ HOME_MENU = ContextNode(
             key="active_faults_screen",
             label="Active Faults Screen",
             route_here=(("RIGHT",),),
-            return_route=(("MENU", "SELECT"),),
+            return_route=(("MENU", "SELECT"), ("LEFT",)),
             children=(
                 ContextNode(
                     key="active_faults_list",

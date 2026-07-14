@@ -675,19 +675,6 @@ def capture_and_read_display(
 def warm_up() -> None:
 	"""Hook for camera warmup work to fully flush the hardware pipeline."""
 	camera = _get_camera()
-	if camera is not None:
-		import time
-		# 1. Allow the physical focus motor and auto-exposure time to settle
-		time.sleep(0.5)
-		
-		# 2. Deep-flush the camera's internal multi-frame ring buffer backlog.
-		# Reading 8 frames in rapid succession guarantees that all pre-focus/stale 
-		# frames are completely cleared out of the pipeline.
-		for _ in range(8):
-			try:
-				camera.capture_array()
-			except Exception:
-				pass
 
 
 def is_camera_available() -> bool:
@@ -713,6 +700,17 @@ def _get_camera() -> Any:
 		"AfMode": 0,
 		"LensPosition": 9,
 	})
+
+	# --- FIX: HARDWARE STABILIZATION SETTLE ---
+	# Ensures the voice coil physical motor has moved to position 9 and 
+	# the image sensor has applied initial auto-exposure parameters 
+	# before ANY frame is handed out to the pipeline.
+	time.sleep(0.6)
+	for _ in range(6):
+		try:
+			camera.capture_array()
+		except Exception:
+			pass
 
 	_CAMERA = camera
 	return _CAMERA
