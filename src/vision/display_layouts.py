@@ -329,21 +329,21 @@ TOU_SCHEDULE_DELETED_TEXT = OCRField(
 
 COMPRESSOR_RELAY_STATE = OCRField(
 	name="compressor_relay_state",
-	ideal=ROIBox(top=0.87, bottom=0.97, left=0.10, right=0.20),
+	ideal=ROIBox(top=0.85, bottom=0.94, left=0.08, right=0.18),
 	fallback=ROIBox(top=0.15, bottom=0.35, left=0.05, right=0.95),
 	tesseract_config="--psm 7 -c tessedit_char_whitelist=OFN",
 )
 
 UPPER_RELAY_STATE = OCRField(
 	name="upper_relay_state",
-	ideal=ROIBox(top=0.25, bottom=0.35, left=0.10, right=0.20),
+	ideal=ROIBox(top=0.45, bottom=0.54, left=0.10, right=0.20),
 	fallback=ROIBox(top=0.15, bottom=0.35, left=0.05, right=0.95),
 	tesseract_config="--psm 7 -c tessedit_char_whitelist=OFN",
 )
 
 LOWER_RELAY_STATE = OCRField(
 	name="lower_relay_state",
-	ideal=ROIBox(top=0.40, bottom=0.45, left=0.10, right=0.20),
+	ideal=ROIBox(top=0.61, bottom=0.70, left=0.10, right=0.20),
 	fallback=ROIBox(top=0.15, bottom=0.35, left=0.05, right=0.95),
 	tesseract_config="--psm 7 -c tessedit_char_whitelist=OFN",
 )
