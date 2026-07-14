@@ -281,9 +281,12 @@ def _parse_temperature(raw_text: str) -> Optional[int]:
 
 
 def _parse_info_line(raw_text: str) -> str:
-	text = _clean_text(raw_text)
-	text = text.replace("_", " ")
-	text = _clean_text(text).strip(" |:;,_-.")
+	# Strictly enforce only letters, numbers, spaces, and periods
+	text = re.sub(r"[^a-zA-Z0-9 \.]", "", raw_text)
+	
+	# Clean up any duplicated whitespace and strip trailing/leading spaces or periods
+	text = _clean_text(text).strip(" .")
+	
 	if not text:
 		return ""
 
@@ -306,6 +309,14 @@ def _field_empty_value(field_name: str) -> Any:
 	return ""
 
 
+def _parse_time(raw_text: str) -> str:
+	# Strictly enforce only numbers, spaces, A, M, and P
+	text = re.sub(r"[^0-9 AMP]", "", raw_text)
+	
+	# Clean up any duplicated whitespace
+	return _clean_text(text)
+
+
 def _parse_field_value(field_name: str, raw_text: str) -> Any:
 	if field_name == "mode":
 		return _parse_mode(raw_text)
@@ -313,6 +324,8 @@ def _parse_field_value(field_name: str, raw_text: str) -> Any:
 		return _parse_temperature(raw_text)
 	if field_name.startswith("dashboard_info_line_"):
 		return _parse_info_line(raw_text)
+	if field_name == "time_field":
+		return _parse_time(raw_text)
 	return _clean_text(raw_text)
 
 
