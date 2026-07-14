@@ -219,7 +219,7 @@ DATE_FIELD = OCRField(
 	name="date_field",
 	ideal=ROIBox(top=0.91, bottom=1.00, left=0.64, right=0.82),
 	fallback=ROIBox(top=0.82, bottom=1.00, left=0.63, right=0.82),
-	tesseract_config="--psm 8 -c tessedit_char_whitelist=0123456789/", # psm 8 b/c single word (no spaces)
+	tesseract_config="--psm 7 -c tessedit_char_whitelist=0123456789/",
 )
 
 WIFI_ICON_FIELD = OCRField(
