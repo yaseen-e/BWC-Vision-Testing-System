@@ -11,27 +11,13 @@ import re
 from pathlib import Path
 from typing import Any, Optional
 
-try:
-	import numpy as np
-except Exception:  # pragma: no cover - environment dependent
-	np = None
+import numpy as np
+import cv2
+import pytesseract
+from .display_layouts import OCRField, TEMPERATURE_RANGE_F
 
-try:
-	import cv2
-except Exception:  # pragma: no cover - environment dependent
-	cv2 = None
-
-try:
-	import pytesseract
-except Exception:  # pragma: no cover - environment dependent
-	pytesseract = None
-
-from .display_layouts import DISPLAY_ASPECT_RATIO, OCRField, TEMPERATURE_RANGE_F
-
-
-# Camera object is created lazily so non-Pi environments still run.
-_CAMERA: Optional[Any] = None
-DEBUG_OCR_CANDIDATES = False
+# Camera is assumed to be connected and initialized directly.
+_CAMERA: Any = None
 
 
 @dataclass(frozen=True)
@@ -397,17 +383,15 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 		value = _parse_field_value(field_name, raw)
 		score = _score_field_candidate(field_name, raw, value)
 
-		if DEBUG_OCR_CANDIDATES:
-			candidate_debug.append((score, raw, value))
+		candidate_debug.append((score, raw, value))
 
 		if score > best_score:
 			best_raw = raw
 			best_value = value
 			best_score = score
 
-	if DEBUG_OCR_CANDIDATES:
-		top = sorted(candidate_debug, key=lambda item: item[0], reverse=True)[:2]
-		print(f"[OCR DEBUG] {field_name} top candidates: {top}")
+	top = sorted(candidate_debug, key=lambda item: item[0], reverse=True)[:2]
+	print(f"[OCR DEBUG] {field_name} top candidates: {top}")
 
 	return best_raw, best_value
 
@@ -616,11 +600,8 @@ def read_display(
 
 
 def capture_frame() -> Optional[np.ndarray]:
-	"""Capture one camera frame (returns None when camera is unavailable)."""
+	"""Capture one camera frame."""
 	camera = _get_camera()
-	if camera is None:
-		return None
-
 	return camera.capture_array()
 
 
@@ -630,17 +611,6 @@ def capture_and_read_display(
 ) -> OCRReadout:
 	"""One-call helper used by main: capture frame then run OCR pipeline."""
 	frame = capture_frame()
-	if frame is None:
-		empty_fields = {
-			field.name: {"raw": "", "value": _field_empty_value(field.name)}
-			for field in menu_fields
-		}
-		return OCRReadout(
-			display_found=False,
-			current_menu_key=current_menu_key,
-			fields=empty_fields,
-		)
-
 	return read_display(
 		frame,
 		current_menu_key,
@@ -649,66 +619,45 @@ def capture_and_read_display(
 
 
 def warm_up() -> None:
-	"""Hook for camera warmup work (kept for main loop integration)."""
+	"""Hook for camera warmup work."""
 	_get_camera()
 
 
 def is_camera_available() -> bool:
-	"""Return True when the Pi camera can be initialized successfully."""
-	return _get_camera() is not None
+	"""Return True when the camera can be used."""
+	return True
 
 
-def _get_camera() -> Optional[Any]:
-	"""Initialize camera on first use, but stay safe on non-Pi systems."""
+def _get_camera() -> Any:
+	"""Initialize and return the camera object."""
 	global _CAMERA
 	if _CAMERA is not None:
 		return _CAMERA
 
-	try:
-		from picamera2 import Picamera2  # type: ignore
-	except Exception:
-		return None
+	from picamera2 import Picamera2  # type: ignore
 
-	try:
-		# Auto-detect available cameras
-		camera_info = Picamera2.global_camera_info()
-		if not camera_info:
-			return None
-		
-		# Use the first available camera
-		camera_num = camera_info[0]["Num"]
-		camera = Picamera2(camera_num=camera_num)
-		config = camera.create_preview_configuration(main={"size": (1280, 720)})
-		camera.configure(config)
-		camera.start()
-		
-		# --- THE FIX ---
-		# AfMode 0: Manual Focus (Locks the lens in place so it stops hunting)
-		# LensPosition: Focus distance measured in diopters (1 / distance_in_meters).
-		# Example: 10.0 = 10cm away. 5.0 = 20cm away. 0.0 = Infinity.
-		camera.set_controls({
-			"AfMode": 0,          
-			"LensPosition": 9   # <-- TUNE THIS NUMBER FOR YOUR RIG'S EXACT DISTANCE
-		})
-		
-		_CAMERA = camera
-	except Exception:
-		return None
+	camera_info = Picamera2.global_camera_info()
+	camera_num = camera_info[0]["Num"]
+	camera = Picamera2(camera_num=camera_num)
+	config = camera.create_preview_configuration(main={"size": (1280, 720)})
+	camera.configure(config)
+	camera.start()
+	camera.set_controls({
+		"AfMode": 0,
+		"LensPosition": 9,
+	})
 
+	_CAMERA = camera
 	return _CAMERA
 
 
 def shutdown() -> None:
-	"""Hook for camera cleanup work (kept for main loop integration)."""
+	"""Stop the camera cleanly."""
 	global _CAMERA
 	if _CAMERA is None:
 		return
 
-	try:
-		_CAMERA.stop()
-	except Exception:
-		pass
-
+	_CAMERA.stop()
 	_CAMERA = None
 
 

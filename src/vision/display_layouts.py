@@ -52,8 +52,6 @@ class ContextNode:
 	fields: tuple[OCRField, ...] = ()
 	children: tuple["ContextNode", ...] = ()
 
-
-DISPLAY_ASPECT_RATIO = 1.75 / 2.25
 TEMPERATURE_RANGE_F = (80, 220)
 
 def iter_context_nodes(root: ContextNode) -> tuple[ContextNode, ...]:
