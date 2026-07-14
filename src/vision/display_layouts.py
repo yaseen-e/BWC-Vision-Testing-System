@@ -313,11 +313,39 @@ USER_SCHEDULE_DELETED_TEXT = OCRField(
 	tesseract_config="--psm 7 -c tessedit_char_whitelist= ABCDEFGHIJKLMNOPQRSTUVWXYZ:",
 )
 
+TOU_SCHEDULE_NAME_1 = OCRField(
+	name="tou_schedule_name_1",
+	ideal=ROIBox(top=0.28, bottom=0.38, left=0.08, right=0.67),
+	fallback=ROIBox(top=0.08, bottom=0.35, left=0.05, right=0.95),
+	tesseract_config="--psm 6",
+)
+
 TOU_SCHEDULE_DELETED_TEXT = OCRField(
 	name="tou_schedule_deleted_text",
 	ideal=ROIBox(top=0.03, bottom=0.14, left=0.23, right=0.77),
 	fallback=ROIBox(top=0.00, bottom=0.18, left=0.18, right=0.82),
 	tesseract_config="--psm 7 -c tessedit_char_whitelist= ABCDEFGHIJKLMNOPQRSTUVWXYZ:",
+)
+
+COMPRESSOR_RELAY_STATE = OCRField(
+	name="compressor_relay_state",
+	ideal=ROIBox(top=0.87, bottom=0.97, left=0.10, right=0.20),
+	fallback=ROIBox(top=0.15, bottom=0.35, left=0.05, right=0.95),
+	tesseract_config="--psm 7 -c tessedit_char_whitelist=OFN",
+)
+
+UPPER_RELAY_STATE = OCRField(
+	name="upper_relay_state",
+	ideal=ROIBox(top=0.25, bottom=0.35, left=0.10, right=0.20),
+	fallback=ROIBox(top=0.15, bottom=0.35, left=0.05, right=0.95),
+	tesseract_config="--psm 7 -c tessedit_char_whitelist=OFN",
+)
+
+LOWER_RELAY_STATE = OCRField(
+	name="lower_relay_state",
+	ideal=ROIBox(top=0.40, bottom=0.45, left=0.10, right=0.20),
+	fallback=ROIBox(top=0.15, bottom=0.35, left=0.05, right=0.95),
+	tesseract_config="--psm 7 -c tessedit_char_whitelist=OFN",
 )
 
 # Create the menu tree
@@ -361,12 +389,19 @@ HOME_MENU = ContextNode(
             label="System Status 1/2",
             route_here=(("MENU", "DOWN", "SELECT"),),
             return_route=(("BACK", "BACK"), ("BACK", "UP", "SELECT"),),
+			fields=(
+				COMPRESSOR_RELAY_STATE,
+			),
             children=(
                 ContextNode(
                     key="system_status_bottom",
                     label="System Status 2/2",
                     route_here=(("DOWN",),),
                     return_route=(("UP",),),
+					fields=(
+						UPPER_RELAY_STATE,
+						LOWER_RELAY_STATE,
+					),
                     children=(),
                 ),
             ),
@@ -416,7 +451,7 @@ HOME_MENU = ContextNode(
 									key="user_schedule_deleted_confirmation",
 									label="User Schedule Deleted Confirmation",
 									route_here=(("DOWN*", "SELECT") + ("DOWN",) * 7 + ("SELECT", "SELECT"),),
-									return_route=(("BACK",),),
+									return_route=(("SELECT",),),
 									fields=(
 										USER_SCHEDULE_DELETED_TEXT,
 									),
@@ -429,13 +464,15 @@ HOME_MENU = ContextNode(
 							label="TOU Schedules List",
 							route_here=(("DOWN", "DOWN", "SELECT"),),
 							return_route=(("BACK",),),
-							fields=(),
+							fields=(
+								TOU_SCHEDULE_NAME_1,
+							),
 							children=(
 								ContextNode(
 									key="tou_schedule_deleted_confirmation",
 									label="TOU Schedule Deleted Confirmation",
 									route_here=(("DOWN*", "SELECT") + ("DOWN",) * 7 + ("SELECT", "SELECT"),),
-									return_route=(("BACK",),),
+									return_route=(("SELECT",),),
 									fields=(
 										TOU_SCHEDULE_DELETED_TEXT,
 									),
