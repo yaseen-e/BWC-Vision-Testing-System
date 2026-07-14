@@ -88,15 +88,15 @@ def _accept_connection_if_needed() -> bool:
 
 
 _COMMAND_RESPONSES = {
-    "UP": "Button Pressed\n",
-    "SELECT": "Button Pressed\n",
-    "DOWN": "Button Pressed\n",
-    "LEFT": "Button Pressed\n",
-    "RIGHT": "Button Pressed\n",
-    "BACK": "Button Pressed\n",
-    "MENU": "Button Pressed\n",
-    "RUN_OCR": "Running OCR123\n",
-    "SEND_OCR_RESULT": "Sending OCR\n",
+    "UP": "Button_Pressed\n",
+    "SELECT": "Button_Pressed\n",
+    "DOWN": "Button_Pressed\n",
+    "LEFT": "Button_Pressed\n",
+    "RIGHT": "Button_Pressed\n",
+    "BACK": "Button_Pressed\n",
+    "MENU": "Button_Pressed\n",
+    "RUN_OCR": "Running_OCR123\n",
+    "SEND_OCR_RESULT": "Sending_OCR123\n",
 }
 
 
