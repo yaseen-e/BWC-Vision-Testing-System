@@ -93,7 +93,7 @@ def build_servo_config():
     global BUTTON_SERVO_CONFIG
 
     home_angles = load_home_angles()
-    press_delta = 50
+    press_delta = 60
 
     BUTTON_SERVO_CONFIG = {
         Button.UP: _build_servo_config(
