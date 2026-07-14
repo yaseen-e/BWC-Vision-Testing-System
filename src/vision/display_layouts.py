@@ -261,35 +261,35 @@ ACTIVE_FAULTS_ERROR_CODE_1 = OCRField(
 	name="active_faults_error_code_1",
 	ideal=ROIBox(top=0.15, bottom=0.30, left=0.05, right=0.85),
 	fallback=ROIBox(top=0.15, bottom=0.35, left=0.05, right=0.95),
-	tesseract_config="--psm 7 -c tessedit_char_whitelist=abcdefgheijklmnopqrstuvwxyz0123456789. ",
+	tesseract_config="--psm 7 -c tessedit_char_whitelist= abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.",
 )
 
 ACTIVE_FAULTS_ERROR_CODE_2 = OCRField(
 	name="active_faults_error_code_2",
 	ideal=ROIBox(top=0.30, bottom=0.45, left=0.05, right=0.85),
 	fallback=ROIBox(top=0.15, bottom=0.35, left=0.05, right=0.95),
-	tesseract_config="--psm 7 -c tessedit_char_whitelist=abcdefgheijklmnopqrstuvwxyz0123456789. ",
+	tesseract_config="--psm 7 -c tessedit_char_whitelist= abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.",
 )
 
 ACTIVE_FAULTS_ERROR_CODE_3 = OCRField(
 	name="active_faults_error_code_3",
 	ideal=ROIBox(top=0.45, bottom=0.60, left=0.05, right=0.85),
 	fallback=ROIBox(top=0.15, bottom=0.35, left=0.05, right=0.95),
-	tesseract_config="--psm 7 -c tessedit_char_whitelist=abcdefgheijklmnopqrstuvwxyz0123456789. ",
+	tesseract_config="--psm 7 -c tessedit_char_whitelist= abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.",
 )
 
 ACTIVE_FAULTS_ERROR_CODE_4 = OCRField(
 	name="active_faults_error_code_4",
 	ideal=ROIBox(top=0.60, bottom=0.75, left=0.05, right=0.85),
 	fallback=ROIBox(top=0.15, bottom=0.35, left=0.05, right=0.95),
-	tesseract_config="--psm 7 -c tessedit_char_whitelist=abcdefgheijklmnopqrstuvwxyz0123456789. ",
+	tesseract_config="--psm 7 -c tessedit_char_whitelist= abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.",
 )
 
 ACTIVE_FAULTS_ERROR_CODE_5 = OCRField(
 	name="active_faults_error_code_5",
 	ideal=ROIBox(top=0.75, bottom=0.90, left=0.05, right=0.85),
 	fallback=ROIBox(top=0.15, bottom=0.35, left=0.05, right=0.95),
-	tesseract_config="--psm 7 -c tessedit_char_whitelist=abcdefgheijklmnopqrstuvwxyz0123456789. ",
+	tesseract_config="--psm 7 -c tessedit_char_whitelist= abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.",
 )
 
 LOCATION_FIELD = OCRField(
@@ -428,7 +428,7 @@ HOME_MENU = ContextNode(
             key="schedules",
             label="Schedules",
             route_here=(("MENU", "RIGHT", "RIGHT", "SELECT",),),
-            return_route=(("BACK",),),
+            return_route=(("BACK","BACK"),),
             fields=(),
 			children=(
 				ContextNode(
