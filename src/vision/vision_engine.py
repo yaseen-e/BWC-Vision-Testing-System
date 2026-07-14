@@ -247,13 +247,18 @@ def _clean_text(raw_text: str) -> str:
 
 
 def _parse_mode(raw_text: str) -> str:
-	cleaned = _clean_text(raw_text).upper()
-	if not cleaned or cleaned == "UNKNOWN":
-		return "UNKNOWN"
-
-	cleaned = re.sub(r"^MODE\s*:\s*", "", cleaned)
-	cleaned = re.sub(r"^MODE\s+", "", cleaned).strip()
-	return cleaned or "UNKNOWN"
+    cleaned = _clean_text(raw_text).upper().strip()
+    
+    # Split the string using a space as the separator. 
+    # maxsplit=1 ensures we only split at the very first space.
+    parts = cleaned.split(" ", 1)
+    
+    # If there are multiple parts, return everything after the first space.
+    if len(parts) > 1:
+        return parts[1]
+        
+    # If there was no space, return an empty string (no "UNKNOWN" fallback).
+    return ""
 
 
 def _parse_temperature(raw_text: str) -> Optional[int]:
