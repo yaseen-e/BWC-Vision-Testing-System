@@ -226,7 +226,7 @@ def _extract_warped_variants(binary: np.ndarray, field: OCRField) -> list[np.nda
 	# Variant 2: Morphological Closing to bridge gaps in segmented LCD text.
 	# Closing (dilation followed by erosion) fills the small inner gaps of white-on-black 
 	# character pieces. Then we invert back to dark-on-light for Tesseract.
-	kernel_bridge = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 2))
+	kernel_bridge = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
 	closed_segments = cv2.morphologyEx(light_on_dark, cv2.MORPH_CLOSE, kernel_bridge)
 	variants.append(cv2.bitwise_not(closed_segments))
 	
@@ -327,10 +327,18 @@ def _field_empty_value(field_name: str) -> Any:
 
 
 def _parse_time(raw_text: str) -> str:
-	# Strictly enforce only numbers, spaces, A, M, P, and colon ':'
-	text = re.sub(r"[^0-9 AMP:]", "", raw_text)
+	# Normalize to uppercase for uniform string analysis
+	text = raw_text.upper().strip()
 	
-	# Clean up any duplicated whitespace
+	# Self-heal dropped or misinterpreted 'M' characters at the end of the timestamp
+	if text.endswith("A") or text.endswith("AN") or text.endswith("AH"):
+		text = text.split("A")[0] + "AM"
+	elif text.endswith("P") or text.endswith("PN") or text.endswith("PH"):
+		text = text.split("P")[0] + "PM"
+
+	# Strictly enforce only numbers, spaces, A, M, P, and colon ':'
+	text = re.sub(r"[^0-9 AMP:]", "", text)
+	
 	return _clean_text(text)
 
 
@@ -665,7 +673,17 @@ def capture_and_read_display(
 
 def warm_up() -> None:
 	"""Hook for camera warmup work."""
-	_get_camera()
+	camera = _get_camera()
+	if camera is not None:
+		import time
+		# 1. Allow the physical focus motor and auto-exposure time to stabilize
+		time.sleep(0.5)
+		
+		# 2. Capture and discard an initial frame to flush the stale pipeline buffer
+		try:
+			camera.capture_array()
+		except Exception:
+			pass
 
 
 def is_camera_available() -> bool:
