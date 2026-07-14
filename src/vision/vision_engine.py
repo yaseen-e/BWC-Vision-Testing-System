@@ -204,25 +204,32 @@ def _extract_warped_variants(binary: np.ndarray, field: OCRField) -> list[np.nda
 	# Tesseract expects dark text on a light background.
 	inverted_roi = cv2.bitwise_not(roi)
 	
+	# Add solid white padding around the ROI to prevent Tesseract from 
+	# dropping characters that sit flush against the crop edges (like 'M' in TIME_FIELD).
+	padded_roi = cv2.copyMakeBorder(
+		inverted_roi, 10, 10, 10, 10, 
+		borderType=cv2.BORDER_CONSTANT, 
+		value=255
+	)
+	
 	variants = []
 	
-	# Variant 1: Standard Otsu's (Works best when backlight brightness is perfectly even)
-	_, otsu = cv2.threshold(inverted_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+	# Variant 1: Standard Otsu's
+	_, otsu = cv2.threshold(padded_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 	variants.append(otsu)
 	
-	# Variant 2: Adaptive Thresholding (Crucial for the center-screen backlight glare)
-	# This looks at local neighborhoods of pixels rather than the whole image at once.
+	# Variant 2: Adaptive Thresholding
+	# Block size increased to 31 to correctly capture larger text sizes and filter grid noise.
 	adaptive = cv2.adaptiveThreshold(
-		inverted_roi, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 15, 4
+		padded_roi, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 4
 	)
 	variants.append(adaptive)
 	
-	# Variant 3: Slight erosion on the adaptive threshold to thin out "bloated" glowing text
+	# Variant 3: Slight erosion on the adaptive threshold
 	kernel_small = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
 	variants.append(cv2.erode(adaptive, kernel_small, iterations=1))
 	
 	return variants
-
 
 def _extract_fallback_variants(frame: np.ndarray, field: OCRField) -> list[np.ndarray]:
 	"""Build conservative OCR variants when the display contour is not found."""
@@ -304,8 +311,8 @@ def _field_empty_value(field_name: str) -> Any:
 
 
 def _parse_time(raw_text: str) -> str:
-	# Strictly enforce only numbers, spaces, A, M, and P
-	text = re.sub(r"[^0-9 AMP]", "", raw_text)
+	# Strictly enforce only numbers, spaces, A, M, P, and colon ':'
+	text = re.sub(r"[^0-9 AMP:]", "", raw_text)
 	
 	# Clean up any duplicated whitespace
 	return _clean_text(text)
@@ -414,9 +421,6 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 		best_raw = "".join(c for c in best_raw if c in whitelist_set)
 		if isinstance(best_value, str):
 			best_value = "".join(c for c in best_value if c in whitelist_set)
-
-	top = sorted(candidate_debug, key=lambda item: item[0], reverse=True)[:2]
-	print(f"[OCR DEBUG] {field_name} top candidates: {top}")
 
 	return best_raw, best_value
 
