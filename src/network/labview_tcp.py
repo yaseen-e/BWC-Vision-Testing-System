@@ -23,7 +23,7 @@ _SIMULATED_COMMANDS = collections.deque(
         # "RIGHT", "SELECT", "RUN_OCR",
 
         # Test schedule 1 name
-        "MENU", "RIGHT", "RIGHT", "SELECT", "SELECT", "RUN_OCR",
+        "MENU", "RIGHT", "RIGHT", "SELECT", "SELECT", "SELECT", "RUN_OCR",
         "BACK", "BACK", "BACK",
 
         # Test System Status 3 rois
