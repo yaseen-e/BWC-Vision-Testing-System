@@ -243,20 +243,6 @@ STATUS_BAR = tuple((
 	CALENDAR_ICON_FIELD,
 ))
 
-ACTIVE_FAULT_TEXT = OCRField(
-	name="active_fault_text",
-	ideal=ROIBox(top=0.20, bottom=0.80, left=0.10, right=0.90),
-	fallback=ROIBox(top=0.15, bottom=0.85, left=0.05, right=0.95),
-	tesseract_config="--psm 6",
-)
-
-SCHEDULE_INFO_TEXT = OCRField(
-	name="schedule_info_text",
-	ideal=ROIBox(top=0.30, bottom=0.70, left=0.10, right=0.90),
-	fallback=ROIBox(top=0.25, bottom=0.75, left=0.05, right=0.95),
-	tesseract_config="--psm 6",
-)
-
 ACTIVE_FAULTS_ERROR_CODE_1 = OCRField(
 	name="active_faults_error_code_1",
 	ideal=ROIBox(top=0.15, bottom=0.30, left=0.05, right=0.85),
