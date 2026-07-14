@@ -91,7 +91,7 @@ _COMMAND_RESPONSES = {
     "RIGHT": "Button Pressed\n",
     "BACK": "Button Pressed\n",
     "MENU": "Button Pressed\n",
-    "RUN_OCR": "Running OCR\n",
+    "RUN_OCR": "Running OCR   \n",
     "SEND_OCR_RESULT": "Sending OCR\n",
 }
 
