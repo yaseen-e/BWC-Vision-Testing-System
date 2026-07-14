@@ -386,8 +386,19 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 	best_score = -1.0
 	candidate_debug: list[tuple[float, str, Any]] = []
 
+	# 1. Parse and cache the whitelist set once per field invocation (O(1) lookups)
+	whitelist_set = None
+	if "tessedit_char_whitelist=" in field.tesseract_config:
+		whitelist_set = set(field.tesseract_config.split("tessedit_char_whitelist=")[1])
+
 	for variant in variants:
 		raw = _clean_text(pytesseract.image_to_string(variant, config=field.tesseract_config))
+		
+		# 2. Filter raw text early for non-temperature fields to strip noise 
+		# and prevent junk characters from spoiling the candidate score.
+		if whitelist_set and field_name != "temperature":
+			raw = "".join(c for c in raw if c in whitelist_set)
+
 		value = _parse_field_value(field_name, raw)
 		score = _score_field_candidate(field_name, raw, value)
 
@@ -397,6 +408,12 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 			best_raw = raw
 			best_value = value
 			best_score = score
+
+	# 3. Apply strict final enforcement on the chosen best candidate outputs
+	if whitelist_set:
+		best_raw = "".join(c for c in best_raw if c in whitelist_set)
+		if isinstance(best_value, str):
+			best_value = "".join(c for c in best_value if c in whitelist_set)
 
 	top = sorted(candidate_debug, key=lambda item: item[0], reverse=True)[:2]
 	print(f"[OCR DEBUG] {field_name} top candidates: {top}")

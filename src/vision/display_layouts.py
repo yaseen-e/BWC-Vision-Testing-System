@@ -10,11 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional
-
-try:
-	import numpy as np
-except Exception:  # pragma: no cover - environment dependent
-	np = None
+import numpy as np
 
 
 @dataclass(frozen=True)
@@ -175,6 +171,8 @@ def apply_navigation_command(
 
 	return current_menu, working_buffer, True
 
+# Create OCRFields
+
 MODE_FIELD = OCRField(
 	name="mode",
 	ideal=ROIBox(top=0.03, bottom=0.14, left=0.25, right=0.75),
@@ -321,6 +319,8 @@ TOU_SCHEDULE_DELETED_TEXT = OCRField(
 	fallback=ROIBox(top=0.00, bottom=0.18, left=0.18, right=0.82),
 	tesseract_config="--psm 7 -c tessedit_char_whitelist= ABCDEFGHIJKLMNOPQRSTUVWXYZ:",
 )
+
+# Create the menu tree
 
 HOME_MENU = ContextNode(
     key="homescreen",
