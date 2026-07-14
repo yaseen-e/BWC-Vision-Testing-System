@@ -80,49 +80,28 @@ def _warp_image(image: np.ndarray, points: np.ndarray) -> np.ndarray:
 	return cv2.warpPerspective(image, transform, (max_width, max_height))
 
 def _build_display_mask(frame: np.ndarray) -> np.ndarray:
-	"""Build a single mask for the emissive display window across both layout states."""
+	"""Build a single mask for the emissive orange display window."""
 	_require_cv2()
 	if frame is None or frame.size == 0:
 		raise ValueError("frame must be a non-empty image")
 
-	gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 	hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-	# 1. Secure the vibrant orange/amber background.
-	# This captures the physical screen area while cleanly ignoring dark bezels.
+	# Secure the vibrant orange/amber background perfectly.
 	orange_mask = cv2.inRange(hsv, np.array([0, 50, 50]), np.array([35, 255, 255]))
 
-	# 2. Extract bright pixels (which catches the white status bar icons/text).
-	_, otsu_mask = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-	
-	# 3. Create an "authority" region by dilating the orange mask vertically.
-	# This ensures we only accept bright pixels located directly below the main screen,
-	# rejecting any rogue glare on the side bezels.
-	authority_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, int(frame.shape[0] * 0.25)))
-	authority_mask = cv2.dilate(orange_mask, authority_kernel, iterations=1)
-	
-	bright_near_orange = cv2.bitwise_and(otsu_mask, authority_mask)
-	
-	# 4. Combine the stable orange core with the validated status bar elements.
-	mask = cv2.bitwise_or(orange_mask, bright_near_orange)
+	# Fuse any inner text gaps horizontally/vertically without spilling into bezels
+	mask = cv2.morphologyEx(orange_mask, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (15, 5)))
+	mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 15)))
 
-	# 5. Bridge gaps WITHOUT expanding outward into the bezels.
-	# A tall, narrow morphological close connects the status bar to the screen vertically.
-	vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, max(15, int(frame.shape[0] * 0.15))))
-	mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, vertical_kernel)
-
-	# A wide, short close fuses the text horizontally into a single solid block.
-	horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(15, int(frame.shape[1] * 0.10)), 5))
-	mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, horizontal_kernel)
-
-	# 6. Clean up any lingering tiny noise specs.
+	# Clean up any lingering tiny noise specs
 	mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)))
 	
 	return mask
 
 
-def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np.ndarray]:
-	"""Find the display rectangle ignoring strict aspect ratio, optimized for bezel rejection."""
+def _find_display_contour(frame: np.ndarray, mask: np.ndarray, min_area: int = 3000) -> Optional[np.ndarray]:
+	"""Find the display rectangle and geometrically project the status bar if present."""
 	_require_cv2()
 	contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 	if not contours:
@@ -141,8 +120,6 @@ def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np
 
 	for contour in contours:
 		area = cv2.contourArea(contour)
-		
-		# Allow almost the full frame to accommodate extremely tight physical crops
 		if area < min_area or area > frame_area * 0.99:
 			continue
 
@@ -152,19 +129,50 @@ def _find_display_contour(mask: np.ndarray, min_area: int = 3000) -> Optional[np
 			continue
 
 		solidity = area / hull_area
-		
-		# Relaxed to allow for empty space within the status bar
 		if solidity < 0.50: 
 			continue
 
-		# Score is strictly based on finding the largest valid contour.
-		# Dropping the aspect ratio constraint handles both the standard layout 
-		# (tall) and Active Faults layout (wide).
 		score = area * solidity
-		
 		if score > best_score:
 			best_score = score
 			best_contour = _contour_box(contour)
+
+	# --- GEOMETRIC STATUS BAR EXTENSION ---
+	if best_contour is not None:
+		ordered = _order_points(best_contour)
+		top_left, top_right, bottom_right, bottom_left = ordered
+
+		# Vectors representing the left and right edges moving downward
+		v_left = bottom_left - top_left
+		v_right = bottom_right - top_right
+
+		# Sample a small region directly below the orange box (2% to 12% below the edge)
+		sample_pts = np.array([
+			bottom_left + v_left * 0.02,
+			bottom_right + v_right * 0.02,
+			bottom_right + v_right * 0.12,
+			bottom_left + v_left * 0.12
+		], dtype="float32")
+
+		# Flatten the sample region to inspect it cleanly
+		tw, th = 100, 20
+		dst_pts = np.array([[0, 0], [tw - 1, 0], [tw - 1, th - 1], [0, th - 1]], dtype="float32")
+		M = cv2.getPerspectiveTransform(sample_pts, dst_pts)
+		sample_region = cv2.warpPerspective(frame, M, (tw, th))
+		
+		# Look for high-contrast white text/icons inside the dark status bar
+		sample_gray = cv2.cvtColor(sample_region, cv2.COLOR_BGR2GRAY)
+		_, thresh = cv2.threshold(sample_gray, 160, 255, cv2.THRESH_BINARY)
+		
+		# If white text pixels are detected, the black status bar layout is active
+		if np.sum(thresh == 255) > 25:
+			# The status bar takes up 9% of total height (orange box is 91%).
+			# Extend downward by exactly 9/91 (~9.89%) of the orange box height.
+			ext_factor = 9.0 / 91.0
+			extended_bottom_left = bottom_left + v_left * ext_factor
+			extended_bottom_right = bottom_right + v_right * ext_factor
+			
+			best_contour = np.array([top_left, top_right, extended_bottom_right, extended_bottom_left], dtype="float32")
 
 	return best_contour
 
@@ -516,7 +524,7 @@ def save_roi_ocr_overlay(
 
 	capture_dir.mkdir(parents=True, exist_ok=True)
 	mask = _build_display_mask(frame)
-	display_contour = _find_display_contour(mask)
+	display_contour = _find_display_contour(frame, mask)
 
 	if display_contour is None:
 		overlay = _draw_roi_overlay(frame, menu_fields, use_fallback_rois=True)
@@ -571,7 +579,7 @@ def read_display(
 	_require_cv2()
 	_require_pytesseract()
 	mask = _build_display_mask(frame)
-	display_contour = _find_display_contour(mask)
+	display_contour = _find_display_contour(frame, mask)
 	fields_result: dict[str, dict[str, Any]] = {}
 
 	if display_contour is None:
@@ -664,7 +672,7 @@ def shutdown() -> None:
 def get_warped_display(frame: np.ndarray) -> Optional[np.ndarray]:
 	"""Extract a front-facing view of the display from a camera frame, or None if not found."""
 	mask = _build_display_mask(frame)
-	display_contour = _find_display_contour(mask)
+	display_contour = _find_display_contour(frame, mask)
 
 	if display_contour is None:
 		return None
