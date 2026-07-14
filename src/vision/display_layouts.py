@@ -427,8 +427,8 @@ HOME_MENU = ContextNode(
         ContextNode(
             key="schedules",
             label="Schedules",
-            route_here=(("MENU", "RIGHT", "RIGHT", "SELECT"),),
-            return_route=(("MENU", "SELECT"),),
+            route_here=(("MENU", "RIGHT", "RIGHT", "SELECT",),),
+            return_route=(("BACK",),),
             fields=(),
 			children=(
 				ContextNode(
@@ -445,6 +445,7 @@ HOME_MENU = ContextNode(
 							return_route=(("BACK",),),
 							fields=(
 								USER_SCHEDULE_NAME_1,
+								*STATUS_BAR,
 							),
 							children=(
 								ContextNode(
