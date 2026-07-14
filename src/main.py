@@ -7,6 +7,8 @@ Coordinates startup, command handling, actuation, OCR reads, reporting, and shut
 
 from pathlib import Path
 from enum import Enum, auto
+import select
+import sys
 import time
 import traceback
 
@@ -18,7 +20,6 @@ from src.vision.display_layouts import HOME_MENU, ContextNode, apply_navigation_
 from src.network.labview_protocol import LabViewCommand, parse_labview_command
 from src.network import labview_tcp
 from src.network import report_writer
-from src.network import terminal_control_temp
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -99,6 +100,31 @@ def _safe_servo_shutdown() -> None:
     except Exception as exc:
         print(f"[WARNING] Servo shutdown skipped: {exc}")
 
+
+def wait_for_enter() -> None:
+    """Block until the user presses ENTER."""
+    if not sys.stdin.isatty():
+        return
+    print("Press ENTER to continue...", end="", flush=True)
+    while True:
+        char = sys.stdin.read(1)
+        if char in ("\n", "\r"):
+            print()
+            break
+
+
+def _space_pressed() -> bool:
+    """Return True when a space key is waiting on stdin."""
+    if not sys.stdin.isatty():
+        return False
+
+    ready, _, _ = select.select([sys.stdin], [], [], 0)
+    if not ready:
+        return False
+
+    return sys.stdin.read(1) == " "
+
+
 def main():
     current_state = SystemState.STARTUP
     last_command = ""
@@ -112,7 +138,6 @@ def main():
     use_simulated_commands = _prompt_for_command_mode()
 
     report_file, report_csv_writer, report_path = report_writer.open_test_report()
-    stdin_fd, previous_termios = terminal_control_temp.enable_single_key_mode()
     
     print("--- Starting BWC Water Heater Vision Testing System ---")
     print(f"[INFO] Test report CSV: {report_path}")
@@ -120,7 +145,7 @@ def main():
 
     try:
         while True:
-            if current_state != SystemState.SHUTDOWN and terminal_control_temp.space_pressed():
+            if current_state != SystemState.SHUTDOWN and _space_pressed():
                 print("[INFO] Space pressed. Entering SHUTDOWN state.")
                 current_state = SystemState.SHUTDOWN
 
@@ -180,7 +205,7 @@ def main():
                     else:
                         print(f"[MANUAL] Please press the {button.name} button on the water heater.")
                         if use_simulated_commands:
-                            terminal_control_temp.wait_for_enter()
+                            wait_for_enter()
                         else:
                             servo_driver.press_button(button)
 
@@ -285,7 +310,6 @@ def main():
                     _safe_servo_home_all()
                     _safe_servo_shutdown()
                     vision_engine.shutdown()
-                    terminal_control_temp.disable_single_key_mode(stdin_fd, previous_termios)
                     break
     
     except Exception as e:
@@ -295,7 +319,6 @@ def main():
 
         report_file.flush()
         report_file.close()
-        terminal_control_temp.disable_single_key_mode(stdin_fd, previous_termios)
         _safe_servo_home_all()
         _safe_servo_shutdown()
         vision_engine.shutdown()
