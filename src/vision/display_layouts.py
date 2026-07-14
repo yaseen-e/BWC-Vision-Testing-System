@@ -343,7 +343,7 @@ UPPER_RELAY_STATE = OCRField(
 
 LOWER_RELAY_STATE = OCRField(
 	name="lower_relay_state",
-	ideal=ROIBox(top=0.63, bottom=0.72, left=0.06, right=0.19),
+	ideal=ROIBox(top=0.64, bottom=0.73, left=0.06, right=0.19),
 	fallback=ROIBox(top=0.15, bottom=0.35, left=0.05, right=0.95),
 	tesseract_config="--psm 7 -c tessedit_char_whitelist=OFN",
 )
