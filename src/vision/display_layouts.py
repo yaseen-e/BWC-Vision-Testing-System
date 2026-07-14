@@ -296,14 +296,14 @@ LOCATION_FIELD = OCRField(
 	name="location_field",
 	ideal=ROIBox(top=0.35, bottom=0.50, left=0.30, right=0.70),
 	fallback=ROIBox(top=0.25, bottom=0.75, left=0.05, right=0.95),
-	tesseract_config="--psm 6",
+	tesseract_config="--psm 7 -c tessedit_char_whitelist= ABCDEFGHIJKLMNOPQRSTUVWXYZ",
 )
 
 USER_SCHEDULE_NAME_1 = OCRField(
 	name="user_schedule_name_1",
 	ideal=ROIBox(top=0.28, bottom=0.38, left=0.08, right=0.67),
 	fallback=ROIBox(top=0.08, bottom=0.35, left=0.05, right=0.95),
-	tesseract_config="--psm 6",
+	tesseract_config="--psm 7 -c tessedit_char_whitelist= abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
 )
 
 USER_SCHEDULE_DELETED_TEXT = OCRField(
@@ -317,7 +317,7 @@ TOU_SCHEDULE_NAME_1 = OCRField(
 	name="tou_schedule_name_1",
 	ideal=ROIBox(top=0.28, bottom=0.38, left=0.08, right=0.67),
 	fallback=ROIBox(top=0.08, bottom=0.35, left=0.05, right=0.95),
-	tesseract_config="--psm 6",
+	tesseract_config="--psm 7 -c tessedit_char_whitelist= abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
 )
 
 TOU_SCHEDULE_DELETED_TEXT = OCRField(
