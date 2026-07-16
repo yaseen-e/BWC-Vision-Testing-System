@@ -353,6 +353,7 @@ HOME_MENU = ContextNode(
             label="Active Faults Screen",
             route_here=(("RIGHT",),),
             return_route=(("MENU", "SELECT"), ("LEFT",)),
+			fields=(),
             children=(
                 ContextNode(
                     key="active_faults_list",
@@ -395,8 +396,8 @@ HOME_MENU = ContextNode(
         ContextNode(
             key="settings",
             label="Settings",
-            route_here=(("MENU", "RIGHT", "DOWN", "SELECT"), ("MENU", "DOWN", "RIGHT", "SELECT")),
-            return_route=(("MENU",),),
+            route_here=(("MENU", "RIGHT", "DOWN", "SELECT"), ("MENU", "DOWN", "RIGHT", "SELECT"),),
+            return_route=(("BACK", "BACK"), ("BACK", "SELECT"),),
             children=(
                 ContextNode(
                     key="location",
@@ -413,7 +414,7 @@ HOME_MENU = ContextNode(
         ContextNode(
             key="schedules",
             label="Schedules",
-            route_here=(("MENU", "RIGHT", "RIGHT", "SELECT",),),
+            route_here=(("MENU", "RIGHT", "RIGHT", "SELECT"),),
             return_route=(("BACK","BACK"),),
             fields=(),
 			children=(

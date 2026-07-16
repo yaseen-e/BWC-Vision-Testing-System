@@ -7,27 +7,39 @@ from xmlrpc import server
 # These mimic what LabVIEW would send over TCP/IP during automated mode testing.
 _SIMULATED_COMMANDS = collections.deque(
     [
-        # MENU TRAVERSAL
-        # "RIGHT", "SELECT", "RUN_OCR", "DOWN", "RUN_OCR", "SHUTDOWN",
-        # LOCATION
-        # "MENU", "RIGHT", "DOWN", "SELECT", "DOWN", "DOWN", "SELECT", "DOWN", "DOWN", "SELECT", "RUN_OCR", "LEFT", "RUN_OCR", "SHUTDOWN",
-        # DELETE SCHEDULE
-        # "MENU", "RIGHT", "RIGHT", "SELECT",
-        # "SELECT", 
-        # "SELECT",
-        # "RUN_OCR", "SHUTDOWN", # For user schedule 1 name
-        # "DOWN", "SELECT", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", 
-        # "SELECT", "SELECT", "RUN_OCR", "SHUTDOWN",
-
-        # CHECK OUT ACTIVE FAULTS LIST
+        # active_faults_list
         "RIGHT", "SELECT", "RUN_OCR", "BACK", "LEFT",
+        
+        # system_status_top
+        "MENU", "DOWN", "SELECT", "RUN_OCR",
 
-        # Test schedule 1 name
-        "MENU", "RIGHT", "RIGHT", "SELECT", "SELECT", "SELECT", "RUN_OCR",
+        # system_status_bottom
+        "DOWN", "RUN_OCR", "UP", "BACK", "UP", "SELECT",
+
+        # location
+        "MENU", "RIGHT", "DOWN", "SELECT", "DOWN", "DOWN", "SELECT", "DOWN", "DOWN", "SELECT",
+        
+        # TEST ALL LOCATIONS
+        
+        # USA
+        "SELECT", "SELECT", "RUN_OCR",
+        # CANADA
+        "LEFT", "SELECT", "DOWN", "SELECT", "RUN_OCR",
+        # MEXICO
+        "LEFT", "SELECT", "DOWN", "DOWN","SELECT", "RUN_OCR",
+        # OTHER
+        "LEFT", "SELECT", "DOWN", "DOWN", "DOWN", "SELECT", "RUN_OCR",
         "BACK", "BACK", "BACK", "BACK",
 
-        # Test System Status 3 rois
-        "MENU", "DOWN", "SELECT", "RUN_OCR", "DOWN", "RUN_OCR", "SHUTDOWN",
+        # user_schedules_list
+        "MENU", "RIGHT", "RIGHT", "SELECT", "SELECT", "SELECT", "RUN_OCR",
+        # WARNING: Make sure to have a second user schedule to delete!
+        "DOWN", "SELECT", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "SELECT", "SELECT", "RUN_OCR",
+        "SELECT", "BACK", "BACK", "BACK", "BACK",
+
+        # TODO: Still need to test tou_schedules_list
+        
+        # TEST ALL MODES
 
         # HEAT_PUMP
         "BACK", "MENU", "SELECT", "LEFT", "LEFT", "SELECT", "DOWN", "DOWN", "SELECT", "RIGHT", "RIGHT", "RUN_OCR",
