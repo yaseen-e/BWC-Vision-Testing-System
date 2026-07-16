@@ -15,6 +15,7 @@ import numpy as np
 import cv2
 import pytesseract
 from .display_layouts import OCRField, TEMPERATURE_RANGE_F
+from picamera2 import Picamera2
 import time
 
 # Camera is assumed to be connected and initialized directly.
@@ -28,16 +29,6 @@ class OCRReadout:
 	display_found: bool
 	current_menu_key: str
 	fields: dict[str, dict[str, Any]]
-
-
-def _require_cv2() -> None:
-	if cv2 is None:
-		raise RuntimeError("opencv-python is required for OCR image processing")
-
-
-def _require_pytesseract() -> None:
-	if pytesseract is None:
-		raise RuntimeError("pytesseract is required for OCR text extraction")
 
 
 def _order_points(points: np.ndarray) -> np.ndarray:
@@ -55,7 +46,6 @@ def _order_points(points: np.ndarray) -> np.ndarray:
 
 def _warp_image(image: np.ndarray, points: np.ndarray) -> np.ndarray:
 	"""Flatten the angled display into a front-facing view."""
-	_require_cv2()
 	rect = _order_points(points)
 	top_left, top_right, bottom_right, bottom_left = rect
 
@@ -82,7 +72,6 @@ def _warp_image(image: np.ndarray, points: np.ndarray) -> np.ndarray:
 
 def _build_display_mask(frame: np.ndarray) -> np.ndarray:
 	"""Build a single mask for the emissive orange display window."""
-	_require_cv2()
 	if frame is None or frame.size == 0:
 		raise ValueError("frame must be a non-empty image")
 
@@ -103,7 +92,6 @@ def _build_display_mask(frame: np.ndarray) -> np.ndarray:
 
 def _find_display_contour(frame: np.ndarray, mask: np.ndarray, min_area: int = 3000) -> Optional[np.ndarray]:
 	"""Find the display rectangle and geometrically project the status bar if present."""
-	_require_cv2()
 	contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 	if not contours:
 		return None
@@ -180,7 +168,6 @@ def _find_display_contour(frame: np.ndarray, mask: np.ndarray, min_area: int = 3
 
 def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
 	"""Convert to grayscale, enhance edges, and scale for OCR."""
-	_require_cv2()
 	gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
 	
 	# 1. Bilateral Filter: Melts away the LCD pixel grid noise but PRESERVES hard edges.
@@ -199,7 +186,6 @@ def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
 
 def _extract_warped_variants(binary: np.ndarray, field: OCRField) -> list[np.ndarray]:
 	"""Build robust OCR variants utilizing adaptive thresholding and morphological operations to bridge LCD segment gaps."""
-	_require_cv2()
 	roi = field.ideal.crop(binary)
 	
 	if np.std(roi) < 15.0:
@@ -245,7 +231,6 @@ def _extract_warped_variants(binary: np.ndarray, field: OCRField) -> list[np.nda
 
 def _extract_fallback_variants(frame: np.ndarray, field: OCRField) -> list[np.ndarray]:
 	"""Build conservative OCR variants when the display contour is not found."""
-	_require_cv2()
 	gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 	gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
 	roi = field.fallback.crop(gray)
@@ -411,7 +396,6 @@ def _score_field_candidate(field_name: str, raw_text: str, value: Any) -> float:
 
 def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 	"""OCR a field from multiple variants and keep the best-scoring candidate."""
-	_require_pytesseract()
 	field_name = field.name
 	best_raw = ""
 	best_value: Any = _field_empty_value(field_name)
@@ -452,7 +436,6 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 
 def _draw_roi_overlay(image: np.ndarray, fields: tuple[OCRField, ...], use_fallback_rois: bool) -> np.ndarray:
 	"""Draw every OCR ROI on a frame for calibration and debugging."""
-	_require_cv2()
 	overlay = image.copy()
 	height, width = overlay.shape[:2]
 
@@ -502,7 +485,6 @@ def _draw_roi_overlay(image: np.ndarray, fields: tuple[OCRField, ...], use_fallb
 
 def _draw_polygon_outline(image: np.ndarray, points: np.ndarray, label: str) -> None:
 	"""Draw a high-contrast polygon outline with a readable label."""
-	_require_cv2()
 	polygon = points.astype("int32")
 	cv2.polylines(image, [polygon], True, (0, 0, 0), 3, cv2.LINE_AA)
 	cv2.polylines(image, [polygon], True, (255, 255, 255), 1, cv2.LINE_AA)
@@ -534,7 +516,6 @@ def _draw_polygon_outline(image: np.ndarray, points: np.ndarray, label: str) -> 
 
 def _project_roi_box(box: "ROIBox", inverse_transform: np.ndarray, warped_width: int, warped_height: int) -> np.ndarray:
 	"""Project a normalized warped ROI back into source-frame coordinates."""
-	_require_cv2()
 	warped_points = np.array(
 		[
 			[warped_width * box.left, warped_height * box.top],
@@ -564,7 +545,6 @@ def save_roi_ocr_overlay(
 	menu_fields: tuple[OCRField, ...],
 ) -> Optional[Path]:
 	"""Persist a calibration image that shows every OCR ROI on the current frame."""
-	_require_cv2()
 	if frame is None:
 		return None
 
@@ -622,8 +602,6 @@ def read_display(
 	Returns:
 		OCRReadout structure containing dynamic fields.
 	"""
-	_require_cv2()
-	_require_pytesseract()
 	mask = _build_display_mask(frame)
 	display_contour = _find_display_contour(frame, mask)
 	fields_result: dict[str, dict[str, Any]] = {}
@@ -678,8 +656,11 @@ def warm_up() -> None:
 
 
 def is_camera_available() -> bool:
-	"""Return True when the camera can be used."""
-	return True
+    try:
+        # Quick non-blocking check
+        return len(Picamera2.global_camera_info()) > 0
+    except Exception:
+        return False
 
 
 def _get_camera() -> Any:
