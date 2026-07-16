@@ -37,7 +37,7 @@ _SIMULATED_COMMANDS = collections.deque(
         "DOWN", "SELECT", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "SELECT", "SELECT", "RUN_OCR",
         "SELECT", "BACK", "BACK", "BACK", "BACK",
 
-        # TODO: Still need to test tou_schedules_list
+        # TODO: Still need to test tou_schedule_deleted_confirmation
         
         # TEST ALL MODES
 
