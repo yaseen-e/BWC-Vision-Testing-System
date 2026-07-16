@@ -89,7 +89,7 @@ def build_servo_config():
     global BUTTON_SERVO_CONFIG
 
     home_angles = load_home_angles()
-    stroke_length = 60
+    stroke_length = 70
 
     BUTTON_SERVO_CONFIG = {
         Button.UP: _build_servo_config(
