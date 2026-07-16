@@ -14,11 +14,6 @@ import json
 from pathlib import Path
 
 try:
-    from adafruit_blinka.microcontroller.generic_linux.i2c import I2C as LinuxI2C
-except Exception:  # pragma: no cover - hardware/environment dependent
-    LinuxI2C = None
-
-try:
     from adafruit_servokit import ServoKit
 except Exception:  # pragma: no cover - hardware/environment dependent
     ServoKit = None
@@ -51,7 +46,7 @@ class Button(Enum):
 def _build_servo_config(channel: int, home_angle: float, press_delta: float, press_direction: int) -> ServoConfig:
     return ServoConfig(channel=channel, home_angle=home_angle, press_angle=home_angle + (press_delta * press_direction))
 
-CAL_FILE = Path(__file__).parent / "servo_calibration.json"
+CAL_FILE = Path(__file__).resolve().parents[2] / "playground" / "servo_calibration.json"
 
 DEFAULT_HOME_ANGLES = {
     Button.UP: 50,
@@ -88,115 +83,58 @@ def load_home_angles() -> dict[Button, float]:
 
     return home_angles
 
+# edit this definition to change stroke length and servo configuration
 def build_servo_config():
 
     global BUTTON_SERVO_CONFIG
 
     home_angles = load_home_angles()
-    press_delta = 60
+    stroke_length = 60
 
     BUTTON_SERVO_CONFIG = {
         Button.UP: _build_servo_config(
             channel=0,
             home_angle=home_angles[Button.UP],
-            press_delta=press_delta,
+            press_delta=stroke_length,
             press_direction=1,
         ),
         Button.LEFT: _build_servo_config(
             channel=1,
             home_angle=home_angles[Button.LEFT],
-            press_delta=press_delta,
+            press_delta=stroke_length,
             press_direction=-1,
         ),
         Button.SELECT: _build_servo_config(
             channel=2,
             home_angle=home_angles[Button.SELECT],
-            press_delta=press_delta,
+            press_delta=stroke_length,
             press_direction=1,
         ),
         Button.RIGHT: _build_servo_config(
             channel=3,
             home_angle=home_angles[Button.RIGHT],
-            press_delta=press_delta,
+            press_delta=stroke_length,
             press_direction=1,
         ),
         Button.BACK: _build_servo_config(
             channel=4,
             home_angle=home_angles[Button.BACK],
-            press_delta=press_delta,
+            press_delta=stroke_length,
             press_direction=1,
         ),
         Button.DOWN: _build_servo_config(
             channel=5,
             home_angle=home_angles[Button.DOWN],
-            press_delta=press_delta,
+            press_delta=stroke_length,
             press_direction=1,
         ),
         Button.MENU: _build_servo_config(
             channel=6,
             home_angle=home_angles[Button.MENU],
-            press_delta=press_delta,
+            press_delta=stroke_length,
             press_direction=-1,
         ),
     }
-
-"""I2C Wrapper for Linux-based servo control. Only needed due to bad pins on Pi."""
-class LinuxI2CBus:
-    def __init__(self, bus_num):
-        if LinuxI2C is None:
-            raise RuntimeError("adafruit_blinka I2C support is not available")
-        self._i2c = LinuxI2C(bus_num)
-        self._locked = False
-
-    def try_lock(self):
-        if not self._locked:
-            self._locked = True
-            return True
-        return False
-
-    def unlock(self):
-        self._locked = False
-
-    def writeto(self, address, buffer, *, start=0, end=None, stop=True):
-        return self._i2c.writeto(
-            address,
-            buffer,
-            start=start,
-            end=end,
-            stop=stop,
-        )
-
-    def readfrom_into(self, address, buffer, *, start=0, end=None, stop=True):
-        return self._i2c.readfrom_into(
-            address,
-            buffer,
-            start=start,
-            end=end,
-            stop=stop,
-        )
-
-    def writeto_then_readfrom(
-        self,
-        address,
-        buffer_out,
-        buffer_in,
-        *,
-        out_start=0,
-        out_end=None,
-        in_start=0,
-        in_end=None,
-        stop=False,
-    ):
-        return self._i2c.writeto_then_readfrom(
-            address,
-            buffer_out,
-            buffer_in,
-            out_start=out_start,
-            out_end=out_end,
-            in_start=in_start,
-            in_end=in_end,
-            stop=stop,
-        )
 
 """Module state"""
 _kit = None
@@ -219,19 +157,15 @@ def initialize() -> None:
     if not _servo_available:
         return
 
-    if ServoKit is None or LinuxI2C is None:
+    if ServoKit is None:
         _servo_available = False
         print("[WARNING] Servo hardware libraries unavailable; servo control disabled.")
         return
 
     try:
         build_servo_config()
-        i2c = LinuxI2CBus(BUS_NUM)
 
-        _kit = ServoKit(
-            channels=16,
-            i2c=i2c,
-        )
+        _kit = ServoKit(channels=16)
 
         for button, config in BUTTON_SERVO_CONFIG.items():
             servo = _kit.servo[config.channel]
