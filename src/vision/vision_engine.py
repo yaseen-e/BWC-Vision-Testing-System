@@ -357,60 +357,6 @@ def _parse_field_value(field_name: str, raw_text: str) -> Any:
 	return _clean_text(raw_text)
 
 
-def _score_temperature(raw_text: str, value: Any) -> float:
-	if not isinstance(value, int):
-		return -1.0
-
-	score = 0.0
-	min_temp, max_temp = TEMPERATURE_RANGE_F
-	if min_temp <= value <= max_temp:
-		score += 2.0
-	if 100 <= value <= 199:
-		score += 1.5
-	if len(str(value)) == 3:
-		score += 1.0
-	if 60 <= value <= 240:
-		score += 0.5
-	if "." in raw_text:
-		score += 0.2
-	if any(char in raw_text.upper() for char in ("O", "I", "L", "S", "B", "Z", "|")):
-		score += 0.1
-	return score
-
-
-def _score_info_line(raw_text: str, parsed_value: Any) -> float:
-	if not isinstance(parsed_value, str) or not parsed_value:
-		return -1.0
-
-	alpha_count = sum(1 for char in parsed_value if char.isalpha())
-	word_count = len([word for word in parsed_value.split(" ") if any(char.isalpha() for char in word)])
-	punct_count = sum(1 for char in parsed_value if not char.isalnum() and char != " ")
-	if alpha_count < 3 or word_count == 0:
-		return -1.0
-
-	junk_cluster_penalty = 0.8 if re.search(r"[^A-Za-z0-9\s]{3,}", raw_text) else 0.0
-
-	score = 0.0
-	score += min(3.0, alpha_count * 0.10)
-	score += min(2.0, word_count * 0.70)
-	score += min(1.5, len(parsed_value) * 0.04)
-	score -= min(2.0, punct_count * 0.15)
-	score -= junk_cluster_penalty
-	return score
-
-
-def _score_field_candidate(field_name: str, raw_text: str, value: Any) -> float:
-	if field_name == "temperature":
-		return _score_temperature(raw_text, value)
-	if field_name.startswith("dashboard_info_line_"):
-		return _score_info_line(raw_text, value)
-	if isinstance(value, str):
-		return float(len(value))
-	if value is None:
-		return -1.0
-	return 0.0
-
-
 def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 	"""OCR a field from multiple variants and keep the best-scoring candidate."""
 	_require_pytesseract()
@@ -434,14 +380,6 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 			raw = "".join(c for c in raw if c in whitelist_set)
 
 		value = _parse_field_value(field_name, raw)
-		score = _score_field_candidate(field_name, raw, value)
-
-		candidate_debug.append((score, raw, value))
-
-		if score > best_score:
-			best_raw = raw
-			best_value = value
-			best_score = score
 
 	# 3. Apply strict final enforcement on the chosen best candidate outputs
 	if whitelist_set:

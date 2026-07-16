@@ -7,6 +7,8 @@ from xmlrpc import server
 # These mimic what LabVIEW would send over TCP/IP during automated mode testing.
 _SIMULATED_COMMANDS = collections.deque(
     [
+        # homescreen x 3 times
+        "BACK", "RUN_OCR", "BACK", "RUN_OCR", "BACK", "RUN_OCR",
         # active_faults_list
         "RIGHT", "SELECT", "RUN_OCR", "BACK", "LEFT",
         
