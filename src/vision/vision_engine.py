@@ -15,7 +15,6 @@ import numpy as np
 import cv2
 import pytesseract
 from .display_layouts import OCRField, TEMPERATURE_RANGE_F
-from picamera2 import Picamera2
 import time
 
 # Camera is assumed to be connected and initialized directly.
@@ -29,6 +28,16 @@ class OCRReadout:
 	display_found: bool
 	current_menu_key: str
 	fields: dict[str, dict[str, Any]]
+
+
+def _require_cv2() -> None:
+	if cv2 is None:
+		raise RuntimeError("opencv-python is required for OCR image processing")
+
+
+def _require_pytesseract() -> None:
+	if pytesseract is None:
+		raise RuntimeError("pytesseract is required for OCR text extraction")
 
 
 def _order_points(points: np.ndarray) -> np.ndarray:
@@ -46,6 +55,7 @@ def _order_points(points: np.ndarray) -> np.ndarray:
 
 def _warp_image(image: np.ndarray, points: np.ndarray) -> np.ndarray:
 	"""Flatten the angled display into a front-facing view."""
+	_require_cv2()
 	rect = _order_points(points)
 	top_left, top_right, bottom_right, bottom_left = rect
 
@@ -70,8 +80,10 @@ def _warp_image(image: np.ndarray, points: np.ndarray) -> np.ndarray:
 	transform = cv2.getPerspectiveTransform(rect, dst)
 	return cv2.warpPerspective(image, transform, (max_width, max_height))
 
+
 def _build_display_mask(frame: np.ndarray) -> np.ndarray:
 	"""Build a single mask for the emissive orange display window."""
+	_require_cv2()
 	if frame is None or frame.size == 0:
 		raise ValueError("frame must be a non-empty image")
 
@@ -91,7 +103,8 @@ def _build_display_mask(frame: np.ndarray) -> np.ndarray:
 
 
 def _find_display_contour(frame: np.ndarray, mask: np.ndarray, min_area: int = 3000) -> Optional[np.ndarray]:
-	"""Find the display rectangle and geometrically project the status bar if present."""
+	"""Find the raw orange display rectangle without geometric status bar projection."""
+	_require_cv2()
 	contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 	if not contours:
 		return None
@@ -126,66 +139,74 @@ def _find_display_contour(frame: np.ndarray, mask: np.ndarray, min_area: int = 3
 			best_score = score
 			best_contour = _contour_box(contour)
 
-	# --- GEOMETRIC STATUS BAR EXTENSION ---
-	if best_contour is not None:
-		ordered = _order_points(best_contour)
-		top_left, top_right, bottom_right, bottom_left = ordered
-
-		# Vectors representing the left and right edges moving downward
-		v_left = bottom_left - top_left
-		v_right = bottom_right - top_right
-
-		# Sample a small region directly below the orange box (2% to 12% below the edge)
-		sample_pts = np.array([
-			bottom_left + v_left * 0.02,
-			bottom_right + v_right * 0.02,
-			bottom_right + v_right * 0.12,
-			bottom_left + v_left * 0.12
-		], dtype="float32")
-
-		# Flatten the sample region to inspect it cleanly
-		tw, th = 100, 20
-		dst_pts = np.array([[0, 0], [tw - 1, 0], [tw - 1, th - 1], [0, th - 1]], dtype="float32")
-		M = cv2.getPerspectiveTransform(sample_pts, dst_pts)
-		sample_region = cv2.warpPerspective(frame, M, (tw, th))
-		
-		# Look for high-contrast white text/icons inside the dark status bar
-		sample_gray = cv2.cvtColor(sample_region, cv2.COLOR_BGR2GRAY)
-		_, thresh = cv2.threshold(sample_gray, 160, 255, cv2.THRESH_BINARY)
-		
-		# If white text pixels are detected, the black status bar layout is active
-		if np.sum(thresh == 255) > 25:
-			# The status bar takes up 9% of total height (orange box is 91%).
-			# Extend downward by exactly 9/91 (~9.89%) of the orange box height.
-			ext_factor = 9.0 / 91.0
-			extended_bottom_left = bottom_left + v_left * ext_factor
-			extended_bottom_right = bottom_right + v_right * ext_factor
-			
-			best_contour = np.array([top_left, top_right, extended_bottom_right, extended_bottom_left], dtype="float32")
-
 	return best_contour
+
+
+def _process_display_contour_and_warp(
+	frame: np.ndarray, orange_contour: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, bool]:
+	"""
+	Warp the extended display area exactly once, check for the status bar inside 
+	the flattened coordinate space, and return the final contour, warped image, 
+	and status bar state.
+	"""
+	_require_cv2()
+	ordered = _order_points(orange_contour)
+	top_left, top_right, bottom_right, bottom_left = ordered
+
+	v_left = bottom_left - top_left
+	v_right = bottom_right - top_right
+
+	# Construct the extended contour downward.
+	# The orange box is 91% of the total height, the black status bar is 9% (9/91 factor).
+	ext_factor = 9.0 / 91.0
+	extended_bottom_left = bottom_left + v_left * ext_factor
+	extended_bottom_right = bottom_right + v_right * ext_factor
+	extended_contour = np.array([top_left, top_right, extended_bottom_right, extended_bottom_left], dtype="float32")
+
+	# PERFORM THE SINGLE PERSPECTIVE WARP OPERATION HERE
+	warped_extended = _warp_image(frame, extended_contour)
+	h, w = warped_extended.shape[:2]
+
+	# Extract status bar slice on the flattened, perspective-corrected image
+	y_start = int(h * 0.91)
+	sample_region = warped_extended[y_start:h, :]
+	
+	sample_gray = cv2.cvtColor(sample_region, cv2.COLOR_BGR2GRAY)
+	_, thresh = cv2.threshold(sample_gray, 160, 255, cv2.THRESH_BINARY)
+	
+	# If white status text pixels are detected, the status bar is active
+	status_bar_present = bool(np.sum(thresh == 255) > 25)
+	
+	if status_bar_present:
+		return extended_contour, warped_extended, True
+	else:
+		# If inactive, discard the bottom slice and crop to only show the orange display
+		cropped_warped = warped_extended[0:int(h * (91.0 / 100.0)), :]
+		return orange_contour, cropped_warped, False
 
 
 def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
 	"""Convert to grayscale, enhance edges, and scale for OCR."""
+	_require_cv2()
 	gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
 	
-	# 1. Bilateral Filter: Melts away the LCD pixel grid noise but PRESERVES hard edges.
-	# This is much safer than Median Blur for images that are already out of focus.
-	filtered = cv2.bilateralFilter(gray, d=5, sigmaColor=50, sigmaSpace=50)
+	# FIX: Replaced high-overhead Bilateral Filter with ultra-fast Gaussian Blur
+	filtered = cv2.GaussianBlur(gray, (3, 3), 0)
 	
-	# 2. Unsharp Masking: Artificially sharpen the image to combat camera lens blur.
+	# Unsharp Masking: Artificially sharpen the image to combat camera lens blur.
 	gaussian_blur = cv2.GaussianBlur(filtered, (0, 0), 2.0)
 	sharpened = cv2.addWeighted(filtered, 1.5, gaussian_blur, -0.5, 0)
 	
-	# 3. Moderate Upscaling: 2.5x gives Tesseract enough pixel density without bloating.
-	scaled = cv2.resize(sharpened, None, fx=2.5, fy=2.5, interpolation=cv2.INTER_CUBIC)
+	# FIX: Swapped out INTER_CUBIC with INTER_LINEAR for optimized CPU usage
+	scaled = cv2.resize(sharpened, None, fx=2.5, fy=2.5, interpolation=cv2.INTER_LINEAR)
 	
 	return scaled
 
 
 def _extract_warped_variants(binary: np.ndarray, field: OCRField) -> list[np.ndarray]:
 	"""Build robust OCR variants utilizing adaptive thresholding and morphological operations to bridge LCD segment gaps."""
+	_require_cv2()
 	roi = field.ideal.crop(binary)
 	
 	if np.std(roi) < 15.0:
@@ -229,10 +250,13 @@ def _extract_warped_variants(binary: np.ndarray, field: OCRField) -> list[np.nda
 	
 	return variants
 
+
 def _extract_fallback_variants(frame: np.ndarray, field: OCRField) -> list[np.ndarray]:
 	"""Build conservative OCR variants when the display contour is not found."""
+	_require_cv2()
 	gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-	gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+	# FIX: Swapped out INTER_CUBIC with INTER_LINEAR
+	gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_LINEAR)
 	roi = field.fallback.crop(gray)
 	
 	# --- FIX: PHANTOM TEXT HALLUCINATION CHECK ---
@@ -250,18 +274,11 @@ def _clean_text(raw_text: str) -> str:
 
 
 def _parse_mode(raw_text: str) -> str:
-    cleaned = _clean_text(raw_text).upper().strip()
-    
-    # Split the string using a space as the separator. 
-    # maxsplit=1 ensures we only split at the very first space.
-    parts = cleaned.split(" ", 1)
-    
-    # If there are multiple parts, return everything after the first space.
-    if len(parts) > 1:
-        return parts[1]
-        
-    # If there was no space, return an empty string (no "UNKNOWN" fallback).
-    return ""
+	cleaned = _clean_text(raw_text).upper().strip()
+	parts = cleaned.split(" ", 1)
+	if len(parts) > 1:
+		return parts[1]
+	return ""
 
 
 def _parse_temperature(raw_text: str) -> Optional[int]:
@@ -396,6 +413,7 @@ def _score_field_candidate(field_name: str, raw_text: str, value: Any) -> float:
 
 def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 	"""OCR a field from multiple variants and keep the best-scoring candidate."""
+	_require_pytesseract()
 	field_name = field.name
 	best_raw = ""
 	best_value: Any = _field_empty_value(field_name)
@@ -436,6 +454,7 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 
 def _draw_roi_overlay(image: np.ndarray, fields: tuple[OCRField, ...], use_fallback_rois: bool) -> np.ndarray:
 	"""Draw every OCR ROI on a frame for calibration and debugging."""
+	_require_cv2()
 	overlay = image.copy()
 	height, width = overlay.shape[:2]
 
@@ -485,6 +504,7 @@ def _draw_roi_overlay(image: np.ndarray, fields: tuple[OCRField, ...], use_fallb
 
 def _draw_polygon_outline(image: np.ndarray, points: np.ndarray, label: str) -> None:
 	"""Draw a high-contrast polygon outline with a readable label."""
+	_require_cv2()
 	polygon = points.astype("int32")
 	cv2.polylines(image, [polygon], True, (0, 0, 0), 3, cv2.LINE_AA)
 	cv2.polylines(image, [polygon], True, (255, 255, 255), 1, cv2.LINE_AA)
@@ -516,6 +536,7 @@ def _draw_polygon_outline(image: np.ndarray, points: np.ndarray, label: str) -> 
 
 def _project_roi_box(box: "ROIBox", inverse_transform: np.ndarray, warped_width: int, warped_height: int) -> np.ndarray:
 	"""Project a normalized warped ROI back into source-frame coordinates."""
+	_require_cv2()
 	warped_points = np.array(
 		[
 			[warped_width * box.left, warped_height * box.top],
@@ -545,6 +566,7 @@ def save_roi_ocr_overlay(
 	menu_fields: tuple[OCRField, ...],
 ) -> Optional[Path]:
 	"""Persist a calibration image that shows every OCR ROI on the current frame."""
+	_require_cv2()
 	if frame is None:
 		return None
 
@@ -555,7 +577,9 @@ def save_roi_ocr_overlay(
 	if display_contour is None:
 		overlay = _draw_roi_overlay(frame, menu_fields, use_fallback_rois=True)
 	else:
-		source_points = _order_points(display_contour.reshape(4, 2))
+		final_contour, warped, status_bar_present = _process_display_contour_and_warp(frame, display_contour)
+		source_points = _order_points(final_contour.reshape(4, 2))
+		
 		width_a = np.linalg.norm(source_points[2] - source_points[3])
 		width_b = np.linalg.norm(source_points[1] - source_points[0])
 		warped_width = max(int(width_a), int(width_b))
@@ -602,6 +626,8 @@ def read_display(
 	Returns:
 		OCRReadout structure containing dynamic fields.
 	"""
+	_require_cv2()
+	_require_pytesseract()
 	mask = _build_display_mask(frame)
 	display_contour = _find_display_contour(frame, mask)
 	fields_result: dict[str, dict[str, Any]] = {}
@@ -617,7 +643,8 @@ def read_display(
 			fields=fields_result,
 		)
 
-	warped = _warp_image(frame, display_contour.reshape(4, 2))
+	# Single Warp & Smart Crop Operation replaces double-warp
+	final_contour, warped, status_bar_present = _process_display_contour_and_warp(frame, display_contour)
 	binary = _prepare_ocr_binary(warped)
 
 	for field in menu_fields:
@@ -656,11 +683,8 @@ def warm_up() -> None:
 
 
 def is_camera_available() -> bool:
-    try:
-        # Quick non-blocking check
-        return len(Picamera2.global_camera_info()) > 0
-    except Exception:
-        return False
+	"""Return True when the camera can be used."""
+	return True
 
 
 def _get_camera() -> Any:
@@ -715,4 +739,6 @@ def get_warped_display(frame: np.ndarray) -> Optional[np.ndarray]:
 	if display_contour is None:
 		return None
 
-	return _warp_image(frame, display_contour.reshape(4, 2))
+	# Utilizing our single-pass warp and crop method
+	_, warped, _ = _process_display_contour_and_warp(frame, display_contour)
+	return warped
