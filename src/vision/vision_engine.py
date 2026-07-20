@@ -267,6 +267,95 @@ def _extract_fallback_variants(frame: np.ndarray, field: OCRField) -> list[np.nd
 	_, otsu = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 	return [roi, otsu, cv2.bitwise_not(otsu)]
 
+# Cache dictionary for loaded template images
+_ICON_TEMPLATES: dict[str, dict[str, np.ndarray]] = {}
+
+# Defined state outputs for each template file
+ICON_STATE_MAPPINGS = {
+    "wifi_icon": {
+        "wifi_on": "ON",
+        "wifi_off": "OFF",
+    },
+    "calendar_icon": {
+        "schedule_running": "RUNNING",
+        "schedule_not_running": "NOT_RUNNING",
+    },
+}
+
+def _load_icon_templates() -> dict[str, dict[str, np.ndarray]]:
+    """Lazy load icon templates from ./templates directory into grayscale memory cache."""
+    global _ICON_TEMPLATES
+    if _ICON_TEMPLATES:
+        return _ICON_TEMPLATES
+
+    # Resolve templates relative to script location or root working directory
+    base_dir = Path(__file__).resolve().parent / "templates"
+    if not base_dir.exists():
+        base_dir = Path("./templates")
+
+    template_files = {
+        "wifi_icon": {
+            "wifi_on": base_dir / "wifi_on.jpg",
+            "wifi_off": base_dir / "wifi_off.jpg",
+        },
+        "calendar_icon": {
+            "schedule_running": base_dir / "schedule_running.jpg",
+            "schedule_not_running": base_dir / "schedule_not_running.jpg",
+        },
+    }
+
+    _require_cv2()
+    for field_key, templates in template_files.items():
+        _ICON_TEMPLATES[field_key] = {}
+        for state_key, file_path in templates.items():
+            if not file_path.exists():
+                continue
+            img = cv2.imread(str(file_path), cv2.IMREAD_GRAYSCALE)
+            if img is not None:
+                _ICON_TEMPLATES[field_key][state_key] = img
+
+    return _ICON_TEMPLATES
+
+
+def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, str]:
+    """
+    Compare a cropped icon ROI against cached templates using Normalized Cross-Correlation.
+    
+    Returns:
+        tuple[raw_str, state_val] e.g. ("wifi_on", "ON") or ("UNKNOWN", "UNKNOWN")
+    """
+    _require_cv2()
+    templates_dict = _load_icon_templates().get(field_name, {})
+    if not templates_dict or roi_gray is None or roi_gray.size == 0:
+        return "UNKNOWN", "UNKNOWN"
+
+    # Ensure crop is grayscale
+    if len(roi_gray.shape) == 3:
+        roi_gray = cv2.cvtColor(roi_gray, cv2.COLOR_BGR2GRAY)
+
+    best_state_key = "UNKNOWN"
+    best_score = -1.0
+    min_confidence_threshold = 0.40  # Minimum correlation threshold
+
+    for state_key, template_img in templates_dict.items():
+        th, tw = template_img.shape[:2]
+        
+        # Resize crop to match template geometry exactly
+        resized_crop = cv2.resize(roi_gray, (tw, th), interpolation=cv2.INTER_LINEAR)
+
+        # Template Matching via Normalized Cross-Correlation
+        res = cv2.matchTemplate(resized_crop, template_img, cv2.TM_CCOEFF_NORMED)
+        _, max_val, _, _ = cv2.minMaxLoc(res)
+
+        if max_val > best_score:
+            best_score = max_val
+            best_state_key = state_key
+
+    if best_score < min_confidence_threshold:
+        return "UNKNOWN", "UNKNOWN"
+
+    parsed_state = ICON_STATE_MAPPINGS.get(field_name, {}).get(best_state_key, "UNKNOWN")
+    return best_state_key, parsed_state
 
 def _clean_text(raw_text: str) -> str:
 	"""Collapse OCR whitespace into a stable single-space form."""
@@ -412,44 +501,46 @@ def _score_field_candidate(field_name: str, raw_text: str, value: Any) -> float:
 
 
 def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
-	"""OCR a field from multiple variants and keep the best-scoring candidate."""
-	_require_pytesseract()
-	field_name = field.name
-	best_raw = ""
-	best_value: Any = _field_empty_value(field_name)
-	best_score = -1.0
-	candidate_debug: list[tuple[float, str, Any]] = []
+    """OCR or classify a field from image variants and keep the best candidate."""
+    field_name = field.name
 
-	# 1. Parse and cache the whitelist set once per field invocation (O(1) lookups)
-	whitelist_set = None
-	if "tessedit_char_whitelist=" in field.tesseract_config:
-		whitelist_set = set(field.tesseract_config.split("tessedit_char_whitelist=")[1])
+    # --- ICON CLASSIFICATION BYPASS ---
+    if field_name in ("wifi_icon", "calendar_icon"):
+        if not variants:
+            return "UNKNOWN", "UNKNOWN"
+        # Classify using the standard grayscale/binary variant
+        return _classify_icon_field(variants[0], field_name)
 
-	for variant in variants:
-		raw = _clean_text(pytesseract.image_to_string(variant, config=field.tesseract_config))
-		
-		# 2. Filter raw text early for non-temperature fields to strip noise 
-		# and prevent junk characters from spoiling the candidate score.
-		if whitelist_set and field_name != "temperature":
-			raw = "".join(c for c in raw if c in whitelist_set)
+    # --- STANDARD TESSERACT OCR FOR TEXT/DIGITS ---
+    _require_pytesseract()
+    best_raw = ""
+    best_value: Any = _field_empty_value(field_name)
+    best_score = -1.0
 
-		value = _parse_field_value(field_name, raw)
-		score = _score_field_candidate(field_name, raw, value)
+    whitelist_set = None
+    if "tessedit_char_whitelist=" in field.tesseract_config:
+        whitelist_set = set(field.tesseract_config.split("tessedit_char_whitelist=")[1])
 
-		candidate_debug.append((score, raw, value))
+    for variant in variants:
+        raw = _clean_text(pytesseract.image_to_string(variant, config=field.tesseract_config))
+        
+        if whitelist_set and field_name != "temperature":
+            raw = "".join(c for c in raw if c in whitelist_set)
 
-		if score > best_score:
-			best_raw = raw
-			best_value = value
-			best_score = score
+        value = _parse_field_value(field_name, raw)
+        score = _score_field_candidate(field_name, raw, value)
 
-	# 3. Apply strict final enforcement on the chosen best candidate outputs
-	if whitelist_set:
-		best_raw = "".join(c for c in best_raw if c in whitelist_set)
-		if isinstance(best_value, str):
-			best_value = "".join(c for c in best_value if c in whitelist_set)
+        if score > best_score:
+            best_raw = raw
+            best_value = value
+            best_score = score
 
-	return best_raw, best_value
+    if whitelist_set:
+        best_raw = "".join(c for c in best_raw if c in whitelist_set)
+        if isinstance(best_value, str):
+            best_value = "".join(c for c in best_value if c in whitelist_set)
+
+    return best_raw, best_value
 
 
 def _draw_roi_overlay(image: np.ndarray, fields: tuple[OCRField, ...], use_fallback_rois: bool) -> np.ndarray:
