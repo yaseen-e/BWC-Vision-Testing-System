@@ -320,9 +320,7 @@ def _load_icon_templates() -> dict[str, dict[str, np.ndarray]]:
 def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, str]:
     """
     Compare a cropped icon ROI against cached templates using Normalized Cross-Correlation.
-    
-    Returns:
-        tuple[raw_str, state_val] e.g. ("wifi_on", "ON") or ("UNKNOWN", "UNKNOWN")
+    Returns the most likely matched state, bypassing confidence thresholds.
     """
     _require_cv2()
     templates_dict = _load_icon_templates().get(field_name, {})
@@ -334,25 +332,27 @@ def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, st
         roi_gray = cv2.cvtColor(roi_gray, cv2.COLOR_BGR2GRAY)
 
     best_state_key = "UNKNOWN"
-    best_score = -1.0
-    min_confidence_threshold = 0.40  # Minimum correlation threshold
+    best_score = -float('inf')
 
     for state_key, template_img in templates_dict.items():
         th, tw = template_img.shape[:2]
+        ch, cw = roi_gray.shape[:2]
         
-        # Resize crop to match template geometry exactly
-        resized_crop = cv2.resize(roi_gray, (tw, th), interpolation=cv2.INTER_LINEAR)
+        # If the ROI crop is smaller than the template, pad it to prevent OpenCV crash
+        pad_h = max(0, th - ch)
+        pad_w = max(0, tw - cw)
+        if pad_h > 0 or pad_w > 0:
+            search_img = cv2.copyMakeBorder(roi_gray, 0, pad_h, 0, pad_w, cv2.BORDER_REPLICATE)
+        else:
+            search_img = roi_gray
 
-        # Template Matching via Normalized Cross-Correlation
-        res = cv2.matchTemplate(resized_crop, template_img, cv2.TM_CCOEFF_NORMED)
+        # Sliding Window Template Matching (no forced resizing)
+        res = cv2.matchTemplate(search_img, template_img, cv2.TM_CCOEFF_NORMED)
         _, max_val, _, _ = cv2.minMaxLoc(res)
 
         if max_val > best_score:
             best_score = max_val
             best_state_key = state_key
-
-    if best_score < min_confidence_threshold:
-        return "UNKNOWN", "UNKNOWN"
 
     parsed_state = ICON_STATE_MAPPINGS.get(field_name, {}).get(best_state_key, "UNKNOWN")
     return best_state_key, parsed_state
