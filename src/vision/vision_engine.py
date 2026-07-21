@@ -496,26 +496,6 @@ def _parse_field_value(field_name: str, raw_text: str) -> Any:
 	return _clean_text(raw_text)
 
 
-def _score_temperature(raw_text: str, value: Any) -> float:
-	if not isinstance(value, int):
-		return -1.0
-
-	score = 0.0
-	if 80 <= value <= 220:
-		score += 2.0
-	if 100 <= value <= 199:
-		score += 1.5
-	if len(str(value)) == 3:
-		score += 1.0
-	if 60 <= value <= 240:
-		score += 0.5
-	if "." in raw_text:
-		score += 0.2
-	if any(char in raw_text.upper() for char in ("O", "I", "L", "S", "B", "Z", "|")):
-		score += 0.1
-	return score
-
-
 def _score_info_line(raw_text: str, parsed_value: Any) -> float:
 	if not isinstance(parsed_value, str) or not parsed_value:
 		return -1.0
@@ -538,8 +518,6 @@ def _score_info_line(raw_text: str, parsed_value: Any) -> float:
 
 
 def _score_field_candidate(field_name: str, raw_text: str, value: Any) -> float:
-	#if field_name == "temperature":
-		#return _score_temperature(raw_text, value)
 	if field_name.startswith("dashboard_info_line_"):
 		return _score_info_line(raw_text, value)
 	if isinstance(value, str):
