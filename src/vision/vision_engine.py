@@ -323,43 +323,42 @@ def _load_icon_templates() -> dict[str, dict[str, np.ndarray]]:
 def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, str]:
     """
     Compare the physical shape of a cropped icon ROI against cached templates using Hu Moments.
-    This ignores scale, location, and padding, focusing entirely on structural geometry.
-    Forces a match with the closest shape score; UNKNOWN is impossible if templates exist.
+    Logs the shape dissimilarity score for each candidate state (lower = better match).
     """
     _require_cv2()
     templates_dict = _load_icon_templates().get(field_name, {})
     
-    # Failsafe only if files are physically missing from the drive or frame is corrupted
+    # Failsafe if files are missing or ROI capture failed
     if not templates_dict or roi_gray is None or roi_gray.size == 0:
+        print(f"[{field_name.upper()}] ERROR: Empty ROI or templates not loaded.")
         return "UNKNOWN", "UNKNOWN"
 
     if len(roi_gray.shape) == 3:
         roi_gray = cv2.cvtColor(roi_gray, cv2.COLOR_BGR2GRAY)
 
-    # Binarize the captured ROI using Otsu's method to isolate white pixels
+    # Binarize the captured ROI to isolate foreground shape
     _, roi_thresh = cv2.threshold(roi_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-    # Initialize best state. Default to the first available key to guarantee no 'UNKNOWN'.
-    best_state_key = list(templates_dict.keys())[0]
-    
-    # In cv2.matchShapes, a LOWER score means a closer geometric match (it calculates mathematical distance).
-    best_score = float('inf')
+    scores: dict[str, float] = {}
 
     for state_key, template_img in templates_dict.items():
-        # Binarize the clean template to match the ROI's format
+        # Binarize template
         _, template_thresh = cv2.threshold(template_img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-        # Compare shapes via Hu Moments (invariant to scale, padding, and translation)
-        # cv2.CONTOURS_MATCH_I1 is the standard robust shape distance algorithm.
+        # Calculate Hu Moments shape dissimilarity distance
         score = cv2.matchShapes(roi_thresh, template_thresh, cv2.CONTOURS_MATCH_I1, 0.0)
+        scores[state_key] = float(score)
 
-        # The lowest distance is the winning shape
-        if score < best_score:
-            best_score = score
-            best_state_key = state_key
+    # Automatically pick the key corresponding to the lowest distance score
+    best_state_key = min(scores, key=scores.get)
+    
+    # Format log output showing scores for every template
+    score_details = " | ".join([f"{state}: {score:.6f}" for state, score in scores.items()])
+    print(f"[{field_name.upper()}] Scores -> [{score_details}] => Best Match: '{best_state_key}'")
 
     parsed_state = ICON_STATE_MAPPINGS.get(field_name, {}).get(best_state_key, "UNKNOWN")
     return best_state_key, parsed_state
+
 
 def _clean_text(raw_text: str) -> str:
 	"""Collapse OCR whitespace into a stable single-space form."""
