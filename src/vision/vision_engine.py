@@ -322,8 +322,8 @@ def _load_icon_templates() -> dict[str, dict[str, np.ndarray]]:
 
 def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, str]:
     """
-    Classify an icon by cropping out all padding, normalizing to a standard 64x64 grid,
-    and comparing the structural overlap (XOR) to strictly penalize missing internal features.
+    Classify an icon by cropping out all padding, forcing the crop into a perfect square 
+    to preserve aspect ratio, normalizing to 64x64, and comparing structural overlap (XOR).
     Lower score = better match.
     """
     _require_cv2()
@@ -339,7 +339,7 @@ def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, st
     # 1. Binarize the captured ROI
     _, roi_thresh = cv2.threshold(roi_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-    # 2. Find contours and filter out tiny background noise specs
+    # 2. Find contours and filter out background noise
     contours, _ = cv2.findContours(roi_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         return "UNKNOWN", "UNKNOWN"
@@ -348,19 +348,29 @@ def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, st
     if not valid_contours:
         valid_contours = [max(contours, key=cv2.contourArea)]
 
-    # 3. Crop ROI perfectly to the edges of the icon, removing all black padding
+    # 3. Crop tightly to the edges of the icon
     x, y, w, h = cv2.boundingRect(np.concatenate(valid_contours))
     if w < 5 or h < 5:
-        return "UNKNOWN", "UNKNOWN" # Failsafe against corrupted captures
+        return "UNKNOWN", "UNKNOWN"
+    
+    crop = roi_thresh[y:y+h, x:x+w]
+    
+    # 4. PAD TO SQUARE: Preserve aspect ratio before normalizing size
+    max_dim = max(w, h)
+    pad_top = (max_dim - h) // 2
+    pad_bottom = max_dim - h - pad_top
+    pad_left = (max_dim - w) // 2
+    pad_right = max_dim - w - pad_left
+    squared_crop = cv2.copyMakeBorder(crop, pad_top, pad_bottom, pad_left, pad_right, cv2.BORDER_CONSTANT, value=0)
         
-    # 4. Normalize to a 64x64 grid
-    roi_crop = cv2.resize(roi_thresh[y:y+h, x:x+w], (64, 64), interpolation=cv2.INTER_AREA)
-    _, roi_norm = cv2.threshold(roi_crop, 127, 255, cv2.THRESH_BINARY)
+    # 5. Normalize to 64x64
+    roi_norm = cv2.resize(squared_crop, (64, 64), interpolation=cv2.INTER_AREA)
+    _, roi_norm = cv2.threshold(roi_norm, 127, 255, cv2.THRESH_BINARY)
 
     scores: dict[str, float] = {}
 
     for state_key, template_img in templates_dict.items():
-        # Do the exact same tight-crop and normalization to the clean template
+        # Do the exact same crop, square-pad, and normalize to the template
         _, template_thresh = cv2.threshold(template_img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         t_contours, _ = cv2.findContours(template_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
@@ -369,14 +379,22 @@ def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, st
             continue
             
         tx, ty, tw, th = cv2.boundingRect(np.concatenate(t_contours))
-        template_crop = cv2.resize(template_thresh[ty:ty+th, tx:tx+tw], (64, 64), interpolation=cv2.INTER_AREA)
-        _, template_norm = cv2.threshold(template_crop, 127, 255, cv2.THRESH_BINARY)
+        t_crop = template_thresh[ty:ty+th, tx:tx+tw]
         
-        # 5. Calculate structural difference (XOR)
-        # Any pixels that don't match exactly will turn white (255)
+        t_max_dim = max(tw, th)
+        t_pad_top = (t_max_dim - th) // 2
+        t_pad_bottom = t_max_dim - th - t_pad_top
+        t_pad_left = (t_max_dim - tw) // 2
+        t_pad_right = t_max_dim - tw - t_pad_left
+        t_squared_crop = cv2.copyMakeBorder(t_crop, t_pad_top, t_pad_bottom, t_pad_left, t_pad_right, cv2.BORDER_CONSTANT, value=0)
+        
+        template_norm = cv2.resize(t_squared_crop, (64, 64), interpolation=cv2.INTER_AREA)
+        _, template_norm = cv2.threshold(template_norm, 127, 255, cv2.THRESH_BINARY)
+        
+        # 6. Calculate structural difference (XOR)
         diff = cv2.bitwise_xor(roi_norm, template_norm)
         
-        # Score is the percentage of mismatched pixels (Lower is better)
+        # Score is the percentage of mismatched pixels
         score = np.sum(diff == 255) / (64.0 * 64.0)
         scores[state_key] = float(score)
 
