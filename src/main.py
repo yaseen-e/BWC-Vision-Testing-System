@@ -135,6 +135,7 @@ def main():
     current_menu: ContextNode = HOME_MENU
     transition_buffer: tuple[str, ...] = ()
     sequence_broken = False
+    press_ready = [1]
     use_simulated_commands = _prompt_for_command_mode()
 
     report_file, report_csv_writer, report_path = report_writer.open_test_report()
@@ -207,7 +208,10 @@ def main():
                         if use_simulated_commands:
                             wait_for_enter()
                         else:
-                            servo_driver.press_button(button)
+                            servo_driver.press_button(button, press_ready)
+
+                        while press_ready[0] != 1:
+                            time.sleep(0.01)
 
                         if sequence_broken:
                             print("[NAV] Sequence locked after mismatch; waiting for RUN_OCR reset.")

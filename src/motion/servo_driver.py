@@ -209,12 +209,17 @@ def shutdown() -> None:
         servo.angle = None
 
 
-def press_button(button: Button) -> bool:
+def press_button(button: Button, press_ready: list[int] | None = None) -> bool:
+    if press_ready is not None:
+        press_ready[0] = 0
+
     if not _initialized:
         initialize()
 
     if not _initialized:
         print(f"[WARNING] Servo control unavailable; skipping {button.value} press.")
+        if press_ready is not None:
+            press_ready[0] = 1
         return False
 
     try:
@@ -223,6 +228,8 @@ def press_button(button: Button) -> bool:
 
         if servo is None:
             print(f"[Servo Error] Missing servo for {button.value}")
+            if press_ready is not None:
+                press_ready[0] = 1
             return False
 
         servo.angle = config.press_angle
@@ -231,8 +238,13 @@ def press_button(button: Button) -> bool:
         servo.angle = config.home_angle
         time.sleep(0.5)
 
+        if press_ready is not None:
+            press_ready[0] = 1
+
         return True
 
     except Exception as exc:
         print(f"Servo error ({button.value}): {exc}")
+        if press_ready is not None:
+            press_ready[0] = 1
         return False
