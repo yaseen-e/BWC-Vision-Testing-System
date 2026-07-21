@@ -226,8 +226,8 @@ WIFI_ICON_FIELD = OCRField(
 	tesseract_config="",
 )
 
-CALENDAR_ICON_FIELD = OCRField(
-	name="calendar_icon",
+SCHEDULE_ICON_FIELD = OCRField(
+	name="schedule_icon",
 	ideal=ROIBox(top=0.91, bottom=1.00, left=0.48, right=0.55),
 	fallback=ROIBox(top=0.82, bottom=1.00, left=0.34, right=0.56),
 	tesseract_config="",
@@ -237,7 +237,7 @@ STATUS_BAR = tuple((
 	TIME_FIELD,
 	DATE_FIELD,
 	WIFI_ICON_FIELD,
-	CALENDAR_ICON_FIELD,
+	SCHEDULE_ICON_FIELD,
 ))
 
 ACTIVE_FAULTS_ERROR_CODE_1 = OCRField(

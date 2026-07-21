@@ -276,10 +276,10 @@ ICON_STATE_MAPPINGS = {
         "wifi_on": "ON",
         "wifi_off": "OFF",
     },
-    "calendar_icon": {
+    "schedule_icon": {
         "schedule_running": "RUNNING",
         "schedule_not_running": "NOT_RUNNING",
-    },
+    }
 }
 
 def _load_icon_templates() -> dict[str, dict[str, np.ndarray]]:
@@ -293,15 +293,16 @@ def _load_icon_templates() -> dict[str, dict[str, np.ndarray]]:
     if not base_dir.exists():
         base_dir = Path("./templates")
 
+    # Mapped to the verbatim filenames requested
     template_files = {
         "wifi_icon": {
-            "wifi_on": base_dir / "wifi_on.jpg",
-            "wifi_off": base_dir / "wifi_off.jpg",
+            "wifi_on": base_dir / "wifi_on.png",
+            "wifi_off": base_dir / "wifi_off.png",
         },
-        "calendar_icon": {
-            "schedule_running": base_dir / "schedule_running.jpg",
-            "schedule_not_running": base_dir / "schedule_not_running.jpg",
-        },
+        "schedule_icon": {
+            "schedule_running": base_dir / "schedule_running.png",
+            "schedule_not_running": base_dir / "schedule_not_running.png",
+        }
     }
 
     _require_cv2()
@@ -309,7 +310,9 @@ def _load_icon_templates() -> dict[str, dict[str, np.ndarray]]:
         _ICON_TEMPLATES[field_key] = {}
         for state_key, file_path in templates.items():
             if not file_path.exists():
+                print(f"[WARNING] Missing template file: {file_path}")
                 continue
+            
             img = cv2.imread(str(file_path), cv2.IMREAD_GRAYSCALE)
             if img is not None:
                 _ICON_TEMPLATES[field_key][state_key] = img
@@ -319,39 +322,40 @@ def _load_icon_templates() -> dict[str, dict[str, np.ndarray]]:
 
 def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, str]:
     """
-    Compare a cropped icon ROI against cached templates using Normalized Cross-Correlation.
-    Returns the most likely matched state, bypassing confidence thresholds.
+    Compare the physical shape of a cropped icon ROI against cached templates using Hu Moments.
+    This ignores scale, location, and padding, focusing entirely on structural geometry.
+    Forces a match with the closest shape score; UNKNOWN is impossible if templates exist.
     """
     _require_cv2()
     templates_dict = _load_icon_templates().get(field_name, {})
+    
+    # Failsafe only if files are physically missing from the drive or frame is corrupted
     if not templates_dict or roi_gray is None or roi_gray.size == 0:
         return "UNKNOWN", "UNKNOWN"
 
-    # Ensure crop is grayscale
     if len(roi_gray.shape) == 3:
         roi_gray = cv2.cvtColor(roi_gray, cv2.COLOR_BGR2GRAY)
 
-    best_state_key = "UNKNOWN"
-    best_score = -float('inf')
+    # Binarize the captured ROI using Otsu's method to isolate white pixels
+    _, roi_thresh = cv2.threshold(roi_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+    # Initialize best state. Default to the first available key to guarantee no 'UNKNOWN'.
+    best_state_key = list(templates_dict.keys())[0]
+    
+    # In cv2.matchShapes, a LOWER score means a closer geometric match (it calculates mathematical distance).
+    best_score = float('inf')
 
     for state_key, template_img in templates_dict.items():
-        th, tw = template_img.shape[:2]
-        ch, cw = roi_gray.shape[:2]
-        
-        # If the ROI crop is smaller than the template, pad it to prevent OpenCV crash
-        pad_h = max(0, th - ch)
-        pad_w = max(0, tw - cw)
-        if pad_h > 0 or pad_w > 0:
-            search_img = cv2.copyMakeBorder(roi_gray, 0, pad_h, 0, pad_w, cv2.BORDER_REPLICATE)
-        else:
-            search_img = roi_gray
+        # Binarize the clean template to match the ROI's format
+        _, template_thresh = cv2.threshold(template_img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-        # Sliding Window Template Matching (no forced resizing)
-        res = cv2.matchTemplate(search_img, template_img, cv2.TM_CCOEFF_NORMED)
-        _, max_val, _, _ = cv2.minMaxLoc(res)
+        # Compare shapes via Hu Moments (invariant to scale, padding, and translation)
+        # cv2.CONTOURS_MATCH_I1 is the standard robust shape distance algorithm.
+        score = cv2.matchShapes(roi_thresh, template_thresh, cv2.CONTOURS_MATCH_I1, 0.0)
 
-        if max_val > best_score:
-            best_score = max_val
+        # The lowest distance is the winning shape
+        if score < best_score:
+            best_score = score
             best_state_key = state_key
 
     parsed_state = ICON_STATE_MAPPINGS.get(field_name, {}).get(best_state_key, "UNKNOWN")
@@ -505,7 +509,7 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
     field_name = field.name
 
     # --- ICON CLASSIFICATION BYPASS ---
-    if field_name in ("wifi_icon", "calendar_icon"):
+    if field_name in ("wifi_icon", "schedule_icon"):
         if not variants:
             return "UNKNOWN", "UNKNOWN"
         # Classify using the standard grayscale/binary variant
