@@ -14,7 +14,7 @@ from typing import Any, Optional
 import numpy as np
 import cv2
 import pytesseract
-from .display_layouts import OCRField, TEMPERATURE_RANGE_F
+from .display_layouts import OCRField, ROIBox
 import time
 
 # Camera is assumed to be connected and initialized directly.
@@ -501,8 +501,7 @@ def _score_temperature(raw_text: str, value: Any) -> float:
 		return -1.0
 
 	score = 0.0
-	min_temp, max_temp = TEMPERATURE_RANGE_F
-	if min_temp <= value <= max_temp:
+	if 80 <= value <= 220:
 		score += 2.0
 	if 100 <= value <= 199:
 		score += 1.5
@@ -539,8 +538,8 @@ def _score_info_line(raw_text: str, parsed_value: Any) -> float:
 
 
 def _score_field_candidate(field_name: str, raw_text: str, value: Any) -> float:
-	if field_name == "temperature":
-		return _score_temperature(raw_text, value)
+	#if field_name == "temperature":
+		#return _score_temperature(raw_text, value)
 	if field_name.startswith("dashboard_info_line_"):
 		return _score_info_line(raw_text, value)
 	if isinstance(value, str):
@@ -849,7 +848,7 @@ def _get_camera() -> Any:
 		"LensPosition": 9,
 	})
 
-	# --- FIX: HARDWARE STABILIZATION SETTLE ---
+	# --- HARDWARE STABILIZATION SETTLE ---
 	# Ensures the voice coil physical motor has moved to position 9 and 
 	# the image sensor has applied initial auto-exposure parameters 
 	# before ANY frame is handed out to the pipeline.

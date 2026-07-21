@@ -45,8 +45,6 @@ class ContextNode:
 	fields: tuple[OCRField, ...] = ()
 	children: tuple["ContextNode", ...] = ()
 
-TEMPERATURE_RANGE_F = (80, 220)
-
 def iter_context_nodes(root: ContextNode) -> tuple[ContextNode, ...]:
 	"""Return nodes in pre-order traversal for deterministic iteration."""
 	nodes: list[ContextNode] = []
