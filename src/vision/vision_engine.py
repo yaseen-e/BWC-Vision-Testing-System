@@ -322,8 +322,8 @@ def _load_icon_templates() -> dict[str, dict[str, np.ndarray]]:
 
 def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, str]:
     """
-    Classify an icon by cropping tightly, padding to square, normalizing to 64x64, 
-    and using cv2.matchTemplate across slight rotations to handle camera tilt.
+    Classify an icon by cropping out all padding, forcing the crop into a perfect square 
+    to preserve aspect ratio, normalizing to 64x64, and comparing structural overlap (XOR).
     Lower score = better match.
     """
     _require_cv2()
@@ -336,8 +336,10 @@ def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, st
     if len(roi_gray.shape) == 3:
         roi_gray = cv2.cvtColor(roi_gray, cv2.COLOR_BGR2GRAY)
 
+    # 1. Binarize the captured ROI
     _, roi_thresh = cv2.threshold(roi_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
+    # 2. Find contours and filter out background noise
     contours, _ = cv2.findContours(roi_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         return "UNKNOWN", "UNKNOWN"
@@ -346,13 +348,14 @@ def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, st
     if not valid_contours:
         valid_contours = [max(contours, key=cv2.contourArea)]
 
+    # 3. Crop tightly to the edges of the icon
     x, y, w, h = cv2.boundingRect(np.concatenate(valid_contours))
     if w < 5 or h < 5:
         return "UNKNOWN", "UNKNOWN"
     
     crop = roi_thresh[y:y+h, x:x+w]
     
-    # Pad to square
+    # 4. PAD TO SQUARE: Preserve aspect ratio before normalizing size
     max_dim = max(w, h)
     pad_top = (max_dim - h) // 2
     pad_bottom = max_dim - h - pad_top
@@ -360,12 +363,14 @@ def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, st
     pad_right = max_dim - w - pad_left
     squared_crop = cv2.copyMakeBorder(crop, pad_top, pad_bottom, pad_left, pad_right, cv2.BORDER_CONSTANT, value=0)
         
+    # 5. Normalize to 64x64
     roi_norm = cv2.resize(squared_crop, (64, 64), interpolation=cv2.INTER_AREA)
     _, roi_norm = cv2.threshold(roi_norm, 127, 255, cv2.THRESH_BINARY)
 
     scores: dict[str, float] = {}
 
     for state_key, template_img in templates_dict.items():
+        # Do the exact same crop, square-pad, and normalize to the template
         _, template_thresh = cv2.threshold(template_img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         t_contours, _ = cv2.findContours(template_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
@@ -386,20 +391,12 @@ def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, st
         template_norm = cv2.resize(t_squared_crop, (64, 64), interpolation=cv2.INTER_AREA)
         _, template_norm = cv2.threshold(template_norm, 127, 255, cv2.THRESH_BINARY)
         
-        # Test rotations to account for camera tilt (e.g. -6 to +6 degrees)
-        best_alignment_score = float('inf')
-        for angle in range(-6, 7, 2):
-            M = cv2.getRotationMatrix2D((32, 32), angle, 1.0)
-            rotated_template = cv2.warpAffine(template_norm, M, (64, 64), flags=cv2.INTER_NEAREST, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-            
-            # TM_SQDIFF_NORMED: Calculates squared differences (0.0 = perfect match, 1.0 = total mismatch)
-            res = cv2.matchTemplate(roi_norm, rotated_template, cv2.TM_SQDIFF_NORMED)
-            min_val, _, _, _ = cv2.minMaxLoc(res)
-            
-            if min_val < best_alignment_score:
-                best_alignment_score = min_val
-                
-        scores[state_key] = float(best_alignment_score)
+        # 6. Calculate structural difference (XOR)
+        diff = cv2.bitwise_xor(roi_norm, template_norm)
+        
+        # Score is the percentage of mismatched pixels
+        score = np.sum(diff == 255) / (64.0 * 64.0)
+        scores[state_key] = float(score)
 
     best_state_key = min(scores, key=scores.get)
     
