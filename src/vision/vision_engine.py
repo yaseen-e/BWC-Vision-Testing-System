@@ -322,38 +322,67 @@ def _load_icon_templates() -> dict[str, dict[str, np.ndarray]]:
 
 def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, str]:
     """
-    Compare the physical shape of a cropped icon ROI against cached templates using Hu Moments.
-    Logs the shape dissimilarity score for each candidate state (lower = better match).
+    Classify an icon by cropping out all padding, normalizing to a standard 64x64 grid,
+    and comparing the structural overlap (XOR) to strictly penalize missing internal features.
+    Lower score = better match.
     """
     _require_cv2()
     templates_dict = _load_icon_templates().get(field_name, {})
     
-    # Failsafe if files are missing or ROI capture failed
     if not templates_dict or roi_gray is None or roi_gray.size == 0:
-        print(f"[{field_name.upper()}] ERROR: Empty ROI or templates not loaded.")
+        print(f"[{field_name.upper()}] ERROR: Empty ROI or missing templates.")
         return "UNKNOWN", "UNKNOWN"
 
     if len(roi_gray.shape) == 3:
         roi_gray = cv2.cvtColor(roi_gray, cv2.COLOR_BGR2GRAY)
 
-    # Binarize the captured ROI to isolate foreground shape
+    # 1. Binarize the captured ROI
     _, roi_thresh = cv2.threshold(roi_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+    # 2. Find contours and filter out tiny background noise specs
+    contours, _ = cv2.findContours(roi_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return "UNKNOWN", "UNKNOWN"
+        
+    valid_contours = [c for c in contours if cv2.contourArea(c) > 5]
+    if not valid_contours:
+        valid_contours = [max(contours, key=cv2.contourArea)]
+
+    # 3. Crop ROI perfectly to the edges of the icon, removing all black padding
+    x, y, w, h = cv2.boundingRect(np.concatenate(valid_contours))
+    if w < 5 or h < 5:
+        return "UNKNOWN", "UNKNOWN" # Failsafe against corrupted captures
+        
+    # 4. Normalize to a 64x64 grid
+    roi_crop = cv2.resize(roi_thresh[y:y+h, x:x+w], (64, 64), interpolation=cv2.INTER_AREA)
+    _, roi_norm = cv2.threshold(roi_crop, 127, 255, cv2.THRESH_BINARY)
 
     scores: dict[str, float] = {}
 
     for state_key, template_img in templates_dict.items():
-        # Binarize template
+        # Do the exact same tight-crop and normalization to the clean template
         _, template_thresh = cv2.threshold(template_img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-        # Calculate Hu Moments shape dissimilarity distance
-        score = cv2.matchShapes(roi_thresh, template_thresh, cv2.CONTOURS_MATCH_I1, 0.0)
+        t_contours, _ = cv2.findContours(template_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if not t_contours:
+            scores[state_key] = float('inf')
+            continue
+            
+        tx, ty, tw, th = cv2.boundingRect(np.concatenate(t_contours))
+        template_crop = cv2.resize(template_thresh[ty:ty+th, tx:tx+tw], (64, 64), interpolation=cv2.INTER_AREA)
+        _, template_norm = cv2.threshold(template_crop, 127, 255, cv2.THRESH_BINARY)
+        
+        # 5. Calculate structural difference (XOR)
+        # Any pixels that don't match exactly will turn white (255)
+        diff = cv2.bitwise_xor(roi_norm, template_norm)
+        
+        # Score is the percentage of mismatched pixels (Lower is better)
+        score = np.sum(diff == 255) / (64.0 * 64.0)
         scores[state_key] = float(score)
 
-    # Automatically pick the key corresponding to the lowest distance score
     best_state_key = min(scores, key=scores.get)
     
-    # Format log output showing scores for every template
-    score_details = " | ".join([f"{state}: {score:.6f}" for state, score in scores.items()])
+    score_details = " | ".join([f"{state}: {score:.4f}" for state, score in scores.items()])
     print(f"[{field_name.upper()}] Scores -> [{score_details}] => Best Match: '{best_state_key}'")
 
     parsed_state = ICON_STATE_MAPPINGS.get(field_name, {}).get(best_state_key, "UNKNOWN")
