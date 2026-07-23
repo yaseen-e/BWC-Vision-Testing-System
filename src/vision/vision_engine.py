@@ -514,34 +514,44 @@ def _should_report_confidence(field_name: str) -> bool:
 
 
 def _parse_tesseract_data(tesseract_output: dict[str, Any]) -> tuple[str, float]:
-	texts = tesseract_output.get("text", []) or []
-	confidences = tesseract_output.get("conf", []) or []
+    texts = tesseract_output.get("text", []) or []
+    confidences = tesseract_output.get("conf", []) or []
 
-	cleaned_tokens: list[str] = []
-	valid_confidences: list[float] = []
+    token_pairs: list[tuple[str, float]] = []
 
-	for token, raw_confidence in zip(texts, confidences):
-		if token is None:
-			continue
-		stripped = str(token).strip()
-		if not stripped:
-			continue
-		cleaned_tokens.append(stripped)
-		try:
-			confidence_value = float(raw_confidence)
-		except (TypeError, ValueError):
-			continue
-		if confidence_value >= 0:
-			valid_confidences.append(confidence_value)
+    for token, raw_confidence in zip(texts, confidences):
+        if token is None:
+            continue
+        stripped = str(token).strip()
+        if not stripped:
+            continue
 
-	if not cleaned_tokens:
-		return "", 0.0
+        try:
+            confidence_value = float(raw_confidence)
+        except (TypeError, ValueError):
+            confidence_value = -1.0
 
-	raw_text = " ".join(cleaned_tokens)
-	if not valid_confidences:
-		return _clean_text(raw_text), 0.0
+        token_pairs.append((stripped, confidence_value))
 
-	return _clean_text(raw_text), sum(valid_confidences) / len(valid_confidences)
+    if not token_pairs:
+        return "", 0.0
+
+    # Preserve the full raw text ("MODE: HYBRID PLUS") so _parse_mode's split(" ", 1) works
+    raw_text = _clean_text(" ".join(text for text, _ in token_pairs))
+
+    # If we have a "MODE:" header followed by the mode value, ignore token 0's confidence 
+    # score so the reported confidence reflects ONLY parts[1]
+    if len(token_pairs) > 1 and token_pairs[0][0].upper().rstrip(":") == "MODE":
+        value_tokens = token_pairs[1:]
+    else:
+        value_tokens = token_pairs
+
+    valid_confidences = [conf for _, conf in value_tokens if conf >= 0]
+
+    if not valid_confidences:
+        return raw_text, 0.0
+
+    return raw_text, sum(valid_confidences) / len(valid_confidences)
 
 
 def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any, float]:
