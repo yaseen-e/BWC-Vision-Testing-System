@@ -14,7 +14,7 @@ from typing import Any, Optional
 import numpy as np
 import cv2
 import pytesseract
-from .display_layouts import OCRField, TEMPERATURE_RANGE_F
+from .display_layouts import OCRField, ROIBox
 import time
 
 # Camera is assumed to be connected and initialized directly.
@@ -144,11 +144,10 @@ def _find_display_contour(frame: np.ndarray, mask: np.ndarray, min_area: int = 3
 
 def _process_display_contour_and_warp(
 	frame: np.ndarray, orange_contour: np.ndarray
-) -> tuple[np.ndarray, np.ndarray, bool]:
+) -> tuple[np.ndarray, np.ndarray]:
 	"""
-	Warp the extended display area exactly once, check for the status bar inside 
-	the flattened coordinate space, and return the final contour, warped image, 
-	and status bar state.
+	Warp the extended display area exactly once and return the final contour 
+	and flattened warped image.
 	"""
 	_require_cv2()
 	ordered = _order_points(orange_contour)
@@ -157,33 +156,14 @@ def _process_display_contour_and_warp(
 	v_left = bottom_left - top_left
 	v_right = bottom_right - top_right
 
-	# Construct the extended contour downward.
-	# The orange box is 91% of the total height, the black status bar is 9% (9/91 factor).
 	ext_factor = 9.0 / 91.0
 	extended_bottom_left = bottom_left + v_left * ext_factor
 	extended_bottom_right = bottom_right + v_right * ext_factor
 	extended_contour = np.array([top_left, top_right, extended_bottom_right, extended_bottom_left], dtype="float32")
 
-	# PERFORM THE SINGLE PERSPECTIVE WARP OPERATION HERE
 	warped_extended = _warp_image(frame, extended_contour)
-	h, w = warped_extended.shape[:2]
-
-	# Extract status bar slice on the flattened, perspective-corrected image
-	y_start = int(h * 0.91)
-	sample_region = warped_extended[y_start:h, :]
 	
-	sample_gray = cv2.cvtColor(sample_region, cv2.COLOR_BGR2GRAY)
-	_, thresh = cv2.threshold(sample_gray, 160, 255, cv2.THRESH_BINARY)
-	
-	# If white status text pixels are detected, the status bar is active
-	status_bar_present = bool(np.sum(thresh == 255) > 25)
-	
-	if status_bar_present:
-		return extended_contour, warped_extended, True
-	else:
-		# If inactive, discard the bottom slice and crop to only show the orange display
-		cropped_warped = warped_extended[0:int(h * (91.0 / 100.0)), :]
-		return orange_contour, cropped_warped, False
+	return extended_contour, warped_extended
 
 
 def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
@@ -273,8 +253,8 @@ _ICON_TEMPLATES: dict[str, dict[str, np.ndarray]] = {}
 # Defined state outputs for each template file
 ICON_STATE_MAPPINGS = {
     "wifi_icon": {
-        "wifi_on": "ON",
-        "wifi_off": "OFF",
+        "wifi_connected": "CONNECTED",
+        "wifi_not_connected": "NOT_CONNECTED",
     },
     "schedule_icon": {
         "schedule_running": "RUNNING",
@@ -288,16 +268,14 @@ def _load_icon_templates() -> dict[str, dict[str, np.ndarray]]:
     if _ICON_TEMPLATES:
         return _ICON_TEMPLATES
 
-    # Resolve templates relative to script location or root working directory
     base_dir = Path(__file__).resolve().parent / "templates"
     if not base_dir.exists():
         base_dir = Path("./templates")
 
-    # Mapped to the verbatim filenames requested
     template_files = {
         "wifi_icon": {
-            "wifi_on": base_dir / "wifi_on.png",
-            "wifi_off": base_dir / "wifi_off.png",
+            "wifi_connected": base_dir / "wifi_connected.png",
+            "wifi_not_connected": base_dir / "wifi_not_connected.png",
         },
         "schedule_icon": {
             "schedule_running": base_dir / "schedule_running.png",
@@ -315,51 +293,86 @@ def _load_icon_templates() -> dict[str, dict[str, np.ndarray]]:
             
             img = cv2.imread(str(file_path), cv2.IMREAD_GRAYSCALE)
             if img is not None:
-                _ICON_TEMPLATES[field_key][state_key] = img
+                # OPTIMIZATION: Process the template bounding box and scaling once upon load
+                _, template_thresh = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+                t_contours, _ = cv2.findContours(template_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                
+                if t_contours:
+                    tx, ty, tw, th = cv2.boundingRect(np.concatenate(t_contours))
+                    t_crop = template_thresh[ty:ty+th, tx:tx+tw]
+                    
+                    t_max_dim = max(tw, th)
+                    t_pad_top = (t_max_dim - th) // 2
+                    t_pad_bottom = t_max_dim - th - t_pad_top
+                    t_pad_left = (t_max_dim - tw) // 2
+                    t_pad_right = t_max_dim - tw - t_pad_left
+                    t_squared_crop = cv2.copyMakeBorder(t_crop, t_pad_top, t_pad_bottom, t_pad_left, t_pad_right, cv2.BORDER_CONSTANT, value=0)
+                    
+                    template_norm = cv2.resize(t_squared_crop, (64, 64), interpolation=cv2.INTER_AREA)
+                    _, template_norm = cv2.threshold(template_norm, 127, 255, cv2.THRESH_BINARY)
+                    _ICON_TEMPLATES[field_key][state_key] = template_norm
+                else:
+                    # Fallback if the template is somehow entirely blank
+                    _ICON_TEMPLATES[field_key][state_key] = img
 
     return _ICON_TEMPLATES
 
 
 def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, str]:
     """
-    Compare the physical shape of a cropped icon ROI against cached templates using Hu Moments.
-    This ignores scale, location, and padding, focusing entirely on structural geometry.
-    Forces a match with the closest shape score; UNKNOWN is impossible if templates exist.
+    Classify an icon by cropping out all padding, forcing the crop into a perfect square 
+    to preserve aspect ratio, normalizing to 64x64, and comparing structural overlap (XOR).
+    Lower score = better match.
     """
     _require_cv2()
     templates_dict = _load_icon_templates().get(field_name, {})
     
-    # Failsafe only if files are physically missing from the drive or frame is corrupted
     if not templates_dict or roi_gray is None or roi_gray.size == 0:
+        print(f"[{field_name.upper()}] ERROR: Empty ROI or missing templates.")
         return "UNKNOWN", "UNKNOWN"
 
     if len(roi_gray.shape) == 3:
         roi_gray = cv2.cvtColor(roi_gray, cv2.COLOR_BGR2GRAY)
 
-    # Binarize the captured ROI using Otsu's method to isolate white pixels
     _, roi_thresh = cv2.threshold(roi_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    contours, _ = cv2.findContours(roi_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return "UNKNOWN", "UNKNOWN"
+        
+    valid_contours = [c for c in contours if cv2.contourArea(c) > 5]
+    if not valid_contours:
+        valid_contours = [max(contours, key=cv2.contourArea)]
 
-    # Initialize best state. Default to the first available key to guarantee no 'UNKNOWN'.
-    best_state_key = list(templates_dict.keys())[0]
+    x, y, w, h = cv2.boundingRect(np.concatenate(valid_contours))
+    if w < 5 or h < 5:
+        return "UNKNOWN", "UNKNOWN"
     
-    # In cv2.matchShapes, a LOWER score means a closer geometric match (it calculates mathematical distance).
-    best_score = float('inf')
+    crop = roi_thresh[y:y+h, x:x+w]
+    max_dim = max(w, h)
+    pad_top = (max_dim - h) // 2
+    pad_bottom = max_dim - h - pad_top
+    pad_left = (max_dim - w) // 2
+    pad_right = max_dim - w - pad_left
+    squared_crop = cv2.copyMakeBorder(crop, pad_top, pad_bottom, pad_left, pad_right, cv2.BORDER_CONSTANT, value=0)
+        
+    roi_norm = cv2.resize(squared_crop, (64, 64), interpolation=cv2.INTER_AREA)
+    _, roi_norm = cv2.threshold(roi_norm, 127, 255, cv2.THRESH_BINARY)
 
-    for state_key, template_img in templates_dict.items():
-        # Binarize the clean template to match the ROI's format
-        _, template_thresh = cv2.threshold(template_img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    scores: dict[str, float] = {}
 
-        # Compare shapes via Hu Moments (invariant to scale, padding, and translation)
-        # cv2.CONTOURS_MATCH_I1 is the standard robust shape distance algorithm.
-        score = cv2.matchShapes(roi_thresh, template_thresh, cv2.CONTOURS_MATCH_I1, 0.0)
+    for state_key, template_norm in templates_dict.items():
+        if template_norm.shape != (64, 64):
+            scores[state_key] = float('inf')
+            continue
+            
+        diff = cv2.bitwise_xor(roi_norm, template_norm)
+        score = np.sum(diff == 255) / (64.0 * 64.0)
+        scores[state_key] = float(score)
 
-        # The lowest distance is the winning shape
-        if score < best_score:
-            best_score = score
-            best_state_key = state_key
-
+    best_state_key = min(scores, key=scores.get)
     parsed_state = ICON_STATE_MAPPINGS.get(field_name, {}).get(best_state_key, "UNKNOWN")
     return best_state_key, parsed_state
+
 
 def _clean_text(raw_text: str) -> str:
 	"""Collapse OCR whitespace into a stable single-space form."""
@@ -455,19 +468,13 @@ def _score_temperature(raw_text: str, value: Any) -> float:
 		return -1.0
 
 	score = 0.0
-	min_temp, max_temp = TEMPERATURE_RANGE_F
-	if min_temp <= value <= max_temp:
+	# Standard bounds for a water heater
+	if 90 <= value <= 160:
 		score += 2.0
-	if 100 <= value <= 199:
+	if 60 <= value <= 199:
 		score += 1.5
 	if len(str(value)) == 3:
 		score += 1.0
-	if 60 <= value <= 240:
-		score += 0.5
-	if "." in raw_text:
-		score += 0.2
-	if any(char in raw_text.upper() for char in ("O", "I", "L", "S", "B", "Z", "|")):
-		score += 0.1
 	return score
 
 
@@ -493,10 +500,10 @@ def _score_info_line(raw_text: str, parsed_value: Any) -> float:
 
 
 def _score_field_candidate(field_name: str, raw_text: str, value: Any) -> float:
-	if field_name == "temperature":
-		return _score_temperature(raw_text, value)
 	if field_name.startswith("dashboard_info_line_"):
 		return _score_info_line(raw_text, value)
+	if field_name == "temperature":
+		return _score_temperature(raw_text, value)
 	if isinstance(value, str):
 		return float(len(value))
 	if value is None:
@@ -504,76 +511,31 @@ def _score_field_candidate(field_name: str, raw_text: str, value: Any) -> float:
 	return 0.0
 
 
-def _should_report_confidence(field_name: str) -> bool:
-	"""Return True only for OCR fields where confidence should be surfaced."""
-	return field_name in {"mode", "temperature"}
-
-
-def _parse_tesseract_data(tesseract_output: dict[str, Any]) -> tuple[str, float]:
-	"""Convert Tesseract's word-level data into a cleaned OCR string and average confidence."""
-	texts = tesseract_output.get("text", []) or []
-	confidences = tesseract_output.get("conf", []) or []
-
-	if not texts:
-		return "", 0.0
-
-	cleaned_tokens: list[str] = []
-	valid_confidences: list[float] = []
-
-	for token, raw_confidence in zip(texts, confidences):
-		if token is None:
-			continue
-		stripped = str(token).strip()
-		if not stripped:
-			continue
-		cleaned_tokens.append(stripped)
-		try:
-			confidence_value = float(raw_confidence)
-		except (TypeError, ValueError):
-			continue
-		if confidence_value >= 0:
-			valid_confidences.append(confidence_value)
-
-	if not cleaned_tokens:
-		return "", 0.0
-
-	raw_text = " ".join(cleaned_tokens)
-	if not valid_confidences:
-		return _clean_text(raw_text), 0.0
-
-	average_confidence = sum(valid_confidences) / len(valid_confidences)
-	return _clean_text(raw_text), average_confidence
-
-
-def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any, float]:
+def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
     """OCR or classify a field from image variants and keep the best candidate."""
     field_name = field.name
 
     # --- ICON CLASSIFICATION BYPASS ---
     if field_name in ("wifi_icon", "schedule_icon"):
         if not variants:
-            return "UNKNOWN", "UNKNOWN", 0.0
-        # Classify using the standard grayscale/binary variant
-        return _classify_icon_field(variants[0], field_name) + (0.0,)
+            return "UNKNOWN", "UNKNOWN"
+		# Invert the variant so the icon is white and the background is black
+        # This allows cv2.findContours to actually find the icon and tightly crop it.
+        inverted_variant = cv2.bitwise_not(variants[0])
+        return _classify_icon_field(inverted_variant, field_name)
 
     # --- STANDARD TESSERACT OCR FOR TEXT/DIGITS ---
     _require_pytesseract()
     best_raw = ""
     best_value: Any = _field_empty_value(field_name)
     best_score = -1.0
-    best_confidence = 0.0
 
     whitelist_set = None
     if "tessedit_char_whitelist=" in field.tesseract_config:
         whitelist_set = set(field.tesseract_config.split("tessedit_char_whitelist=")[1])
 
     for variant in variants:
-        tesseract_output = pytesseract.image_to_data(
-            variant,
-            config=field.tesseract_config,
-            output_type=pytesseract.Output.DICT,
-        )
-        raw, confidence = _parse_tesseract_data(tesseract_output)
+        raw = _clean_text(pytesseract.image_to_string(variant, config=field.tesseract_config))
         
         if whitelist_set and field_name != "temperature":
             raw = "".join(c for c in raw if c in whitelist_set)
@@ -585,14 +547,13 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any, f
             best_raw = raw
             best_value = value
             best_score = score
-            best_confidence = confidence
 
     if whitelist_set:
         best_raw = "".join(c for c in best_raw if c in whitelist_set)
         if isinstance(best_value, str):
             best_value = "".join(c for c in best_value if c in whitelist_set)
 
-    return best_raw, best_value, best_confidence
+    return best_raw, best_value
 
 
 def _draw_roi_overlay(image: np.ndarray, fields: tuple[OCRField, ...], use_fallback_rois: bool) -> np.ndarray:
@@ -720,7 +681,7 @@ def save_roi_ocr_overlay(
 	if display_contour is None:
 		overlay = _draw_roi_overlay(frame, menu_fields, use_fallback_rois=True)
 	else:
-		final_contour, warped, status_bar_present = _process_display_contour_and_warp(frame, display_contour)
+		final_contour, warped = _process_display_contour_and_warp(frame, display_contour)
 		source_points = _order_points(final_contour.reshape(4, 2))
 		
 		width_a = np.linalg.norm(source_points[2] - source_points[3])
@@ -777,11 +738,8 @@ def read_display(
 
 	if display_contour is None:
 		for field in menu_fields:
-			raw, val, confidence = _ocr_field(field, _extract_fallback_variants(frame, field))
-			field_data = {"raw": raw, "value": val}
-			if _should_report_confidence(field.name):
-				field_data["confidence"] = confidence
-			fields_result[field.name] = field_data
+			raw, val = _ocr_field(field, _extract_fallback_variants(frame, field))
+			fields_result[field.name] = {"raw": raw, "value": val}
 		
 		return OCRReadout(
 			display_found=False,
@@ -790,15 +748,12 @@ def read_display(
 		)
 
 	# Single Warp & Smart Crop Operation replaces double-warp
-	final_contour, warped, status_bar_present = _process_display_contour_and_warp(frame, display_contour)
+	final_contour, warped = _process_display_contour_and_warp(frame, display_contour)
 	binary = _prepare_ocr_binary(warped)
 
 	for field in menu_fields:
-		raw, val, confidence = _ocr_field(field, _extract_warped_variants(binary, field))
-		field_data = {"raw": raw, "value": val}
-		if _should_report_confidence(field.name):
-			field_data["confidence"] = confidence
-		fields_result[field.name] = field_data
+		raw, val = _ocr_field(field, _extract_warped_variants(binary, field))
+		fields_result[field.name] = {"raw": raw, "value": val}
 
 	return OCRReadout(
 		display_found=True,
@@ -855,7 +810,7 @@ def _get_camera() -> Any:
 		"LensPosition": 9,
 	})
 
-	# --- FIX: HARDWARE STABILIZATION SETTLE ---
+	# --- HARDWARE STABILIZATION SETTLE ---
 	# Ensures the voice coil physical motor has moved to position 9 and 
 	# the image sensor has applied initial auto-exposure parameters 
 	# before ANY frame is handed out to the pipeline.
@@ -889,5 +844,5 @@ def get_warped_display(frame: np.ndarray) -> Optional[np.ndarray]:
 		return None
 
 	# Utilizing our single-pass warp and crop method
-	_, warped, _ = _process_display_contour_and_warp(frame, display_contour)
+	_, warped = _process_display_contour_and_warp(frame, display_contour)
 	return warped
