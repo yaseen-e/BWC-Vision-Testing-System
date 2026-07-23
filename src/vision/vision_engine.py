@@ -172,7 +172,7 @@ def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
 	gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
 	
 	# FIX: Replaced high-overhead Bilateral Filter with ultra-fast Gaussian Blur
-	filtered = cv2.medianBlur(gray, 3)
+	filtered = cv2.medianBlur(gray, 5)
 	
 	# Unsharp Masking: Artificially sharpen the image to combat camera lens blur.
 	median_blur = cv2.medianBlur(filtered, 5)
@@ -243,7 +243,7 @@ def _extract_fallback_variants(frame: np.ndarray, field: OCRField) -> list[np.nd
 	if np.std(roi) < 15.0:
 		return []
 
-	roi = cv2.medianBlur(roi, 3)
+	roi = cv2.medianBlur(roi, 5)
 	_, otsu = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 	return [roi, otsu, cv2.bitwise_not(otsu)]
 
