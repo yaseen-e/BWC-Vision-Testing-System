@@ -511,7 +511,42 @@ def _score_field_candidate(field_name: str, raw_text: str, value: Any) -> float:
 	return 0.0
 
 
-def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
+def _should_report_confidence(field_name: str) -> bool:
+	return field_name in {"mode", "temperature"}
+
+
+def _parse_tesseract_data(tesseract_output: dict[str, Any]) -> tuple[str, float]:
+	texts = tesseract_output.get("text", []) or []
+	confidences = tesseract_output.get("conf", []) or []
+
+	cleaned_tokens: list[str] = []
+	valid_confidences: list[float] = []
+
+	for token, raw_confidence in zip(texts, confidences):
+		if token is None:
+			continue
+		stripped = str(token).strip()
+		if not stripped:
+			continue
+		cleaned_tokens.append(stripped)
+		try:
+			confidence_value = float(raw_confidence)
+		except (TypeError, ValueError):
+			continue
+		if confidence_value >= 0:
+			valid_confidences.append(confidence_value)
+
+	if not cleaned_tokens:
+		return "", 0.0
+
+	raw_text = " ".join(cleaned_tokens)
+	if not valid_confidences:
+		return _clean_text(raw_text), 0.0
+
+	return _clean_text(raw_text), sum(valid_confidences) / len(valid_confidences)
+
+
+def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any, float]:
     """OCR or classify a field from image variants and keep the best candidate."""
     field_name = field.name
 
@@ -529,13 +564,19 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
     best_raw = ""
     best_value: Any = _field_empty_value(field_name)
     best_score = -1.0
+    best_confidence = 0.0
 
     whitelist_set = None
     if "tessedit_char_whitelist=" in field.tesseract_config:
         whitelist_set = set(field.tesseract_config.split("tessedit_char_whitelist=")[1])
 
     for variant in variants:
-        raw = _clean_text(pytesseract.image_to_string(variant, config=field.tesseract_config))
+        tesseract_output = pytesseract.image_to_data(
+            variant,
+            config=field.tesseract_config,
+            output_type=pytesseract.Output.DICT,
+        )
+        raw, confidence = _parse_tesseract_data(tesseract_output)
         
         if whitelist_set and field_name != "temperature":
             raw = "".join(c for c in raw if c in whitelist_set)
@@ -547,13 +588,14 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
             best_raw = raw
             best_value = value
             best_score = score
+            best_confidence = confidence
 
     if whitelist_set:
         best_raw = "".join(c for c in best_raw if c in whitelist_set)
         if isinstance(best_value, str):
             best_value = "".join(c for c in best_value if c in whitelist_set)
 
-    return best_raw, best_value
+    return best_raw, best_value, best_confidence
 
 
 def _draw_roi_overlay(image: np.ndarray, fields: tuple[OCRField, ...], use_fallback_rois: bool) -> np.ndarray:
@@ -738,8 +780,11 @@ def read_display(
 
 	if display_contour is None:
 		for field in menu_fields:
-			raw, val = _ocr_field(field, _extract_fallback_variants(frame, field))
-			fields_result[field.name] = {"raw": raw, "value": val}
+			raw, val, confidence = _ocr_field(field, _extract_fallback_variants(frame, field))
+			field_data = {"raw": raw, "value": val}
+			if _should_report_confidence(field.name):
+				field_data["confidence"] = confidence
+			fields_result[field.name] = field_data
 		
 		return OCRReadout(
 			display_found=False,
@@ -752,8 +797,11 @@ def read_display(
 	binary = _prepare_ocr_binary(warped)
 
 	for field in menu_fields:
-		raw, val = _ocr_field(field, _extract_warped_variants(binary, field))
-		fields_result[field.name] = {"raw": raw, "value": val}
+		raw, val, confidence = _ocr_field(field, _extract_warped_variants(binary, field))
+		field_data = {"raw": raw, "value": val}
+		if _should_report_confidence(field.name):
+			field_data["confidence"] = confidence
+		fields_result[field.name] = field_data
 
 	return OCRReadout(
 		display_found=True,
