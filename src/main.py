@@ -281,26 +281,35 @@ def main():
                         ocr_result = f"{ocr_result};{fields_str}"
                     step_counter += 1
                     
-                    row_data = {"step": step_counter, "menu": current_menu.label}
-                    for field_name in report_writer.get_report_field_names():
-                        row_data[field_name] = ""
+                    row_data = {
+                        "Mode": "",
+                        "Mode_Conf": "",
+                        "Temp": "",
+                        "Temp_Conf": "",
+                    }
 
-                    for field in current_menu.fields:
-                        field_name = field.name
-                        val = readout.fields.get(field_name, {}).get("value")
-                        if field_name == "temperature":
-                            if val is None or val == "":
-                                row_data[field_name] = ""
-                            else:
-                                try:
-                                    row_data[field_name] = int(val)
-                                except (TypeError, ValueError):
-                                    print(f"[WARNING] Invalid temperature value from OCR: {val}")
-                                    row_data[field_name] = ""
-                        elif field_name == "mode":
-                            row_data[field_name] = "UNKNOWN" if val is None else val
+                    if current_menu.key == "homescreen":
+                        mode_field = readout.fields.get("mode", {})
+                        temp_field = readout.fields.get("temperature", {})
+
+                        mode_value = mode_field.get("value")
+                        temp_value = temp_field.get("value")
+                        mode_confidence = mode_field.get("confidence", 0.0)
+                        temp_confidence = temp_field.get("confidence", 0.0)
+
+                        row_data["Mode"] = "UNKNOWN" if mode_value is None else mode_value
+                        row_data["Mode_Conf"] = "" if mode_confidence is None else f"{mode_confidence:.2f}"
+
+                        if temp_value in (None, ""):
+                            row_data["Temp"] = ""
                         else:
-                            row_data[field_name] = "" if val is None else val
+                            try:
+                                row_data["Temp"] = int(temp_value)
+                            except (TypeError, ValueError):
+                                print(f"[WARNING] Invalid temperature value from OCR: {temp_value}")
+                                row_data["Temp"] = ""
+
+                        row_data["Temp_Conf"] = "" if temp_confidence is None else f"{temp_confidence:.2f}"
                     
                     report_csv_writer.writerow(row_data)
                     current_state = SystemState.REPORT_TO_LABVIEW
