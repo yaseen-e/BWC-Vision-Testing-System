@@ -167,21 +167,20 @@ def _process_display_contour_and_warp(
 
 
 def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
-	"""Convert to grayscale, enhance edges, and scale for OCR."""
-	_require_cv2()
-	gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
-	
-# FIX: Replaced high-overhead Bilateral Filter with ultra-fast median blur.
-	filtered = cv2.medianBlur(gray, 3)
-
-	# Unsharp Masking: Artificially sharpen the image to combat camera lens blur.
-	median_blur = cv2.medianBlur(filtered, 5)
-	sharpened = cv2.addWeighted(filtered, 1.5, median_blur, -0.5, 0)
-
-	# Use linear interpolation for a cleaner upscale with less edge ringing.
-	scaled = cv2.resize(sharpened, None, fx=2.5, fy=2.5, interpolation=cv2.INTER_LINEAR)
-	
-	return scaled
+    """Convert to grayscale, enhance edges, and scale for OCR."""
+    _require_cv2()
+    gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
+    
+    # 1. Use a mild Gaussian Blur (3x3 or 5x5) to smooth backlight gradients without eroding text
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    
+    # 2. Unsharp Masking: Boost edges crispness against camera lens blur
+    sharpened = cv2.addWeighted(gray, 1.5, blurred, -0.5, 0)
+    
+    # 3. Upscale linearly for Tesseract
+    scaled = cv2.resize(sharpened, None, fx=3.0, fy=3.0, interpolation=cv2.INTER_LINEAR)
+    
+    return scaled
 
 
 def _extract_warped_variants(binary: np.ndarray, field: OCRField) -> list[np.ndarray]:
