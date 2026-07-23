@@ -179,7 +179,7 @@ def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
 	sharpened = cv2.addWeighted(filtered, 1.5, median_blur, -0.5, 0)
 	
 	# FIX: Swapped out INTER_CUBIC with INTER_LINEAR for optimized CPU usage
-	scaled = cv2.resize(sharpened, None, fx=2.5, fy=2.5, interpolation=cv2.INTER_LINEAR)
+	scaled = cv2.resize(sharpened, None, fx=3.0, fy=3.0, interpolation=cv2.INTER_LINEAR)
 	
 	return scaled
 
