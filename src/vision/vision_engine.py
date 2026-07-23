@@ -178,8 +178,8 @@ def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
 	median_blur = cv2.medianBlur(filtered, 5)
 	sharpened = cv2.addWeighted(filtered, 1.5, median_blur, -0.5, 0)
 	
-	# FIX: Swapped out INTER_CUBIC with INTER_LINEAR for optimized CPU usage
-	scaled = cv2.resize(sharpened, None, fx=4.0, fy=4.0, interpolation=cv2.INTER_LINEAR)
+	# Use higher-quality interpolation to keep text crisper after scaling.
+	scaled = cv2.resize(sharpened, None, fx=2.5, fy=2.5, interpolation=cv2.INTER_CUBIC)
 	
 	return scaled
 
