@@ -238,10 +238,12 @@ def main():
                     frame = vision_engine.capture_frame()
                     if frame is None:
                         print("[WARNING] No camera frame available; skipping image save.")
-                        empty_fields = {
-                            field.name: {"raw": "", "value": ("UNKNOWN" if field.name == "mode" else None if field.name == "temperature" else "")}
-                            for field in current_menu.fields
-                        }
+                        empty_fields = {}
+                        for field in current_menu.fields:
+                            field_data = {"raw": "", "value": ("UNKNOWN" if field.name == "mode" else None if field.name == "temperature" else "")}
+                            if vision_engine._should_report_confidence(field.name):
+                                field_data["confidence"] = 0.0
+                            empty_fields[field.name] = field_data
                         readout = vision_engine.OCRReadout(
                             display_found=False,
                             current_menu_key=current_menu.key,
@@ -264,9 +266,14 @@ def main():
                     
                     field_pairs: list[str] = []
                     for field in current_menu.fields:
-                        raw_value = readout.fields.get(field.name, {}).get("value", "")
+                        field_data = readout.fields.get(field.name, {})
+                        raw_value = field_data.get("value", "")
                         field_value = "" if raw_value is None else raw_value
-                        field_pairs.append(f"{field.name.upper()}={field_value}")
+                        if vision_engine._should_report_confidence(field.name):
+                            confidence = field_data.get("confidence", 0.0)
+                            field_pairs.append(f"{field.name.upper()}={field_value}|CONF={confidence:.2f}")
+                        else:
+                            field_pairs.append(f"{field.name.upper()}={field_value}")
 
                     fields_str = ";".join(field_pairs)
                     ocr_result = f"DISPLAY_FOUND={readout.display_found};MENU={current_menu.label}"
