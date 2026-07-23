@@ -171,15 +171,15 @@ def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
 	_require_cv2()
 	gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
 	
-	# FIX: Replaced high-overhead Bilateral Filter with ultra-fast Gaussian Blur
-	filtered = cv2.medianBlur(gray, 5)
-	
+# FIX: Replaced high-overhead Bilateral Filter with ultra-fast median blur.
+	filtered = cv2.medianBlur(gray, 3)
+
 	# Unsharp Masking: Artificially sharpen the image to combat camera lens blur.
 	median_blur = cv2.medianBlur(filtered, 5)
 	sharpened = cv2.addWeighted(filtered, 1.5, median_blur, -0.5, 0)
-	
-	# Use higher-quality interpolation to keep text crisper after scaling.
-	scaled = cv2.resize(sharpened, None, fx=2.5, fy=2.5, interpolation=cv2.INTER_CUBIC)
+
+	# Use linear interpolation for a cleaner upscale with less edge ringing.
+	scaled = cv2.resize(sharpened, None, fx=2.5, fy=2.5, interpolation=cv2.INTER_LINEAR)
 	
 	return scaled
 
