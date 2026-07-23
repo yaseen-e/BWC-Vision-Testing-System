@@ -273,8 +273,8 @@ _ICON_TEMPLATES: dict[str, dict[str, np.ndarray]] = {}
 # Defined state outputs for each template file
 ICON_STATE_MAPPINGS = {
     "wifi_icon": {
-        "wifi_on": "ON",
-        "wifi_off": "OFF",
+        "wifi_connected": "CONNECTED",
+        "wifi_not_connected": "NOT_CONNECTED",
     },
     "schedule_icon": {
         "schedule_running": "RUNNING",
@@ -296,8 +296,8 @@ def _load_icon_templates() -> dict[str, dict[str, np.ndarray]]:
     # Mapped to the verbatim filenames requested
     template_files = {
         "wifi_icon": {
-            "wifi_on": base_dir / "wifi_on.png",
-            "wifi_off": base_dir / "wifi_off.png",
+            "wifi_connected": base_dir / "wifi_connected.png",
+            "wifi_not_connected": base_dir / "wifi_not_connected.png",
         },
         "schedule_icon": {
             "schedule_running": base_dir / "schedule_running.png",
