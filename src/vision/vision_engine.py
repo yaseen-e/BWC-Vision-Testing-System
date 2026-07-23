@@ -379,13 +379,33 @@ def _clean_text(raw_text: str) -> str:
 	return re.sub(r"\s+", " ", raw_text).strip()
 
 
-def _parse_mode(raw_text: str) -> str:
-	cleaned = _clean_text(raw_text).upper().strip()
-	parts = cleaned.split(" ", 1)
-	if len(parts) > 1:
-		return parts[1]
-	return ""
+VALID_MODES = ["HYBRID PLUS", "HYBRID", "HEAT PUMP", "ELECTRIC", "VACATION"]
 
+def _parse_mode(raw_text: str) -> str:
+    cleaned = _clean_text(raw_text).upper().strip()
+    
+    # 1. Direct substring match
+    for mode in VALID_MODES:
+        if mode in cleaned:
+            return mode
+            
+    # 2. Fuzzy matching for common Tesseract misreads
+    if "PUMP" in cleaned or "HEAT" in cleaned:
+        return "HEAT PUMP"
+    if "PLUS" in cleaned:
+        return "HYBRID PLUS"
+    if "HYB" in cleaned or "YBR" in cleaned:
+        return "HYBRID"
+    if "ELEC" in cleaned or "TRIC" in cleaned:
+        return "ELECTRIC"
+    if "VAC" in cleaned or "TION" in cleaned:
+        return "VACATION"
+        
+    # 3. Legacy fallback
+    parts = cleaned.split(" ", 1)
+    if len(parts) > 1:
+        return parts[1]
+    return ""
 
 def _parse_temperature(raw_text: str) -> Optional[int]:
 	if not raw_text:
