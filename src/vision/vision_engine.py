@@ -553,11 +553,12 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any, f
     # --- ICON CLASSIFICATION BYPASS ---
     if field_name in ("wifi_icon", "schedule_icon"):
         if not variants:
-            return "UNKNOWN", "UNKNOWN"
+            return "UNKNOWN", "UNKNOWN", 0.0
 		# Invert the variant so the icon is white and the background is black
         # This allows cv2.findContours to actually find the icon and tightly crop it.
         inverted_variant = cv2.bitwise_not(variants[0])
-        return _classify_icon_field(inverted_variant, field_name)
+        icon_key, icon_value = _classify_icon_field(inverted_variant, field_name)
+        return icon_key, icon_value, 0.0
 
     # --- STANDARD TESSERACT OCR FOR TEXT/DIGITS ---
     _require_pytesseract()
