@@ -171,12 +171,12 @@ def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
 	_require_cv2()
 	gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
 	
-# Reduce noise while preserving text edges for OCR.
-	filtered = cv2.medianBlur(gray, 3)
-
-	# Unsharp Masking: sharpen the text while avoiding excessive smoothing.
+	# FIX: Replaced high-overhead Bilateral Filter with ultra-fast Gaussian Blur
+	filtered = cv2.medianBlur(gray, 5)
+	
+	# Unsharp Masking: Artificially sharpen the image to combat camera lens blur.
 	median_blur = cv2.medianBlur(filtered, 5)
-	sharpened = cv2.addWeighted(filtered, 1.6, median_blur, -0.6, 0)
+	sharpened = cv2.addWeighted(filtered, 1.5, median_blur, -0.5, 0)
 	
 	# FIX: Swapped out INTER_CUBIC with INTER_LINEAR for optimized CPU usage
 	scaled = cv2.resize(sharpened, None, fx=2.5, fy=2.5, interpolation=cv2.INTER_LINEAR)
@@ -221,11 +221,11 @@ def _extract_warped_variants(binary: np.ndarray, field: OCRField) -> list[np.nda
 	# Variant 3: Adaptive Threshold with specialized dilation to handle backlight glare.
 	inverted_roi = cv2.bitwise_not(roi)
 	adaptive = cv2.adaptiveThreshold(
-		inverted_roi, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 11, 2
+		inverted_roi, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 15, 4
 	)
 	# Dilating white-on-black text patches smears adjacent segment segments together
-	kernel_dilate = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-	dilated_adaptive = cv2.dilate(adaptive, kernel_dilate, iterations=2)
+	kernel_dilate = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+	dilated_adaptive = cv2.dilate(adaptive, kernel_dilate, iterations=1)
 	variants.append(cv2.bitwise_not(dilated_adaptive))
 	
 	return variants
@@ -378,30 +378,8 @@ def _clean_text(raw_text: str) -> str:
 	"""Collapse OCR whitespace into a stable single-space form."""
 	return re.sub(r"\s+", " ", raw_text).strip()
 
-
-VALID_MODES = ["HYBRID PLUS", "HYBRID", "HEAT PUMP", "ELECTRIC", "VACATION"]
-
 def _parse_mode(raw_text: str) -> str:
     cleaned = _clean_text(raw_text).upper().strip()
-    
-    # 1. Direct substring match
-    for mode in VALID_MODES:
-        if mode in cleaned:
-            return mode
-            
-    # 2. Fuzzy matching for common Tesseract misreads
-    if "PUMP" in cleaned or "HEAT" in cleaned:
-        return "HEAT PUMP"
-    if "PLUS" in cleaned:
-        return "HYBRID PLUS"
-    if "HYB" in cleaned or "YBR" in cleaned:
-        return "HYBRID"
-    if "ELEC" in cleaned or "TRIC" in cleaned:
-        return "ELECTRIC"
-    if "VAC" in cleaned or "TION" in cleaned:
-        return "VACATION"
-        
-    # 3. Legacy fallback
     parts = cleaned.split(" ", 1)
     if len(parts) > 1:
         return parts[1]
