@@ -195,9 +195,11 @@ def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
 	return scaled
 
 
-def _build_variants_from_roi(roi: np.ndarray) -> list[np.ndarray]:
-	"""Create OCR-friendly variants from a single ROI crop."""
+def _extract_warped_variants(binary: np.ndarray, field: OCRField) -> list[np.ndarray]:
+	"""Build robust OCR variants utilizing adaptive thresholding and morphological operations to bridge LCD segment gaps."""
 	_require_cv2()
+	roi = field.ideal.crop(binary)
+	
 	if roi.size == 0:
 		return []
 
@@ -209,11 +211,14 @@ def _build_variants_from_roi(roi: np.ndarray) -> list[np.ndarray]:
 		_, otsu_standard = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 		otsu_inverted = cv2.bitwise_not(otsu_standard)
 		return [roi, otsu_standard, otsu_inverted]
-
+	
+	# 1. Generate baseline standard and inverted threshold options
 	_, otsu_standard = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 	otsu_inverted = cv2.bitwise_not(otsu_standard)
-
-	# Dynamically enforce dark-on-light polarity.
+	
+	# 2. Dynamically enforce dark-on-light polarity.
+	# Since display backgrounds occupy far more area than text lines, the background
+	# color will consistently hold the dominant pixel count.
 	if np.sum(otsu_standard == 255) > np.sum(otsu_standard == 0):
 		dark_on_light = otsu_standard
 		light_on_dark = otsu_inverted
@@ -221,34 +226,28 @@ def _build_variants_from_roi(roi: np.ndarray) -> list[np.ndarray]:
 		dark_on_light = otsu_inverted
 		light_on_dark = otsu_standard
 
-	variants: list[np.ndarray] = []
+	variants = []
+	
+	# Variant 1: Clean, high-contrast dark text on a light background (Standard Otsu)
 	variants.append(dark_on_light)
-
+	
+	# Variant 2: Morphological Closing to bridge gaps in segmented LCD text.
+	# Closing (dilation followed by erosion) fills the small inner gaps of white-on-black 
+	# character pieces. Then we invert back to dark-on-light for Tesseract.
 	kernel_bridge = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
 	closed_segments = cv2.morphologyEx(light_on_dark, cv2.MORPH_CLOSE, kernel_bridge)
 	variants.append(cv2.bitwise_not(closed_segments))
-
+	
+	# Variant 3: Adaptive Threshold with specialized dilation to handle backlight glare.
 	inverted_roi = cv2.bitwise_not(roi)
 	adaptive = cv2.adaptiveThreshold(
 		inverted_roi, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 15, 4
 	)
+	# Dilating white-on-black text patches smears adjacent segment segments together
 	kernel_dilate = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
 	dilated_adaptive = cv2.dilate(adaptive, kernel_dilate, iterations=1)
 	variants.append(cv2.bitwise_not(dilated_adaptive))
-	return variants
-
-
-def _extract_warped_variants(binary: np.ndarray, field: OCRField) -> list[np.ndarray]:
-	"""Build OCR variants from both ideal and fallback ROIs so location text is still attempted."""
-	_require_cv2()
-	variants: list[np.ndarray] = []
-
-	for box in (field.ideal, field.fallback):
-		roi = box.crop(binary)
-		if roi.size == 0:
-			continue
-		variants.extend(_build_variants_from_roi(roi))
-
+	
 	return variants
 
 
@@ -256,18 +255,22 @@ def _extract_fallback_variants(frame: np.ndarray, field: OCRField) -> list[np.nd
 	"""Build conservative OCR variants when the display contour is not found."""
 	_require_cv2()
 	gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+	# FIX: Swapped out INTER_CUBIC with INTER_LINEAR
 	gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_LINEAR)
+	roi = field.fallback.crop(gray)
+	
+	if roi.size == 0:
+		return []
 
-	variants: list[np.ndarray] = []
-	for box in (field.fallback, field.ideal):
-		roi = box.crop(gray)
-		if roi.size == 0:
-			continue
-		roi = cv2.GaussianBlur(roi, (3, 3), 0)
+	roi = cv2.GaussianBlur(roi, (3, 3), 0)
+
+	# --- FIX: PHANTOM TEXT HALLUCINATION CHECK ---
+	if np.std(roi) < 15.0:
 		_, otsu = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-		variants.extend([roi, otsu, cv2.bitwise_not(otsu)])
+		return [roi, otsu, cv2.bitwise_not(otsu)]
 
-	return variants
+	_, otsu = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+	return [roi, otsu, cv2.bitwise_not(otsu)]
 
 # Cache dictionary for loaded template images
 _ICON_TEMPLATES: dict[str, dict[str, np.ndarray]] = {}
