@@ -872,7 +872,7 @@ def _get_camera() -> Any:
 	camera.start()
 	camera.set_controls({
 		"AfMode": 0,
-		"LensPosition": 8.7,
+		"LensPosition": 9.1,
 	})
 
 	# --- HARDWARE STABILIZATION SETTLE ---
