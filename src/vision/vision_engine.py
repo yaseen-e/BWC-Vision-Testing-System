@@ -82,30 +82,32 @@ def _warp_image(image: np.ndarray, points: np.ndarray) -> np.ndarray:
 
 
 def _build_display_mask(frame: np.ndarray) -> np.ndarray:
-	"""Build a single mask for the emissive orange display window."""
+	"""Build a robust mask for the emissive orange display window."""
 	_require_cv2()
 	if frame is None or frame.size == 0:
 		raise ValueError("frame must be a non-empty image")
 
 	hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-	# Secure the vibrant orange/amber background perfectly.
-	orange_mask = cv2.inRange(hsv, np.array([0, 50, 50]), np.array([35, 255, 255]))
+	# Capture the warm display tones while allowing a bit of saturation margin for glare.
+	orange_mask = cv2.inRange(hsv, np.array([0, 40, 45]), np.array([35, 255, 255]))
+	warm_mask = cv2.inRange(hsv, np.array([0, 15, 90]), np.array([25, 255, 255]))
+	mask = cv2.bitwise_or(orange_mask, warm_mask)
 
-	# Fuse any inner text gaps horizontally/vertically without spilling into bezels
-	mask = cv2.morphologyEx(orange_mask, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (15, 5)))
+	# Fuse any inner text gaps horizontally/vertically without spilling into bezels.
+	mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (15, 5)))
 	mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 15)))
 
-	# Clean up any lingering tiny noise specs
+	# Clean up any lingering tiny noise specs while retaining the overall display outline.
 	mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)))
 	
 	return mask
 
 
 def _find_display_contour(frame: np.ndarray, mask: np.ndarray, min_area: int = 3000) -> Optional[np.ndarray]:
-	"""Find the raw orange display rectangle without geometric status bar projection."""
+	"""Find the display border by preferring compact quadrilateral contours over generic blobs."""
 	_require_cv2()
-	contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+	contours, _ = cv2.findContours(mask, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
 	if not contours:
 		return None
 
@@ -114,11 +116,6 @@ def _find_display_contour(frame: np.ndarray, mask: np.ndarray, min_area: int = 3
 	
 	best_contour: Optional[np.ndarray] = None
 	best_score = float("-inf")
-
-	def _contour_box(candidate: np.ndarray) -> np.ndarray:
-		rotated = cv2.minAreaRect(candidate)
-		points = cv2.boxPoints(rotated)
-		return points.astype("float32")
 
 	for contour in contours:
 		area = cv2.contourArea(contour)
@@ -131,13 +128,39 @@ def _find_display_contour(frame: np.ndarray, mask: np.ndarray, min_area: int = 3
 			continue
 
 		solidity = area / hull_area
-		if solidity < 0.50: 
+		if solidity < 0.45:
 			continue
 
-		score = area * solidity
+		perimeter = cv2.arcLength(contour, True)
+		if perimeter <= 0:
+			continue
+
+		approx = cv2.approxPolyDP(contour, 0.02 * perimeter, True)
+		if len(approx) == 4:
+			simplified = approx.reshape(4, 2).astype("float32")
+			ordered = _order_points(simplified)
+			x, y, w, h = cv2.boundingRect(approx)
+			aspect_ratio = max(w, h) / max(1, min(w, h))
+			if aspect_ratio > 8:
+				continue
+			rectangularity = area / max(1, w * h)
+			if rectangularity < 0.30:
+				continue
+			score = area * solidity * (1.0 + rectangularity)
+			candidate = ordered
+		else:
+			rotated = cv2.minAreaRect(contour)
+			candidate = cv2.boxPoints(rotated).astype("float32")
+			candidate = _order_points(candidate)
+			x, y, w, h = cv2.boundingRect(contour)
+			aspect_ratio = max(w, h) / max(1, min(w, h))
+			if aspect_ratio > 8:
+				continue
+			score = area * solidity * 0.85
+
 		if score > best_score:
 			best_score = score
-			best_contour = _contour_box(contour)
+			best_contour = candidate
 
 	return best_contour
 
