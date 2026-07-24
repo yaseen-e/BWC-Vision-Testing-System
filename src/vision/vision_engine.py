@@ -147,18 +147,18 @@ def _should_use_extended_warp(current_menu_key: Optional[str]) -> bool:
 	if not current_menu_key:
 		return False
 
-	normalized_key = current_menu_key.strip().lower()
-	return normalized_key in {"homescreen", "home", "main", "main_screen", "dashboard"}
+	normalized_key = current_menu_key.strip().lower().replace(" ", "_")
+	return normalized_key in {"homescreen", "home", "main", "main_screen", "dashboard", "home_screen"}
 
 
 def _process_display_contour_and_warp(
-	frame: np.ndarray, orange_contour: np.ndarray, use_extended_warp: bool = False
+	frame: np.ndarray, orange_contour: np.ndarray, current_menu_key: Optional[str] = None
 ) -> tuple[np.ndarray, np.ndarray]:
 	"""
 	Warp the display area once and optionally extend the contour for the main screen.
 	"""
 	_require_cv2()
-	if not use_extended_warp:
+	if not _should_use_extended_warp(current_menu_key):
 		return orange_contour, _warp_image(frame, orange_contour)
 
 	ordered = _order_points(orange_contour)
@@ -722,6 +722,7 @@ def save_roi_ocr_overlay(
 	frame: np.ndarray,
 	capture_id: Optional[str],
 	menu_fields: tuple[OCRField, ...],
+	current_menu_key: Optional[str] = None,
 ) -> Optional[Path]:
 	"""Persist a calibration image that shows every OCR ROI on the current frame."""
 	_require_cv2()
@@ -735,7 +736,7 @@ def save_roi_ocr_overlay(
 	if display_contour is None:
 		overlay = _draw_roi_overlay(frame, menu_fields, use_fallback_rois=True)
 	else:
-		final_contour, warped = _process_display_contour_and_warp(frame, display_contour, use_extended_warp=False)
+		final_contour, warped = _process_display_contour_and_warp(frame, display_contour, current_menu_key=current_menu_key)
 		source_points = _order_points(final_contour.reshape(4, 2))
 		
 		width_a = np.linalg.norm(source_points[2] - source_points[3])
@@ -805,11 +806,10 @@ def read_display(
 		)
 
 	# Only extend the warp on the main/home screen; other screens use the normal contour.
-	use_extended_warp = _should_use_extended_warp(current_menu_key)
 	final_contour, warped = _process_display_contour_and_warp(
 		frame,
 		display_contour,
-		use_extended_warp=use_extended_warp,
+		current_menu_key=current_menu_key,
 	)
 	binary = _prepare_ocr_binary(warped)
 
@@ -900,7 +900,7 @@ def shutdown() -> None:
 	_CAMERA = None
 
 
-def get_warped_display(frame: np.ndarray) -> Optional[np.ndarray]:
+def get_warped_display(frame: np.ndarray, current_menu_key: Optional[str] = None) -> Optional[np.ndarray]:
 	"""Extract a front-facing view of the display from a camera frame, or None if not found."""
 	mask = _build_display_mask(frame)
 	display_contour = _find_display_contour(frame, mask)
@@ -908,6 +908,6 @@ def get_warped_display(frame: np.ndarray) -> Optional[np.ndarray]:
 	if display_contour is None:
 		return None
 
-	# Utilizing our single-pass warp and crop method without the home-screen extension
-	_, warped = _process_display_contour_and_warp(frame, display_contour, use_extended_warp=False)
+	# Utilizing our single-pass warp and crop method with the home-screen extension when appropriate
+	_, warped = _process_display_contour_and_warp(frame, display_contour, current_menu_key=current_menu_key)
 	return warped

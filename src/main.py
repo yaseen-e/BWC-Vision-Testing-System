@@ -256,7 +256,13 @@ def main():
                         else:
                             print(f"[INFO] Saved capture frame: {saved_path}")
 
-                        roi_overlay_path = vision_engine.save_roi_ocr_overlay(CAPTURE_DIR, frame, capture_id, current_menu.fields)
+                        roi_overlay_path = vision_engine.save_roi_ocr_overlay(
+                            CAPTURE_DIR,
+                            frame,
+                            capture_id,
+                            current_menu.fields,
+                            current_menu_key=current_menu.key,
+                        )
                         if roi_overlay_path is None:
                             print("[WARNING] ROI calibration image could not be saved.")
                         else:
