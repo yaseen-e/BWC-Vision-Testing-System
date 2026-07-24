@@ -200,8 +200,17 @@ def _extract_warped_variants(binary: np.ndarray, field: OCRField) -> list[np.nda
 	_require_cv2()
 	roi = field.ideal.crop(binary)
 	
-	if np.std(roi) < 15.0:
+	if roi.size == 0:
 		return []
+
+	roi = cv2.GaussianBlur(roi, (3, 3), 0)
+
+	# Some location/setting screens have low contrast in the warped ROI, so avoid
+	# dropping OCR entirely just because the raw standard deviation is small.
+	if np.std(roi) < 15.0:
+		_, otsu_standard = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+		otsu_inverted = cv2.bitwise_not(otsu_standard)
+		return [roi, otsu_standard, otsu_inverted]
 	
 	# 1. Generate baseline standard and inverted threshold options
 	_, otsu_standard = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
@@ -250,11 +259,16 @@ def _extract_fallback_variants(frame: np.ndarray, field: OCRField) -> list[np.nd
 	gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_LINEAR)
 	roi = field.fallback.crop(gray)
 	
-	# --- FIX: PHANTOM TEXT HALLUCINATION CHECK ---
-	if np.std(roi) < 15.0:
+	if roi.size == 0:
 		return []
 
 	roi = cv2.GaussianBlur(roi, (3, 3), 0)
+
+	# --- FIX: PHANTOM TEXT HALLUCINATION CHECK ---
+	if np.std(roi) < 15.0:
+		_, otsu = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+		return [roi, otsu, cv2.bitwise_not(otsu)]
+
 	_, otsu = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 	return [roi, otsu, cv2.bitwise_not(otsu)]
 
