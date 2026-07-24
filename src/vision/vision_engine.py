@@ -142,14 +142,25 @@ def _find_display_contour(frame: np.ndarray, mask: np.ndarray, min_area: int = 3
 	return best_contour
 
 
+def _should_use_extended_warp(current_menu_key: Optional[str]) -> bool:
+	"""Only extend the display contour on the main/home screen."""
+	if not current_menu_key:
+		return False
+
+	normalized_key = current_menu_key.strip().lower()
+	return normalized_key in {"homescreen", "home", "main", "main_screen", "dashboard"}
+
+
 def _process_display_contour_and_warp(
-	frame: np.ndarray, orange_contour: np.ndarray
+	frame: np.ndarray, orange_contour: np.ndarray, use_extended_warp: bool = False
 ) -> tuple[np.ndarray, np.ndarray]:
 	"""
-	Warp the extended display area exactly once and return the final contour 
-	and flattened warped image.
+	Warp the display area once and optionally extend the contour for the main screen.
 	"""
 	_require_cv2()
+	if not use_extended_warp:
+		return orange_contour, _warp_image(frame, orange_contour)
+
 	ordered = _order_points(orange_contour)
 	top_left, top_right, bottom_right, bottom_left = ordered
 
@@ -724,7 +735,7 @@ def save_roi_ocr_overlay(
 	if display_contour is None:
 		overlay = _draw_roi_overlay(frame, menu_fields, use_fallback_rois=True)
 	else:
-		final_contour, warped = _process_display_contour_and_warp(frame, display_contour)
+		final_contour, warped = _process_display_contour_and_warp(frame, display_contour, use_extended_warp=False)
 		source_points = _order_points(final_contour.reshape(4, 2))
 		
 		width_a = np.linalg.norm(source_points[2] - source_points[3])
@@ -793,8 +804,13 @@ def read_display(
 			fields=fields_result,
 		)
 
-	# Single Warp & Smart Crop Operation replaces double-warp
-	final_contour, warped = _process_display_contour_and_warp(frame, display_contour)
+	# Only extend the warp on the main/home screen; other screens use the normal contour.
+	use_extended_warp = _should_use_extended_warp(current_menu_key)
+	final_contour, warped = _process_display_contour_and_warp(
+		frame,
+		display_contour,
+		use_extended_warp=use_extended_warp,
+	)
 	binary = _prepare_ocr_binary(warped)
 
 	for field in menu_fields:
@@ -892,6 +908,6 @@ def get_warped_display(frame: np.ndarray) -> Optional[np.ndarray]:
 	if display_contour is None:
 		return None
 
-	# Utilizing our single-pass warp and crop method
-	_, warped = _process_display_contour_and_warp(frame, display_contour)
+	# Utilizing our single-pass warp and crop method without the home-screen extension
+	_, warped = _process_display_contour_and_warp(frame, display_contour, use_extended_warp=False)
 	return warped
