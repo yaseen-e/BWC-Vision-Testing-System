@@ -1,9 +1,9 @@
 {
-    "UP": 63,
-    "LEFT": 122,
-    "SELECT": 46,
-    "RIGHT": 73,
-    "BACK": 44,
-    "DOWN": 75,
-    "MENU": 139
+    "UP": 73,
+    "LEFT": 105,
+    "SELECT": 56,
+    "RIGHT": 93,
+    "BACK": 41,
+    "DOWN": 93,
+    "MENU": 134
 }
