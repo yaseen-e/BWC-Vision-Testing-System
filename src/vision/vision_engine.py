@@ -525,12 +525,13 @@ def _should_report_confidence(field_name: str) -> bool:
 	return field_name in {"mode", "temperature"}
 
 
-def _parse_tesseract_data(tesseract_output: dict[str, Any]) -> tuple[str, float]:
+def _parse_tesseract_data(tesseract_output: dict[str, Any]) -> tuple[str, float, list[tuple[str, Optional[float]]]]:
 	texts = tesseract_output.get("text", []) or []
 	confidences = tesseract_output.get("conf", []) or []
 
 	cleaned_tokens: list[str] = []
 	valid_confidences: list[float] = []
+	token_confidence_pairs: list[tuple[str, Optional[float]]] = []
 
 	for token, raw_confidence in zip(texts, confidences):
 		if token is None:
@@ -542,73 +543,95 @@ def _parse_tesseract_data(tesseract_output: dict[str, Any]) -> tuple[str, float]
 		try:
 			confidence_value = float(raw_confidence)
 		except (TypeError, ValueError):
+			token_confidence_pairs.append((stripped, None))
 			continue
 		if confidence_value >= 0:
 			valid_confidences.append(confidence_value)
+			token_confidence_pairs.append((stripped, confidence_value))
+		else:
+			token_confidence_pairs.append((stripped, None))
 
 	if not cleaned_tokens:
-		return "", 0.0
+		return "", 0.0, []
 
 	raw_text = " ".join(cleaned_tokens)
 	if not valid_confidences:
-		return _clean_text(raw_text), 0.0
+		return _clean_text(raw_text), 0.0, token_confidence_pairs
 
-	return _clean_text(raw_text), sum(valid_confidences) / len(valid_confidences)
+	return _clean_text(raw_text), sum(valid_confidences) / len(valid_confidences), token_confidence_pairs
+
+
+def _mode_confidence_without_prefix(token_confidence_pairs: list[tuple[str, Optional[float]]]) -> float:
+	"""Average confidence after dropping the first MODE_FIELD token."""
+	if len(token_confidence_pairs) <= 1:
+		return 0.0
+
+	remaining_confidences = [
+		confidence
+		for _, confidence in token_confidence_pairs[1:]
+		if confidence is not None and confidence >= 0
+	]
+	if not remaining_confidences:
+		return 0.0
+
+	return sum(remaining_confidences) / len(remaining_confidences)
 
 
 def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any, float]:
-    """OCR or classify a field from image variants and keep the best candidate using confidence tie-breaking."""
-    field_name = field.name
+	"""OCR or classify a field from image variants and keep the best candidate using confidence tie-breaking."""
+	field_name = field.name
 
-    # --- ICON CLASSIFICATION BYPASS ---
-    if field_name in ("wifi_icon", "schedule_icon"):
-        if not variants:
-            return "UNKNOWN", "UNKNOWN", 0.0
-        # Invert the variant so the icon is white and the background is black
-        inverted_variant = cv2.bitwise_not(variants[0])
-        icon_key, icon_value = _classify_icon_field(inverted_variant, field_name)
-        return icon_key, icon_value, 0.0
+	# --- ICON CLASSIFICATION BYPASS ---
+	if field_name in ("wifi_icon", "schedule_icon"):
+		if not variants:
+			return "UNKNOWN", "UNKNOWN", 0.0
+		# Invert the variant so the icon is white and the background is black
+		inverted_variant = cv2.bitwise_not(variants[0])
+		icon_key, icon_value = _classify_icon_field(inverted_variant, field_name)
+		return icon_key, icon_value, 0.0
 
-    # --- STANDARD TESSERACT OCR FOR TEXT/DIGITS ---
-    _require_pytesseract()
-    best_raw = ""
-    best_value: Any = _field_empty_value(field_name)
-    best_score = -1.0
-    best_confidence = 0.0
+	# --- STANDARD TESSERACT OCR FOR TEXT/DIGITS ---
+	_require_pytesseract()
+	best_raw = ""
+	best_value: Any = _field_empty_value(field_name)
+	best_score = -1.0
+	best_confidence = 0.0
 
-    whitelist_set = None
-    if "tessedit_char_whitelist=" in field.tesseract_config:
-        whitelist_set = set(field.tesseract_config.split("tessedit_char_whitelist=")[1])
+	whitelist_set = None
+	if "tessedit_char_whitelist=" in field.tesseract_config:
+		whitelist_set = set(field.tesseract_config.split("tessedit_char_whitelist=")[1])
 
-    for variant in variants:
-        tesseract_output = pytesseract.image_to_data(
-            variant,
-            config=field.tesseract_config,
-            output_type=pytesseract.Output.DICT,
-        )
-        raw, confidence = _parse_tesseract_data(tesseract_output)
-        
-        if whitelist_set and field_name != "temperature":
-            raw = "".join(c for c in raw if c in whitelist_set)
+	for variant in variants:
+		tesseract_output = pytesseract.image_to_data(
+			variant,
+			config=field.tesseract_config,
+			output_type=pytesseract.Output.DICT,
+		)
+		raw, confidence, token_confidence_pairs = _parse_tesseract_data(tesseract_output)
+		if field_name == "mode":
+			confidence = _mode_confidence_without_prefix(token_confidence_pairs)
 
-        value = _parse_field_value(field_name, raw)
-        score = _score_field_candidate(field_name, raw, value)
+		if whitelist_set and field_name != "temperature":
+			raw = "".join(c for c in raw if c in whitelist_set)
 
-        # --- Option 1 Fix: Confidence fraction (0.0 to 1.0) breaks score ties ---
-        effective_score = score + (confidence / 100.0)
+		value = _parse_field_value(field_name, raw)
+		score = _score_field_candidate(field_name, raw, value)
 
-        if effective_score > best_score:
-            best_raw = raw
-            best_value = value
-            best_score = effective_score
-            best_confidence = confidence
+		# --- Option 1 Fix: Confidence fraction (0.0 to 1.0) breaks score ties ---
+		effective_score = score + (confidence / 100.0)
 
-    if whitelist_set:
-        best_raw = "".join(c for c in best_raw if c in whitelist_set)
-        if isinstance(best_value, str):
-            best_value = "".join(c for c in best_value if c in whitelist_set)
+		if effective_score > best_score:
+			best_raw = raw
+			best_value = value
+			best_score = effective_score
+			best_confidence = confidence
 
-    return best_raw, best_value, best_confidence
+	if whitelist_set:
+		best_raw = "".join(c for c in best_raw if c in whitelist_set)
+		if isinstance(best_value, str):
+			best_value = "".join(c for c in best_value if c in whitelist_set)
+
+	return best_raw, best_value, best_confidence
 
 
 def _draw_roi_overlay(image: np.ndarray, fields: tuple[OCRField, ...], use_fallback_rois: bool) -> np.ndarray:
