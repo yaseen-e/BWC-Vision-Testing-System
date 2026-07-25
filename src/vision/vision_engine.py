@@ -182,14 +182,20 @@ def _process_display_contour_and_warp(
 
 
 def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
-    """Bilateral filtering pipeline for ultra-smooth backgrounds and razor-sharp characters."""
+    """Bilateral filtering pipeline for native-scale text rendering.
+    
+    Completely eliminates background screen texture and digital grain 
+    while preserving razor-sharp, smooth character vector edges.
+    """
     _require_cv2()
     gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
     
-    # 1. Bilateral filter flattens background noise while protecting character boundaries
-    denoised = cv2.bilateralFilter(gray, d=5, sigmaColor=75, sigmaSpace=75)
+    # 1. Bilateral Filter at native resolution:
+    # d=7 applies thorough spatial smoothing to orange screen grain,
+    # while high color variance threshold (75) prevents bleeding across high-contrast text edges.
+    denoised = cv2.bilateralFilter(gray, d=7, sigmaColor=75, sigmaSpace=75)
     
-    # 2. Subtle edge boost
+    # 2. Subtle unsharp mask to define clean character boundaries for Otsu thresholding
     blur_layer = cv2.GaussianBlur(denoised, (0, 0), 2.0)
     sharpened = cv2.addWeighted(denoised, 1.3, blur_layer, -0.3, 0)
     
