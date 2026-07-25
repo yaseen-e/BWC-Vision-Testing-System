@@ -202,60 +202,65 @@ def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
     return sharpened
 
 
-def _extract_warped_variants(binary: np.ndarray, field: OCRField) -> list[np.ndarray]:
-    """Build robust OCR variants utilizing directional morphology and adaptive thresholding."""
+def _extract_warped_variants(prepared: np.ndarray) -> list[np.ndarray]:
+    """Extract binary variants from the preprocessed frame, optimized for large/medium display text.
+    
+    Avoids aggressive morphological closing that clogs character loops (e.g. 'e', 'a', 'o', '5').
+    """
     _require_cv2()
-    roi = field.ideal.crop(binary)
-    
-    if np.std(roi) < 15.0:
-        return []
-    
-    # 1. Baseline Otsu Thresholding
-    _, otsu_standard = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    otsu_inverted = cv2.bitwise_not(otsu_standard)
-    
-    # Enforce dark-on-light polarity based on dominant pixel count
-    if np.sum(otsu_standard == 255) > np.sum(otsu_standard == 0):
-        dark_on_light = otsu_standard
-        light_on_dark = otsu_inverted
-    else:
-        dark_on_light = otsu_inverted
-        light_on_dark = otsu_standard
+    variants = []
 
-    variants = [dark_on_light]
-    
-    # 2. Variant 2: Horizontal Morphological Closing (Bridge LCD/stroke gaps without vertical bleed)
-    kernel_horizontal = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 1))
-    closed_segments = cv2.morphologyEx(light_on_dark, cv2.MORPH_CLOSE, kernel_horizontal)
-    variants.append(cv2.bitwise_not(closed_segments))
-    
-    # 3. Variant 3: Adaptive Gaussian Thresholding (Handles backlight glare)
-    inverted_roi = cv2.bitwise_not(roi)
-    adaptive = cv2.adaptiveThreshold(
-        inverted_roi, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 15, 3
+    # --- Variant 1: Global Otsu Thresholding ---
+    # Ideal for large text with uniform screen lighting; produces clean vector-like strokes.
+    _, v1 = cv2.threshold(prepared, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    variants.append(v1)
+
+    # --- Variant 2: Large-Window Adaptive Thresholding ---
+    # A large block size (35px) prevents large glyph strokes (like '105') from being hollowed out.
+    v2 = cv2.adaptiveThreshold(
+        prepared,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY,
+        blockSize=35,
+        C=3,
     )
-    kernel_dilate = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 1))
-    dilated_adaptive = cv2.dilate(adaptive, kernel_dilate, iterations=1)
-    variants.append(cv2.bitwise_not(dilated_adaptive))
-    
+    variants.append(v2)
+
+    # --- Variant 3: Mild Blur + Otsu Thresholding ---
+    # Eliminates any residual background LCD grid patterns before thresholding mid-weight text lines.
+    smoothed = cv2.GaussianBlur(prepared, (3, 3), 0)
+    _, v3 = cv2.threshold(smoothed, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    variants.append(v3)
+
     return variants
 
 
-def _extract_fallback_variants(frame: np.ndarray, field: OCRField) -> list[np.ndarray]:
-	"""Build conservative OCR variants when the display contour is not found."""
-	_require_cv2()
-	gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-	# FIX: Swapped out INTER_CUBIC with INTER_LINEAR
-	gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_LINEAR)
-	roi = field.fallback.crop(gray)
-	
-	# --- FIX: PHANTOM TEXT HALLUCINATION CHECK ---
-	if np.std(roi) < 15.0:
-		return []
+def _extract_fallback_variants(prepared: np.ndarray) -> list[np.ndarray]:
+    """Fallback binary variants for challenging lighting or low-contrast conditions on main text."""
+    _require_cv2()
+    fallbacks = []
 
-	roi = cv2.GaussianBlur(roi, (3, 3), 0)
-	_, otsu = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-	return [roi, otsu, cv2.bitwise_not(otsu)]
+    # --- Fallback 1: Truncated Contrast Stretch + Otsu ---
+    # Clips extreme background brightness to boost contrast on thinner text like "Call for heat."
+    norm = cv2.normalize(prepared, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
+    _, f1 = cv2.threshold(norm, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    fallbacks.append(f1)
+
+    # --- Fallback 2: Median-Filtered Adaptive Threshold ---
+    # Uses a median filter (3x3) to remove point noise without distorting large character edges.
+    median = cv2.medianBlur(prepared, 3)
+    f2 = cv2.adaptiveThreshold(
+        median,
+        255,
+        cv2.ADAPTIVE_THRESH_MEAN_C,
+        cv2.THRESH_BINARY,
+        blockSize=45,
+        C=4,
+    )
+    fallbacks.append(f2)
+
+    return fallbacks
 
 # Cache dictionary for loaded template images
 _ICON_TEMPLATES: dict[str, dict[str, np.ndarray]] = {}
