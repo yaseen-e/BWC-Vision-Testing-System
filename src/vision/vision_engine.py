@@ -178,21 +178,17 @@ def _process_display_contour_and_warp(
 
 
 def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
-	"""Convert to grayscale, enhance edges, and scale for OCR."""
-	_require_cv2()
-	gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
-	
-	# FIX: Replaced high-overhead Bilateral Filter with ultra-fast Gaussian Blur
-	filtered = cv2.GaussianBlur(gray, (5, 5), 0)
-	
-	# Unsharp Masking: Artificially sharpen the image to combat camera lens blur.
-	gaussian_blur = cv2.GaussianBlur(filtered, (0, 0), 2.0)
-	sharpened = cv2.addWeighted(filtered, 1.5, gaussian_blur, -0.5, 0)
-	
-	# FIX: Swapped out INTER_CUBIC with INTER_LINEAR for optimized CPU usage
-	scaled = cv2.resize(sharpened, None, fx=2, fy=2, interpolation=cv2.INTER_LINEAR)
-	
-	return scaled
+    gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
+    
+    # 1. Eliminate speckle noise with a 5x5 Gaussian Kernel
+    denoised = cv2.GaussianBlur(gray, (5, 5), 0)
+    
+    # 2. Unsharp Masking: (1.8 * denoised) - (0.8 * blurred)
+    blurred_mask = cv2.GaussianBlur(denoised, (0, 0), 3.0)
+    sharpened = cv2.addWeighted(denoised, 1.8, blurred_mask, -0.8, 0)
+    
+    # 3. Smooth Bilinear Rescaling
+    return cv2.resize(sharpened, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_LINEAR)
 
 
 def _extract_warped_variants(binary: np.ndarray, field: OCRField) -> list[np.ndarray]:
