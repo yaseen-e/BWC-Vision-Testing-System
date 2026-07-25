@@ -182,19 +182,18 @@ def _process_display_contour_and_warp(
 
 
 def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
+    """Native-scale pipeline optimized for large/medium display text (Mode, Temp, Info lines)."""
     _require_cv2()
     gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
     
-    # 1. Upscale FIRST so downstream operations work on high pixel density
-    scaled = cv2.resize(gray, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_LINEAR)
+    # 1. 5x5 blur at native 1x scale flattens background noise completely
+    denoised = cv2.GaussianBlur(gray, (5, 5), 0)
     
-    # 2. Gentle blur on high-res frame
-    denoised = cv2.GaussianBlur(scaled, (3, 3), 0)
+    # 2. Gentle unsharp mask on noise-free image (prevents saw-tooth edges)
+    blur_layer = cv2.GaussianBlur(denoised, (0, 0), 3.0)
+    sharpened = cv2.addWeighted(denoised, 1.4, blur_layer, -0.4, 0)
     
-    # 3. Sharpen high-res edges (unsharp mask stays crisp)
-    blur_layer = cv2.GaussianBlur(denoised, (0, 0), 2.0)
-    sharpened = cv2.addWeighted(denoised, 1.5, blur_layer, -0.5, 0)
-    
+    # No upscaling: native height is already in Tesseract's optimal range!
     return sharpened
 
 
