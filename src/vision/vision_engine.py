@@ -177,7 +177,7 @@ def _process_display_contour_and_warp(
 	return extended_contour, warped_extended
 
 
-def _prepare_ocr_binary_bilateral(warped: np.ndarray) -> np.ndarray:
+def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
     gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
     
     # d=5 (pixel diameter), sigmaColor=75 (flattens background noise), sigmaSpace=75
