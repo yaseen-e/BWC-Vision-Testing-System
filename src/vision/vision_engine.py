@@ -202,7 +202,7 @@ def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
     return sharpened
 
 
-def _extract_warped_variants(prepared: np.ndarray) -> list[np.ndarray]:
+def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np.ndarray]:
     """Extract binary variants from the preprocessed frame, optimized for large/medium display text.
     
     Avoids aggressive morphological closing that clogs character loops (e.g. 'e', 'a', 'o', '5').
@@ -236,7 +236,7 @@ def _extract_warped_variants(prepared: np.ndarray) -> list[np.ndarray]:
     return variants
 
 
-def _extract_fallback_variants(prepared: np.ndarray) -> list[np.ndarray]:
+def _extract_fallback_variants(prepared: np.ndarray, field: Any = None) -> list[np.ndarray]:
     """Fallback binary variants for challenging lighting or low-contrast conditions on main text."""
     _require_cv2()
     fallbacks = []
