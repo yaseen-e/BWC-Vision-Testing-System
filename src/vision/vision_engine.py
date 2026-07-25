@@ -183,14 +183,14 @@ def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
 	gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
 	
 	# FIX: Replaced high-overhead Bilateral Filter with ultra-fast Gaussian Blur
-	filtered = cv2.GaussianBlur(gray, (3, 3), 0)
+	filtered = cv2.GaussianBlur(gray, (5, 5), 0)
 	
 	# Unsharp Masking: Artificially sharpen the image to combat camera lens blur.
 	gaussian_blur = cv2.GaussianBlur(filtered, (0, 0), 2.0)
 	sharpened = cv2.addWeighted(filtered, 1.5, gaussian_blur, -0.5, 0)
 	
 	# FIX: Swapped out INTER_CUBIC with INTER_LINEAR for optimized CPU usage
-	scaled = cv2.resize(sharpened, None, fx=2.5, fy=2.5, interpolation=cv2.INTER_CUBIC)
+	scaled = cv2.resize(sharpened, None, fx=2.5, fy=2.5, interpolation=cv2.INTER_LINEAR)
 	
 	return scaled
 
@@ -872,7 +872,7 @@ def _get_camera() -> Any:
 	camera.start()
 	camera.set_controls({
 		"AfMode": 0,
-		"LensPosition": 9.1,
+		"LensPosition": 9.1, # 1 / 0.11m = 9.1
 	})
 
 	# --- HARDWARE STABILIZATION SETTLE ---
