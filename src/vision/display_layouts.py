@@ -172,7 +172,7 @@ MODE_FIELD = OCRField(
 	name="mode",
 	ideal=ROIBox(top=0.03, bottom=0.14, left=0.25, right=0.75),
 	fallback=ROIBox(top=0.00, bottom=0.18, left=0.18, right=0.82),
-	tesseract_config="--psm 7 -c tessedit_char_whitelist= ABCDEFGHIJKLMNOPQRSTUVWXYZ:",
+	tesseract_config="--psm 7 -c tessedit_char_whitelist=MODE: HYBRIDPLUSATCVN",
 )
 
 TEMPERATURE_FIELD = OCRField(
