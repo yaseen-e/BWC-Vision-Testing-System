@@ -202,8 +202,15 @@ def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
     return sharpened
 
 
+def _ensure_black_text_white_bg(binary_roi: np.ndarray) -> np.ndarray:
+    """Ensure binary image is black text (0) on white background (255)."""
+    if np.mean(binary_roi) < 127:
+        return cv2.bitwise_not(binary_roi)
+    return binary_roi
+
+
 def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np.ndarray]:
-    """Extract binary variants from the cropped ideal ROI of the preprocessed frame."""
+    """Extract high-resolution, padded binary variants tuned for maximum OCR confidence."""
     _require_cv2()
 
     # 1. Crop to the field's ideal ROI box
@@ -215,42 +222,68 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
     if roi is None or roi.size == 0:
         return []
 
+    # 2. Heavy CPU Upscaling (Target height 180px for Tesseract LSTM optimal glyph size)
+    h, w = roi.shape[:2]
+    target_height = 180
+    if h < target_height:
+        scale = target_height / float(h)
+        new_w = max(1, int(w * scale))
+        roi = cv2.resize(roi, (new_w, target_height), interpolation=cv2.INTER_CUBIC)
+
     variants = []
 
-    # --- Variant 1: Global Otsu Thresholding ---
-    _, v1 = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    variants.append(v1)
+    def _finalize(bin_img: np.ndarray) -> np.ndarray:
+        bin_img = _ensure_black_text_white_bg(bin_img)
+        # Add 25px white quiet zone margin around text
+        return cv2.copyMakeBorder(
+            bin_img, 25, 25, 25, 25, cv2.BORDER_CONSTANT, value=255
+        )
 
-    # --- Variant 2: Adaptive Thresholding (Dynamically bounded block size) ---
-    h, w = roi.shape[:2]
-    max_block = max(3, (min(h, w) // 2) * 2 - 1)
-    block_size = min(35, max_block)
+    # --- Variant 1: Standard Otsu Thresholding ---
+    _, v1 = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    variants.append(_finalize(v1))
+
+    # --- Variant 2: CLAHE Contrast Boost + Otsu ---
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+    enhanced = clahe.apply(roi)
+    _, v2 = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    variants.append(_finalize(v2))
+
+    # --- Variant 3: Adaptive Gaussian Thresholding ---
+    curr_h, curr_w = roi.shape[:2]
+    max_block = max(3, (min(curr_h, curr_w) // 2) * 2 - 1)
+    block_size = min(41, max_block)
     if block_size % 2 == 0:
         block_size -= 1
 
-    v2 = cv2.adaptiveThreshold(
+    v3 = cv2.adaptiveThreshold(
         roi,
         255,
         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
         cv2.THRESH_BINARY,
         blockSize=max(3, block_size),
-        C=3,
+        C=4,
     )
-    variants.append(v2)
+    variants.append(_finalize(v3))
 
-    # --- Variant 3: Mild Blur + Otsu Thresholding ---
+    # --- Variant 4: Mild Blur + Otsu Thresholding ---
     smoothed = cv2.GaussianBlur(roi, (3, 3), 0)
-    _, v3 = cv2.threshold(smoothed, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    variants.append(v3)
+    _, v4 = cv2.threshold(smoothed, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    variants.append(_finalize(v4))
+
+    # --- Variant 5: Morphological Stroke Smoothing + Otsu ---
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+    morphed = cv2.morphologyEx(roi, cv2.MORPH_CLOSE, kernel)
+    _, v5 = cv2.threshold(morphed, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    variants.append(_finalize(v5))
 
     return variants
 
 
 def _extract_fallback_variants(prepared: np.ndarray, field: Any = None) -> list[np.ndarray]:
-    """Fallback binary variants for challenging lighting conditions, cropped to fallback ROI."""
+    """Fallback binary variants with upscaling and quiet-zone padding."""
     _require_cv2()
 
-    # 1. Crop to the field's fallback ROI box
     if field is not None and hasattr(field, "fallback"):
         roi = field.fallback.crop(prepared)
     else:
@@ -259,17 +292,30 @@ def _extract_fallback_variants(prepared: np.ndarray, field: Any = None) -> list[
     if roi is None or roi.size == 0:
         return []
 
+    h, w = roi.shape[:2]
+    target_height = 180
+    if h < target_height:
+        scale = target_height / float(h)
+        new_w = max(1, int(w * scale))
+        roi = cv2.resize(roi, (new_w, target_height), interpolation=cv2.INTER_CUBIC)
+
     fallbacks = []
+
+    def _finalize(bin_img: np.ndarray) -> np.ndarray:
+        bin_img = _ensure_black_text_white_bg(bin_img)
+        return cv2.copyMakeBorder(
+            bin_img, 25, 25, 25, 25, cv2.BORDER_CONSTANT, value=255
+        )
 
     # --- Fallback 1: Truncated Contrast Stretch + Otsu ---
     norm = cv2.normalize(roi, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
     _, f1 = cv2.threshold(norm, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    fallbacks.append(f1)
+    fallbacks.append(_finalize(f1))
 
     # --- Fallback 2: Median-Filtered Adaptive Threshold ---
     median = cv2.medianBlur(roi, 3)
-    h, w = roi.shape[:2]
-    max_block = max(3, (min(h, w) // 2) * 2 - 1)
+    curr_h, curr_w = roi.shape[:2]
+    max_block = max(3, (min(curr_h, curr_w) // 2) * 2 - 1)
     block_size = min(45, max_block)
     if block_size % 2 == 0:
         block_size -= 1
@@ -282,7 +328,7 @@ def _extract_fallback_variants(prepared: np.ndarray, field: Any = None) -> list[
         blockSize=max(3, block_size),
         C=4,
     )
-    fallbacks.append(f2)
+    fallbacks.append(_finalize(f2))
 
     return fallbacks
 
@@ -607,60 +653,63 @@ def _mode_confidence_without_prefix(token_confidence_pairs: list[tuple[str, Opti
 
 
 def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any, float]:
-	"""OCR or classify a field from image variants and keep the best candidate using confidence tie-breaking."""
-	field_name = field.name
+    """OCR or classify a field from image variants and keep the best candidate using confidence tie-breaking."""
+    field_name = field.name
 
-	# --- ICON CLASSIFICATION BYPASS ---
-	if field_name in ("wifi_icon", "schedule_icon"):
-		if not variants:
-			return "UNKNOWN", "UNKNOWN", 0.0
-		# Invert the variant so the icon is white and the background is black
-		inverted_variant = cv2.bitwise_not(variants[0])
-		icon_key, icon_value = _classify_icon_field(inverted_variant, field_name)
-		return icon_key, icon_value, 0.0
+    # --- ICON CLASSIFICATION BYPASS ---
+    if field_name in ("wifi_icon", "schedule_icon"):
+        if not variants:
+            return "UNKNOWN", "UNKNOWN", 0.0
+        inverted_variant = cv2.bitwise_not(variants[0])
+        icon_key, icon_value = _classify_icon_field(inverted_variant, field_name)
+        return icon_key, icon_value, 0.0
 
-	# --- STANDARD TESSERACT OCR FOR TEXT/DIGITS ---
-	_require_pytesseract()
-	best_raw = ""
-	best_value: Any = _field_empty_value(field_name)
-	best_score = -1.0
-	best_confidence = 0.0
+    # --- STANDARD TESSERACT OCR FOR TEXT/DIGITS ---
+    _require_pytesseract()
+    best_raw = ""
+    best_value: Any = _field_empty_value(field_name)
+    best_score = -1.0
+    best_confidence = 0.0
 
-	whitelist_set = None
-	if "tessedit_char_whitelist=" in field.tesseract_config:
-		whitelist_set = set(field.tesseract_config.split("tessedit_char_whitelist=")[1])
+    whitelist_set = None
+    if "tessedit_char_whitelist=" in field.tesseract_config:
+        whitelist_set = set(field.tesseract_config.split("tessedit_char_whitelist=")[1])
 
-	for variant in variants:
-		tesseract_output = pytesseract.image_to_data(
-			variant,
-			config=field.tesseract_config,
-			output_type=pytesseract.Output.DICT,
-		)
-		raw, confidence, token_confidence_pairs = _parse_tesseract_data(tesseract_output)
-		if field_name == "mode":
-			confidence = _mode_confidence_without_prefix(token_confidence_pairs)
+    # Enforce pure LSTM Engine Mode (--oem 1) for highest neural net accuracy
+    config = field.tesseract_config
+    if "--oem" not in config:
+        config = f"--oem 1 {config}"
 
-		if whitelist_set and field_name != "temperature":
-			raw = "".join(c for c in raw if c in whitelist_set)
+    for variant in variants:
+        tesseract_output = pytesseract.image_to_data(
+            variant,
+            config=config,
+            output_type=pytesseract.Output.DICT,
+        )
+        raw, confidence, token_confidence_pairs = _parse_tesseract_data(tesseract_output)
+        if field_name == "mode":
+            confidence = _mode_confidence_without_prefix(token_confidence_pairs)
 
-		value = _parse_field_value(field_name, raw)
-		score = _score_field_candidate(field_name, raw, value)
+        if whitelist_set and field_name != "temperature":
+            raw = "".join(c for c in raw if c in whitelist_set)
 
-		# --- Option 1 Fix: Confidence fraction (0.0 to 1.0) breaks score ties ---
-		effective_score = score + (confidence / 100.0)
+        value = _parse_field_value(field_name, raw)
+        score = _score_field_candidate(field_name, raw, value)
 
-		if effective_score > best_score:
-			best_raw = raw
-			best_value = value
-			best_score = effective_score
-			best_confidence = confidence
+        effective_score = score + (confidence / 100.0)
 
-	if whitelist_set:
-		best_raw = "".join(c for c in best_raw if c in whitelist_set)
-		if isinstance(best_value, str):
-			best_value = "".join(c for c in best_value if c in whitelist_set)
+        if effective_score > best_score:
+            best_raw = raw
+            best_value = value
+            best_score = effective_score
+            best_confidence = confidence
 
-	return best_raw, best_value, best_confidence
+    if whitelist_set:
+        best_raw = "".join(c for c in best_raw if c in whitelist_set)
+        if isinstance(best_value, str):
+            best_value = "".join(c for c in best_value if c in whitelist_set)
+
+    return best_raw, best_value, best_confidence
 
 
 def _draw_roi_overlay(image: np.ndarray, fields: tuple[OCRField, ...], use_fallback_rois: bool) -> np.ndarray:
