@@ -14,6 +14,7 @@ from typing import Any, Optional
 import numpy as np
 import cv2
 import pytesseract
+import re
 from .display_layouts import OCRField, ROIBox, STATUS_BAR
 import time
 
@@ -209,11 +210,37 @@ def _ensure_black_text_white_bg(binary_roi: np.ndarray) -> np.ndarray:
     return binary_roi
 
 
+def _denoise_roi_grayscale(roi: np.ndarray) -> np.ndarray:
+    """Applies a bilateral filter to smooth LCD dither texture while preserving sharp text edges."""
+    return cv2.bilateralFilter(roi, d=9, sigmaColor=75, sigmaSpace=75)
+
+
+def _filter_connected_components(bin_img: np.ndarray, min_area: int = 30) -> np.ndarray:
+    """Removes isolated noise specks smaller than min_area pixels from black-text-on-white-bg image."""
+    # Work on inverted image where text/noise is foreground (255)
+    fg_mask = cv2.bitwise_not(bin_img)
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(fg_mask, connectivity=8)
+
+    cleaned_fg = np.zeros_like(fg_mask)
+    for i in range(1, num_labels):  # Skip background label 0
+        if stats[i, cv2.CC_STAT_AREA] >= min_area:
+            cleaned_fg[labels == i] = 255
+
+    # Invert back to black text (0) on white background (255)
+    return cv2.bitwise_not(cleaned_fg)
+
+
+def _is_roi_blank(bin_img: np.ndarray, min_text_ratio: float = 0.008) -> bool:
+    """Returns True if foreground text pixels account for less than min_text_ratio of the total crop area."""
+    black_pixels = np.count_nonzero(bin_img == 0)
+    total_pixels = bin_img.size
+    return (black_pixels / float(total_pixels)) < min_text_ratio
+
+
 def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np.ndarray]:
-    """Extract high-resolution, padded binary variants tuned for maximum OCR confidence."""
+    """Extract upscaled, bilaterally smoothed, and speckle-filtered variants for OCR."""
     _require_cv2()
 
-    # 1. Crop to the field's ideal ROI box
     if field is not None and hasattr(field, "ideal"):
         roi = field.ideal.crop(prepared)
     else:
@@ -222,7 +249,7 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
     if roi is None or roi.size == 0:
         return []
 
-    # 2. Heavy CPU Upscaling (Target height 180px for Tesseract LSTM optimal glyph size)
+    # 1. Heavy Upscaling to 180px height for optimal Tesseract LSTM font size
     h, w = roi.shape[:2]
     target_height = 180
     if h < target_height:
@@ -230,34 +257,43 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
         new_w = max(1, int(w * scale))
         roi = cv2.resize(roi, (new_w, target_height), interpolation=cv2.INTER_CUBIC)
 
+    # 2. Denoise LCD screen dither texture
+    denoised_roi = _denoise_roi_grayscale(roi)
+
     variants = []
 
     def _finalize(bin_img: np.ndarray) -> np.ndarray:
-        bin_img = _ensure_black_text_white_bg(bin_img)
-        # Add 25px white quiet zone margin around text
+        # Enforce black text (0) on white background (255)
+        if np.mean(bin_img) < 127:
+            bin_img = cv2.bitwise_not(bin_img)
+        
+        # Erase small noise specks via Connected Component Analysis
+        bin_img = _filter_connected_components(bin_img, min_area=35)
+
+        # Add 25px white quiet zone margin around characters
         return cv2.copyMakeBorder(
             bin_img, 25, 25, 25, 25, cv2.BORDER_CONSTANT, value=255
         )
 
-    # --- Variant 1: Standard Otsu Thresholding ---
-    _, v1 = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    # --- Variant 1: Denoised Otsu ---
+    _, v1 = cv2.threshold(denoised_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     variants.append(_finalize(v1))
 
-    # --- Variant 2: CLAHE Contrast Boost + Otsu ---
+    # --- Variant 2: CLAHE + Otsu ---
     clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-    enhanced = clahe.apply(roi)
+    enhanced = clahe.apply(denoised_roi)
     _, v2 = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     variants.append(_finalize(v2))
 
     # --- Variant 3: Adaptive Gaussian Thresholding ---
-    curr_h, curr_w = roi.shape[:2]
+    curr_h, curr_w = denoised_roi.shape[:2]
     max_block = max(3, (min(curr_h, curr_w) // 2) * 2 - 1)
     block_size = min(41, max_block)
     if block_size % 2 == 0:
         block_size -= 1
 
     v3 = cv2.adaptiveThreshold(
-        roi,
+        denoised_roi,
         255,
         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
         cv2.THRESH_BINARY,
@@ -265,17 +301,6 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
         C=4,
     )
     variants.append(_finalize(v3))
-
-    # --- Variant 4: Mild Blur + Otsu Thresholding ---
-    smoothed = cv2.GaussianBlur(roi, (3, 3), 0)
-    _, v4 = cv2.threshold(smoothed, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    variants.append(_finalize(v4))
-
-    # --- Variant 5: Morphological Stroke Smoothing + Otsu ---
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-    morphed = cv2.morphologyEx(roi, cv2.MORPH_CLOSE, kernel)
-    _, v5 = cv2.threshold(morphed, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    variants.append(_finalize(v5))
 
     return variants
 
