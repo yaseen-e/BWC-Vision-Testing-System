@@ -182,21 +182,20 @@ def _process_display_contour_and_warp(
 
 
 def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
-    """Convert to grayscale, eliminate speckle noise, sharpen edges, and scale smoothly for OCR."""
     _require_cv2()
     gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
     
-    # 1. 5x5 Gaussian blur flattens high-frequency background sensor speckle
-    denoised = cv2.GaussianBlur(gray, (5, 5), 0)
+    # 1. Upscale FIRST so downstream operations work on high pixel density
+    scaled = cv2.resize(gray, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_LINEAR)
     
-    # 2. Unsharp mask boosts font stroke contrast
-    blur_layer = cv2.GaussianBlur(denoised, (0, 0), 2.5)
-    sharpened = cv2.addWeighted(denoised, 1.6, blur_layer, -0.6, 0)
+    # 2. Gentle blur on high-res frame
+    denoised = cv2.GaussianBlur(scaled, (3, 3), 0)
     
-    # 3. INTER_LINEAR prevents edge ringing artifacts
-    scaled = cv2.resize(sharpened, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_LINEAR)
+    # 3. Sharpen high-res edges (unsharp mask stays crisp)
+    blur_layer = cv2.GaussianBlur(denoised, (0, 0), 2.0)
+    sharpened = cv2.addWeighted(denoised, 1.5, blur_layer, -0.5, 0)
     
-    return scaled
+    return sharpened
 
 
 def _extract_warped_variants(binary: np.ndarray, field: OCRField) -> list[np.ndarray]:
