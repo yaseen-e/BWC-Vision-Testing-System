@@ -14,7 +14,7 @@ from typing import Any, Optional
 import numpy as np
 import cv2
 import pytesseract
-from .display_layouts import OCRField, ROIBox
+from .display_layouts import OCRField, ROIBox, STATUS_BAR
 import time
 
 # Camera is assumed to be connected and initialized directly.
@@ -142,23 +142,27 @@ def _find_display_contour(frame: np.ndarray, mask: np.ndarray, min_area: int = 3
 	return best_contour
 
 
-def _should_use_extended_warp(current_menu_key: Optional[str]) -> bool:
-	"""Only extend the display contour on the main/home screen."""
-	if not current_menu_key:
+def _should_use_extended_warp(menu_fields: Optional[tuple[OCRField, ...]]) -> bool:
+	"""Only extend when the current ContextNode includes the full status bar field set."""
+	if not menu_fields:
 		return False
 
-	normalized_key = current_menu_key.strip().lower().replace(" ", "_")
-	return normalized_key in {"homescreen", "home", "main", "main_screen", "dashboard", "home_screen"}
+	status_bar_names = {field.name for field in STATUS_BAR}
+	current_field_names = {field.name for field in menu_fields}
+	return status_bar_names.issubset(current_field_names)
 
 
 def _process_display_contour_and_warp(
-	frame: np.ndarray, orange_contour: np.ndarray, current_menu_key: Optional[str] = None
+	frame: np.ndarray,
+	orange_contour: np.ndarray,
+	menu_fields: Optional[tuple[OCRField, ...]] = None,
 ) -> tuple[np.ndarray, np.ndarray]:
 	"""
-	Warp the display area once and optionally extend the contour for the main screen.
+	Warp the display area once and optionally extend the contour for ContextNodes
+	that include the status bar fields.
 	"""
 	_require_cv2()
-	if not _should_use_extended_warp(current_menu_key):
+	if not _should_use_extended_warp(menu_fields):
 		return orange_contour, _warp_image(frame, orange_contour)
 
 	ordered = _order_points(orange_contour)
@@ -549,23 +553,6 @@ def _parse_tesseract_data(tesseract_output: dict[str, Any]) -> tuple[str, float]
 	return _clean_text(raw_text), sum(valid_confidences) / len(valid_confidences)
 
 
-def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
-    _require_cv2()
-    gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
-    
-    # 1. Upscale FIRST so downstream operations work on high pixel density
-    scaled = cv2.resize(gray, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
-    
-    # 2. Gentle blur on high-res frame
-    denoised = cv2.GaussianBlur(scaled, (3, 3), 0)
-    
-    # 3. Sharpen high-res edges (unsharp mask stays crisp)
-    blur_layer = cv2.GaussianBlur(denoised, (0, 0), 2.0)
-    sharpened = cv2.addWeighted(denoised, 1.5, blur_layer, -0.5, 0)
-    
-    return sharpened
-
-
 def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any, float]:
     """OCR or classify a field from image variants and keep the best candidate using confidence tie-breaking."""
     field_name = field.name
@@ -747,7 +734,11 @@ def save_roi_ocr_overlay(
 	if display_contour is None:
 		overlay = _draw_roi_overlay(frame, menu_fields, use_fallback_rois=True)
 	else:
-		final_contour, warped = _process_display_contour_and_warp(frame, display_contour, current_menu_key=current_menu_key)
+		final_contour, warped = _process_display_contour_and_warp(
+			frame,
+			display_contour,
+			menu_fields=menu_fields,
+		)
 		source_points = _order_points(final_contour.reshape(4, 2))
 		
 		width_a = np.linalg.norm(source_points[2] - source_points[3])
@@ -816,11 +807,11 @@ def read_display(
 			fields=fields_result,
 		)
 
-	# Only extend the warp on the main/home screen; other screens use the normal contour.
+	# Extend the warp only when this ContextNode includes the status bar fields.
 	final_contour, warped = _process_display_contour_and_warp(
 		frame,
 		display_contour,
-		current_menu_key=current_menu_key,
+		menu_fields=menu_fields,
 	)
 	binary = _prepare_ocr_binary(warped)
 
@@ -911,14 +902,20 @@ def shutdown() -> None:
 	_CAMERA = None
 
 
-def get_warped_display(frame: np.ndarray, current_menu_key: Optional[str] = None) -> Optional[np.ndarray]:
+def get_warped_display(
+	frame: np.ndarray,
+	current_menu_key: Optional[str] = None,
+	menu_fields: Optional[tuple[OCRField, ...]] = None,
+) -> Optional[np.ndarray]:
 	"""Extract a front-facing view of the display from a camera frame, or None if not found."""
+	# Keep current_menu_key for backward compatibility with existing callers.
+	_ = current_menu_key
 	mask = _build_display_mask(frame)
 	display_contour = _find_display_contour(frame, mask)
 
 	if display_contour is None:
 		return None
 
-	# Utilizing our single-pass warp and crop method with the home-screen extension when appropriate
-	_, warped = _process_display_contour_and_warp(frame, display_contour, current_menu_key=current_menu_key)
+	# Single-pass warp/crop with status-bar-aware extension when appropriate.
+	_, warped = _process_display_contour_and_warp(frame, display_contour, menu_fields=menu_fields)
 	return warped
