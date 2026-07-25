@@ -177,18 +177,13 @@ def _process_display_contour_and_warp(
 	return extended_contour, warped_extended
 
 
-def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
+def _prepare_ocr_binary_bilateral(warped: np.ndarray) -> np.ndarray:
     gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
     
-    # 1. Eliminate speckle noise with a 5x5 Gaussian Kernel
-    denoised = cv2.GaussianBlur(gray, (5, 5), 0)
+    # d=5 (pixel diameter), sigmaColor=75 (flattens background noise), sigmaSpace=75
+    denoised = cv2.bilateralFilter(gray, d=5, sigmaColor=75, sigmaSpace=75)
     
-    # 2. Unsharp Masking: (1.8 * denoised) - (0.8 * blurred)
-    blurred_mask = cv2.GaussianBlur(denoised, (0, 0), 3.0)
-    sharpened = cv2.addWeighted(denoised, 1.8, blurred_mask, -0.8, 0)
-    
-    # 3. Smooth Bilinear Rescaling
-    return cv2.resize(sharpened, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_LINEAR)
+    return cv2.resize(denoised, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_LINEAR)
 
 
 def _extract_warped_variants(binary: np.ndarray, field: OCRField) -> list[np.ndarray]:
