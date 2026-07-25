@@ -280,58 +280,6 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
     return variants
 
 
-def _extract_fallback_variants(prepared: np.ndarray, field: Any = None) -> list[np.ndarray]:
-    """Fallback binary variants with upscaling and quiet-zone padding."""
-    _require_cv2()
-
-    if field is not None and hasattr(field, "fallback"):
-        roi = field.fallback.crop(prepared)
-    else:
-        roi = prepared
-
-    if roi is None or roi.size == 0:
-        return []
-
-    h, w = roi.shape[:2]
-    target_height = 180
-    if h < target_height:
-        scale = target_height / float(h)
-        new_w = max(1, int(w * scale))
-        roi = cv2.resize(roi, (new_w, target_height), interpolation=cv2.INTER_CUBIC)
-
-    fallbacks = []
-
-    def _finalize(bin_img: np.ndarray) -> np.ndarray:
-        bin_img = _ensure_black_text_white_bg(bin_img)
-        return cv2.copyMakeBorder(
-            bin_img, 25, 25, 25, 25, cv2.BORDER_CONSTANT, value=255
-        )
-
-    # --- Fallback 1: Truncated Contrast Stretch + Otsu ---
-    norm = cv2.normalize(roi, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
-    _, f1 = cv2.threshold(norm, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    fallbacks.append(_finalize(f1))
-
-    # --- Fallback 2: Median-Filtered Adaptive Threshold ---
-    median = cv2.medianBlur(roi, 3)
-    curr_h, curr_w = roi.shape[:2]
-    max_block = max(3, (min(curr_h, curr_w) // 2) * 2 - 1)
-    block_size = min(45, max_block)
-    if block_size % 2 == 0:
-        block_size -= 1
-
-    f2 = cv2.adaptiveThreshold(
-        median,
-        255,
-        cv2.ADAPTIVE_THRESH_MEAN_C,
-        cv2.THRESH_BINARY,
-        blockSize=max(3, block_size),
-        C=4,
-    )
-    fallbacks.append(_finalize(f2))
-
-    return fallbacks
-
 # Cache dictionary for loaded template images
 _ICON_TEMPLATES: dict[str, dict[str, np.ndarray]] = {}
 
@@ -898,13 +846,18 @@ def read_display(
 	fields_result: dict[str, dict[str, Any]] = {}
 
 	if display_contour is None:
-		for field in menu_fields:
-			raw, val, confidence = _ocr_field(field, _extract_fallback_variants(frame, field))
-			field_data = {"raw": raw, "value": val}
-			if _should_report_confidence(field.name):
-				field_data["confidence"] = confidence
-			fields_result[field.name] = field_data
-		
+		# Graceful exit without running heavy fallback OCR on full unwarped frames
+		return OCRReadout(
+			display_found=False,
+			current_menu_key=current_menu_key,
+			fields={
+				field.name: {"raw": "", "value": _field_empty_value(field.name), "confidence": 0.0}
+				for field in menu_fields
+			},
+		)
+
+	# If we reach here, display_contour is found but fields_result might still be empty
+	if not fields_result:
 		return OCRReadout(
 			display_found=False,
 			current_menu_key=current_menu_key,
