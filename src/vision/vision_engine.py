@@ -178,59 +178,60 @@ def _process_display_contour_and_warp(
 
 
 def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
+    """Convert to grayscale, eliminate speckle noise, sharpen edges, and scale smoothly for OCR."""
+    _require_cv2()
     gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
     
-    # d=5 (pixel diameter), sigmaColor=75 (flattens background noise), sigmaSpace=75
-    denoised = cv2.bilateralFilter(gray, d=5, sigmaColor=75, sigmaSpace=75)
+    # 1. 5x5 Gaussian blur flattens high-frequency background sensor speckle
+    denoised = cv2.GaussianBlur(gray, (5, 5), 0)
     
-    return cv2.resize(denoised, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_LINEAR)
+    # 2. Unsharp mask boosts font stroke contrast
+    blur_layer = cv2.GaussianBlur(denoised, (0, 0), 2.5)
+    sharpened = cv2.addWeighted(denoised, 1.6, blur_layer, -0.6, 0)
+    
+    # 3. INTER_LINEAR prevents edge ringing artifacts
+    scaled = cv2.resize(sharpened, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_LINEAR)
+    
+    return scaled
 
 
 def _extract_warped_variants(binary: np.ndarray, field: OCRField) -> list[np.ndarray]:
-	"""Build robust OCR variants utilizing adaptive thresholding and morphological operations to bridge LCD segment gaps."""
-	_require_cv2()
-	roi = field.ideal.crop(binary)
-	
-	if np.std(roi) < 15.0:
-		return []
-	
-	# 1. Generate baseline standard and inverted threshold options
-	_, otsu_standard = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-	otsu_inverted = cv2.bitwise_not(otsu_standard)
-	
-	# 2. Dynamically enforce dark-on-light polarity.
-	# Since display backgrounds occupy far more area than text lines, the background
-	# color will consistently hold the dominant pixel count.
-	if np.sum(otsu_standard == 255) > np.sum(otsu_standard == 0):
-		dark_on_light = otsu_standard
-		light_on_dark = otsu_inverted
-	else:
-		dark_on_light = otsu_inverted
-		light_on_dark = otsu_standard
+    """Build robust OCR variants utilizing directional morphology and adaptive thresholding."""
+    _require_cv2()
+    roi = field.ideal.crop(binary)
+    
+    if np.std(roi) < 15.0:
+        return []
+    
+    # 1. Baseline Otsu Thresholding
+    _, otsu_standard = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    otsu_inverted = cv2.bitwise_not(otsu_standard)
+    
+    # Enforce dark-on-light polarity based on dominant pixel count
+    if np.sum(otsu_standard == 255) > np.sum(otsu_standard == 0):
+        dark_on_light = otsu_standard
+        light_on_dark = otsu_inverted
+    else:
+        dark_on_light = otsu_inverted
+        light_on_dark = otsu_standard
 
-	variants = []
-	
-	# Variant 1: Clean, high-contrast dark text on a light background (Standard Otsu)
-	variants.append(dark_on_light)
-	
-	# Variant 2: Morphological Closing to bridge gaps in segmented LCD text.
-	# Closing (dilation followed by erosion) fills the small inner gaps of white-on-black 
-	# character pieces. Then we invert back to dark-on-light for Tesseract.
-	kernel_bridge = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-	closed_segments = cv2.morphologyEx(light_on_dark, cv2.MORPH_CLOSE, kernel_bridge)
-	variants.append(cv2.bitwise_not(closed_segments))
-	
-	# Variant 3: Adaptive Threshold with specialized dilation to handle backlight glare.
-	inverted_roi = cv2.bitwise_not(roi)
-	adaptive = cv2.adaptiveThreshold(
-		inverted_roi, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 15, 4
-	)
-	# Dilating white-on-black text patches smears adjacent segment segments together
-	kernel_dilate = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-	dilated_adaptive = cv2.dilate(adaptive, kernel_dilate, iterations=1)
-	variants.append(cv2.bitwise_not(dilated_adaptive))
-	
-	return variants
+    variants = [dark_on_light]
+    
+    # 2. Variant 2: Horizontal Morphological Closing (Bridge LCD/stroke gaps without vertical bleed)
+    kernel_horizontal = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 1))
+    closed_segments = cv2.morphologyEx(light_on_dark, cv2.MORPH_CLOSE, kernel_horizontal)
+    variants.append(cv2.bitwise_not(closed_segments))
+    
+    # 3. Variant 3: Adaptive Gaussian Thresholding (Handles backlight glare)
+    inverted_roi = cv2.bitwise_not(roi)
+    adaptive = cv2.adaptiveThreshold(
+        inverted_roi, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 15, 3
+    )
+    kernel_dilate = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 1))
+    dilated_adaptive = cv2.dilate(adaptive, kernel_dilate, iterations=1)
+    variants.append(cv2.bitwise_not(dilated_adaptive))
+    
+    return variants
 
 
 def _extract_fallback_variants(frame: np.ndarray, field: OCRField) -> list[np.ndarray]:
