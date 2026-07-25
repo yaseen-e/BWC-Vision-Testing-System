@@ -550,21 +550,20 @@ def _parse_tesseract_data(tesseract_output: dict[str, Any]) -> tuple[str, float]
 
 
 def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
-    """Convert to grayscale, eliminate speckle noise with a tight kernel, sharpen edges, and scale smoothly."""
     _require_cv2()
     gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
     
-    # 1. Option 2 Fix: 3x3 Gaussian blur flattens noise while preserving small font gaps
-    denoised = cv2.GaussianBlur(gray, (3, 3), 0)
+    # 1. Upscale FIRST so downstream operations work on high pixel density
+    scaled = cv2.resize(gray, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
     
-    # 2. Unsharp mask boosts font stroke contrast without over-saturating small characters
+    # 2. Gentle blur on high-res frame
+    denoised = cv2.GaussianBlur(scaled, (3, 3), 0)
+    
+    # 3. Sharpen high-res edges (unsharp mask stays crisp)
     blur_layer = cv2.GaussianBlur(denoised, (0, 0), 2.0)
     sharpened = cv2.addWeighted(denoised, 1.5, blur_layer, -0.5, 0)
     
-    # 3. Smooth Bilinear Rescaling prevents ringing halos
-    scaled = cv2.resize(sharpened, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_LINEAR)
-    
-    return scaled
+    return sharpened
 
 
 def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any, float]:

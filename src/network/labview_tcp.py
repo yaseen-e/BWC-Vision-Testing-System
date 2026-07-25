@@ -8,7 +8,7 @@ from xmlrpc import server
 _SIMULATED_COMMANDS = collections.deque(
     [
         # homescreen x 3 times
-        "BACK", "RUN_OCR", "BACK", "RUN_OCR", "BACK", "RUN_OCR",
+        "BACK", "RUN_OCR", "BACK", "RUN_OCR", "BACK", "RUN_OCR", "SHUTDOWN",
         # active_faults_list
         "RIGHT", "SELECT", "RUN_OCR", "BACK", "LEFT",
         
