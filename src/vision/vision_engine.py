@@ -203,33 +203,43 @@ def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
 
 
 def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np.ndarray]:
-    """Extract binary variants from the preprocessed frame, optimized for large/medium display text.
-    
-    Avoids aggressive morphological closing that clogs character loops (e.g. 'e', 'a', 'o', '5').
-    """
+    """Extract binary variants from the cropped ideal ROI of the preprocessed frame."""
     _require_cv2()
+
+    # 1. Crop to the field's ideal ROI box
+    if field is not None and hasattr(field, "ideal"):
+        roi = field.ideal.crop(prepared)
+    else:
+        roi = prepared
+
+    if roi is None or roi.size == 0:
+        return []
+
     variants = []
 
     # --- Variant 1: Global Otsu Thresholding ---
-    # Ideal for large text with uniform screen lighting; produces clean vector-like strokes.
-    _, v1 = cv2.threshold(prepared, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    _, v1 = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     variants.append(v1)
 
-    # --- Variant 2: Large-Window Adaptive Thresholding ---
-    # A large block size (35px) prevents large glyph strokes (like '105') from being hollowed out.
+    # --- Variant 2: Adaptive Thresholding (Dynamically bounded block size) ---
+    h, w = roi.shape[:2]
+    max_block = max(3, (min(h, w) // 2) * 2 - 1)
+    block_size = min(35, max_block)
+    if block_size % 2 == 0:
+        block_size -= 1
+
     v2 = cv2.adaptiveThreshold(
-        prepared,
+        roi,
         255,
         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
         cv2.THRESH_BINARY,
-        blockSize=35,
+        blockSize=max(3, block_size),
         C=3,
     )
     variants.append(v2)
 
     # --- Variant 3: Mild Blur + Otsu Thresholding ---
-    # Eliminates any residual background LCD grid patterns before thresholding mid-weight text lines.
-    smoothed = cv2.GaussianBlur(prepared, (3, 3), 0)
+    smoothed = cv2.GaussianBlur(roi, (3, 3), 0)
     _, v3 = cv2.threshold(smoothed, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     variants.append(v3)
 
@@ -237,25 +247,39 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 
 
 def _extract_fallback_variants(prepared: np.ndarray, field: Any = None) -> list[np.ndarray]:
-    """Fallback binary variants for challenging lighting or low-contrast conditions on main text."""
+    """Fallback binary variants for challenging lighting conditions, cropped to fallback ROI."""
     _require_cv2()
+
+    # 1. Crop to the field's fallback ROI box
+    if field is not None and hasattr(field, "fallback"):
+        roi = field.fallback.crop(prepared)
+    else:
+        roi = prepared
+
+    if roi is None or roi.size == 0:
+        return []
+
     fallbacks = []
 
     # --- Fallback 1: Truncated Contrast Stretch + Otsu ---
-    # Clips extreme background brightness to boost contrast on thinner text like "Call for heat."
-    norm = cv2.normalize(prepared, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
+    norm = cv2.normalize(roi, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
     _, f1 = cv2.threshold(norm, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     fallbacks.append(f1)
 
     # --- Fallback 2: Median-Filtered Adaptive Threshold ---
-    # Uses a median filter (3x3) to remove point noise without distorting large character edges.
-    median = cv2.medianBlur(prepared, 3)
+    median = cv2.medianBlur(roi, 3)
+    h, w = roi.shape[:2]
+    max_block = max(3, (min(h, w) // 2) * 2 - 1)
+    block_size = min(45, max_block)
+    if block_size % 2 == 0:
+        block_size -= 1
+
     f2 = cv2.adaptiveThreshold(
         median,
         255,
         cv2.ADAPTIVE_THRESH_MEAN_C,
         cv2.THRESH_BINARY,
-        blockSize=45,
+        blockSize=max(3, block_size),
         C=4,
     )
     fallbacks.append(f2)
