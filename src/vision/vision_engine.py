@@ -549,16 +549,33 @@ def _parse_tesseract_data(tesseract_output: dict[str, Any]) -> tuple[str, float]
 	return _clean_text(raw_text), sum(valid_confidences) / len(valid_confidences)
 
 
+def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
+    """Convert to grayscale, eliminate speckle noise with a tight kernel, sharpen edges, and scale smoothly."""
+    _require_cv2()
+    gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
+    
+    # 1. Option 2 Fix: 3x3 Gaussian blur flattens noise while preserving small font gaps
+    denoised = cv2.GaussianBlur(gray, (3, 3), 0)
+    
+    # 2. Unsharp mask boosts font stroke contrast without over-saturating small characters
+    blur_layer = cv2.GaussianBlur(denoised, (0, 0), 2.0)
+    sharpened = cv2.addWeighted(denoised, 1.5, blur_layer, -0.5, 0)
+    
+    # 3. Smooth Bilinear Rescaling prevents ringing halos
+    scaled = cv2.resize(sharpened, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_LINEAR)
+    
+    return scaled
+
+
 def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any, float]:
-    """OCR or classify a field from image variants and keep the best candidate."""
+    """OCR or classify a field from image variants and keep the best candidate using confidence tie-breaking."""
     field_name = field.name
 
     # --- ICON CLASSIFICATION BYPASS ---
     if field_name in ("wifi_icon", "schedule_icon"):
         if not variants:
             return "UNKNOWN", "UNKNOWN", 0.0
-		# Invert the variant so the icon is white and the background is black
-        # This allows cv2.findContours to actually find the icon and tightly crop it.
+        # Invert the variant so the icon is white and the background is black
         inverted_variant = cv2.bitwise_not(variants[0])
         icon_key, icon_value = _classify_icon_field(inverted_variant, field_name)
         return icon_key, icon_value, 0.0
@@ -588,10 +605,13 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any, f
         value = _parse_field_value(field_name, raw)
         score = _score_field_candidate(field_name, raw, value)
 
-        if score > best_score:
+        # --- Option 1 Fix: Confidence fraction (0.0 to 1.0) breaks score ties ---
+        effective_score = score + (confidence / 100.0)
+
+        if effective_score > best_score:
             best_raw = raw
             best_value = value
-            best_score = score
+            best_score = effective_score
             best_confidence = confidence
 
     if whitelist_set:
