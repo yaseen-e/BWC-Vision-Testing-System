@@ -53,8 +53,13 @@ def _get_paddle_ocr() -> Any:
 		return _PADDLE_OCR
 
 	_require_paddleocr()
-	# Initialize PaddleOCR with English recognition and suppressed logs
-	_PADDLE_OCR = PaddleOCR(use_angle_cls=False, lang="en", show_log=False)
+
+	# Suppress PaddleOCR internal logger output
+	import logging
+	logging.getLogger("ppocr").setLevel(logging.ERROR)
+
+	# Initialize PaddleOCR engine without deprecated parameters
+	_PADDLE_OCR = PaddleOCR(lang="en")
 	return _PADDLE_OCR
 
 
