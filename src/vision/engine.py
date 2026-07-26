@@ -23,6 +23,32 @@ from .layouts import OCRField, ROIBox, STATUS_BAR
 _CAMERA: Any = None
 _RAPID_OCR: Any = None
 
+# OCR Confusion map for nearest whitelisted character resolution
+_OCR_CHAR_SIMILARITY_MAP: dict[str, list[str]] = {
+	",": [".", ";", "'"],
+	";": [":", ".", ","],
+	":": [";", "."],
+	"`": ["'", "."],
+	"'": [".", "`"],
+	"-": ["_", "~"],
+	"_": ["-"],
+	"|": ["I", "l", "1", "!"],
+	"!": ["1", "I", "|", "."],
+	"l": ["I", "1", "|"],
+	"I": ["1", "l", "|"],
+	"1": ["I", "l", "|"],
+	"0": ["O", "Q", "D"],
+	"O": ["0", "Q", "D"],
+	"5": ["S", "s"],
+	"S": ["5", "s"],
+	"2": ["Z", "z"],
+	"Z": ["2", "z"],
+	"8": ["B", "b"],
+	"B": ["8"],
+	"9": ["g", "q"],
+	"g": ["9", "q"],
+}
+
 
 # =============================================================================
 # DATA TYPES
@@ -475,7 +501,60 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 	_, thresh = cv2.threshold(primary, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 	padded_thresh = cv2.copyMakeBorder(thresh, 30, 30, 30, 30, cv2.BORDER_CONSTANT, value=(255, 255, 255))
 
-	return [padded, padded_thresh, 255 - padded]
+	# CLAHE (Local Contrast Enhancement) to ensure faint secondary words like "On." across uneven lighting are captured
+	clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+	clahe_img = clahe.apply(primary)
+	padded_clahe = cv2.copyMakeBorder(clahe_img, 30, 30, 30, 30, cv2.BORDER_CONSTANT, value=(255, 255, 255))
+
+	return [padded, padded_thresh, padded_clahe, 255 - padded]
+
+
+# =============================================================================
+# WHITELIST CHARACTER MAPPER
+# =============================================================================
+
+def _closest_whitelisted_char(char: str, whitelist: str) -> str:
+	"""Find visually or structurally closest character in whitelist for an un-whitelisted char."""
+	if char in whitelist:
+		return char
+
+	# 1. Check direct OCR confusion map priorities
+	if char in _OCR_CHAR_SIMILARITY_MAP:
+		for candidate in _OCR_CHAR_SIMILARITY_MAP[char]:
+			if candidate in whitelist:
+				return candidate
+
+	# 2. Case conversion fallback
+	if char.isupper() and char.lower() in whitelist:
+		return char.lower()
+	if char.islower() and char.upper() in whitelist:
+		return char.upper()
+
+	# 3. Category-based nearest distance search in whitelist
+	allowed = list(whitelist)
+	if char.isdigit():
+		digits = [c for c in allowed if c.isdigit()]
+		if digits:
+			return min(digits, key=lambda c: abs(ord(c) - ord(char)))
+	elif char.isalpha():
+		letters = [c for c in allowed if c.isalpha()]
+		if letters:
+			return min(letters, key=lambda c: abs(ord(c) - ord(char)))
+	elif not char.isalnum() and not char.isspace():
+		puncts = [c for c in allowed if not c.isalnum() and not c.isspace()]
+		if puncts:
+			return min(puncts, key=lambda c: abs(ord(c) - ord(char)))
+
+	# 4. Global minimum ASCII distance fallback across all whitelisted characters
+	return min(allowed, key=lambda c: abs(ord(c) - ord(char)))
+
+
+def _map_to_whitelisted_chars(text: str, whitelist: str) -> str:
+	"""Parse each character in text to the closest whitelisted character match."""
+	if not text or not whitelist:
+		return text
+
+	return "".join(_closest_whitelisted_char(char, whitelist) for char in text)
 
 
 # =============================================================================
@@ -499,6 +578,9 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 		if not raw:
 			continue
 
+		if field.whitelisted_chars:
+			raw = _map_to_whitelisted_chars(raw, field.whitelisted_chars)
+
 		value = _parse_field_value(field_name, raw)
 		score = _score_field_candidate(field_name, raw, value, conf)
 
@@ -507,7 +589,7 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 			best_value = value
 			best_score = score
 
-		if best_score > 4.0:
+		if best_score > 6.0:
 			break
 
 	return best_raw, best_value
@@ -527,7 +609,6 @@ def _parse_and_filter_rapidocr_boxes(
 			continue
 
 		box, text, conf = item[0], str(item[1]).strip(), float(item[2])
-		# Lowered threshold from 0.25 to 0.15 so thin status-bar text (TIME_FIELD) isn't discarded
 		if not text or conf < 0.15:
 			continue
 
@@ -558,7 +639,6 @@ def _parse_and_filter_rapidocr_boxes(
 		for row in rows:
 			avg_cy = sum(r["center_y"] for r in row) / len(row)
 			avg_h = sum(r["height"] for r in row) / len(row)
-			# If box center falls within 50% of row height, consider it the same line
 			if abs(item["center_y"] - avg_cy) < max(8.0, avg_h * 0.5):
 				row.append(item)
 				placed = True
@@ -597,7 +677,11 @@ def _score_field_candidate(field_name: str, raw_text: str, value: Any, conf: flo
 			score += 1.0
 	elif field_name.startswith("dashboard_info_line"):
 		if isinstance(value, str) and len(value) >= 3:
-			score += 3.0
+			score += 2.0
+			if len(value) >= 6:
+				score += 2.0
+			if value.endswith((".", "!", "?")):
+				score += 2.5
 	elif field_name == "time_field":
 		if isinstance(value, str) and re.search(r"\d{1,2}:\d{2}", value):
 			score += 4.0
@@ -714,8 +798,14 @@ def _parse_dashboard_info(raw_text: str) -> str:
 
 	cleaned = re.sub(r"^[^\w\s\.\,\!\?]+", "", raw_text.strip()).strip()
 
-	# Strip orphan single-character noise (e.g., "Setpoint s satisfied." -> "Setpoint satisfied.")
-	cleaned = re.sub(r"\b[a-zA-Z]\b\s*", "", cleaned)
+	# Rejoins split single letters from OCR (e.g., "O n" -> "On", "F an" -> "Fan")
+	cleaned = re.sub(r"\b([A-Za-z])\s+([A-Za-z])\b", r"\1\2", cleaned)
+
+	# Fix common digit-letter mixups in status words (e.g., "0n" -> "On")
+	cleaned = re.sub(r"\b0n\b", "On", cleaned, flags=re.IGNORECASE)
+
+	# Strip orphan non-word single character noise, preserving valid standalone 'a' / 'I'
+	cleaned = re.sub(r"\b[b-hj-zA-HJ-Z]\b\s*", "", cleaned)
 
 	word_corrections = {
 		r"\bFon\b": "Fan",

@@ -44,6 +44,7 @@ class OCRField:
 	name: str
 	ideal: ROIBox
 	fallback: ROIBox
+	whitelisted_chars: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -191,35 +192,43 @@ def _matches_route_prefix(route: tuple[str, ...], stream: tuple[str, ...]) -> bo
 # OCR FIELD DEFINITIONS
 # =============================================================================
 
+# Common Whitelist String Constants
+DASHBOARD_INFO_WHITELIST = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789. !?:-/()"
+
 # --- Main Dashboard ---
 MODE_FIELD = OCRField(
 	name="mode",
 	ideal=ROIBox(top=0.03, bottom=0.14, left=0.25, right=0.75),
 	fallback=ROIBox(top=0.00, bottom=0.18, left=0.18, right=0.82),
+	whitelisted_chars="ABCDEFGHIJKLMNOPQRSTUVWXYZ ",
 )
 
 TEMPERATURE_FIELD = OCRField(
 	name="temperature",
 	ideal=ROIBox(top=0.16, bottom=0.42, left=0.28, right=0.64),
 	fallback=ROIBox(top=0.12, bottom=0.52, left=0.24, right=0.68),
+	whitelisted_chars="0123456789",
 )
 
 DASHBOARD_INFO_LINE_1 = OCRField(
 	name="dashboard_info_line_1",
 	ideal=ROIBox(top=0.45, bottom=0.57, left=0.10, right=0.90),
 	fallback=ROIBox(top=0.45, bottom=0.70, left=0.05, right=0.95),
+	whitelisted_chars=DASHBOARD_INFO_WHITELIST,
 )
 
 DASHBOARD_INFO_LINE_2 = OCRField(
 	name="dashboard_info_line_2",
 	ideal=ROIBox(top=0.56, bottom=0.66, left=0.10, right=0.90),
 	fallback=ROIBox(top=0.55, bottom=0.75, left=0.05, right=0.95),
+	whitelisted_chars=DASHBOARD_INFO_WHITELIST,
 )
 
 DASHBOARD_INFO_LINE_3 = OCRField(
 	name="dashboard_info_line_3",
 	ideal=ROIBox(top=0.65, bottom=0.77, left=0.10, right=0.90),
 	fallback=ROIBox(top=0.65, bottom=0.80, left=0.05, right=0.95),
+	whitelisted_chars=DASHBOARD_INFO_WHITELIST,
 )
 
 # --- Status Bar ---
@@ -227,12 +236,14 @@ TIME_FIELD = OCRField(
 	name="time_field",
 	ideal=ROIBox(top=0.91, bottom=1.00, left=0.83, right=1.00),
 	fallback=ROIBox(top=0.82, bottom=1.00, left=0.68, right=1.00),
+	whitelisted_chars="0123456789: AMPM",
 )
 
 DATE_FIELD = OCRField(
 	name="date_field",
 	ideal=ROIBox(top=0.91, bottom=1.00, left=0.64, right=0.82),
 	fallback=ROIBox(top=0.82, bottom=1.00, left=0.63, right=0.82),
+	whitelisted_chars="0123456789/",
 )
 
 WIFI_ICON_FIELD = OCRField(
@@ -259,30 +270,35 @@ ACTIVE_FAULTS_ERROR_CODE_1 = OCRField(
 	name="active_faults_error_code_1",
 	ideal=ROIBox(top=0.15, bottom=0.30, left=0.05, right=0.33),
 	fallback=ROIBox(top=0.15, bottom=0.35, left=0.05, right=0.95),
+	whitelisted_chars="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-",
 )
 
 ACTIVE_FAULTS_ERROR_CODE_2 = OCRField(
 	name="active_faults_error_code_2",
 	ideal=ROIBox(top=0.30, bottom=0.45, left=0.05, right=0.33),
 	fallback=ROIBox(top=0.15, bottom=0.35, left=0.05, right=0.95),
+	whitelisted_chars="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-",
 )
 
 ACTIVE_FAULTS_ERROR_CODE_3 = OCRField(
 	name="active_faults_error_code_3",
 	ideal=ROIBox(top=0.45, bottom=0.60, left=0.05, right=0.33),
 	fallback=ROIBox(top=0.15, bottom=0.35, left=0.05, right=0.95),
+	whitelisted_chars="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-",
 )
 
 ACTIVE_FAULTS_ERROR_CODE_4 = OCRField(
 	name="active_faults_error_code_4",
 	ideal=ROIBox(top=0.60, bottom=0.75, left=0.05, right=0.33),
 	fallback=ROIBox(top=0.15, bottom=0.35, left=0.05, right=0.95),
+	whitelisted_chars="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-",
 )
 
 ACTIVE_FAULTS_ERROR_CODE_5 = OCRField(
 	name="active_faults_error_code_5",
 	ideal=ROIBox(top=0.75, bottom=0.90, left=0.05, right=0.33),
 	fallback=ROIBox(top=0.15, bottom=0.35, left=0.05, right=0.95),
+	whitelisted_chars="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-",
 )
 
 # --- Settings & Relays ---
@@ -290,24 +306,28 @@ LOCATION_FIELD = OCRField(
 	name="location_field",
 	ideal=ROIBox(top=0.31, bottom=0.41, left=0.30, right=0.70),
 	fallback=ROIBox(top=0.25, bottom=0.75, left=0.05, right=0.95),
+	whitelisted_chars="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 ",
 )
 
 COMPRESSOR_RELAY_STATE = OCRField(
 	name="compressor_relay_state",
 	ideal=ROIBox(top=0.83, bottom=0.92, left=0.06, right=0.21),
 	fallback=ROIBox(top=0.15, bottom=0.35, left=0.05, right=0.95),
+	whitelisted_chars="ABCDEFGHIJKLMNOPQRSTUVWXYZ ",
 )
 
 UPPER_RELAY_STATE = OCRField(
 	name="upper_relay_state",
 	ideal=ROIBox(top=0.45, bottom=0.54, left=0.06, right=0.21),
 	fallback=ROIBox(top=0.15, bottom=0.35, left=0.05, right=0.95),
+	whitelisted_chars="ABCDEFGHIJKLMNOPQRSTUVWXYZ ",
 )
 
 LOWER_RELAY_STATE = OCRField(
 	name="lower_relay_state",
 	ideal=ROIBox(top=0.64, bottom=0.73, left=0.06, right=0.21),
 	fallback=ROIBox(top=0.15, bottom=0.35, left=0.05, right=0.95),
+	whitelisted_chars="ABCDEFGHIJKLMNOPQRSTUVWXYZ ",
 )
 
 # --- Schedules ---
@@ -315,24 +335,28 @@ USER_SCHEDULE_NAME_1 = OCRField(
 	name="user_schedule_name_1",
 	ideal=ROIBox(top=0.28, bottom=0.38, left=0.08, right=0.67),
 	fallback=ROIBox(top=0.08, bottom=0.35, left=0.05, right=0.95),
+	whitelisted_chars="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -",
 )
 
 USER_SCHEDULE_DELETED_TEXT = OCRField(
 	name="user_schedule_deleted_text",
 	ideal=ROIBox(top=0.03, bottom=0.14, left=0.23, right=0.77),
 	fallback=ROIBox(top=0.00, bottom=0.18, left=0.18, right=0.82),
+	whitelisted_chars="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789. !",
 )
 
 TOU_SCHEDULE_NAME_1 = OCRField(
 	name="tou_schedule_name_1",
 	ideal=ROIBox(top=0.28, bottom=0.38, left=0.08, right=0.67),
 	fallback=ROIBox(top=0.08, bottom=0.35, left=0.05, right=0.95),
+	whitelisted_chars="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -",
 )
 
 TOU_SCHEDULE_DELETED_TEXT = OCRField(
 	name="tou_schedule_deleted_text",
 	ideal=ROIBox(top=0.03, bottom=0.14, left=0.23, right=0.77),
 	fallback=ROIBox(top=0.00, bottom=0.18, left=0.18, right=0.82),
+	whitelisted_chars="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789. !",
 )
 
 
