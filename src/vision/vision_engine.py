@@ -14,7 +14,6 @@ from typing import Any, Optional
 import numpy as np
 import cv2
 import pytesseract
-import re
 from .display_layouts import OCRField, ROIBox, STATUS_BAR
 import time
 
@@ -183,126 +182,160 @@ def _process_display_contour_and_warp(
 
 
 def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
-    """Bilateral filtering pipeline for native-scale text rendering.
-    
-    Completely eliminates background screen texture and digital grain 
-    while preserving razor-sharp, smooth character vector edges.
-    """
-    _require_cv2()
-    gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
-    
-    # 1. Bilateral Filter at native resolution:
-    # d=7 applies thorough spatial smoothing to orange screen grain,
-    # while high color variance threshold (75) prevents bleeding across high-contrast text edges.
-    denoised = cv2.bilateralFilter(gray, d=7, sigmaColor=75, sigmaSpace=75)
-    
-    # 2. Subtle unsharp mask to define clean character boundaries for Otsu thresholding
-    blur_layer = cv2.GaussianBlur(denoised, (0, 0), 2.0)
-    sharpened = cv2.addWeighted(denoised, 1.3, blur_layer, -0.3, 0)
-    
-    return sharpened
+	"""Convert the warped display to grayscale only.
+
+	Heavy denoising is deliberately deferred to `_extract_warped_variants`,
+	where it runs on the small per-field crop *before* that crop gets
+	upscaled. Doing it here on the full warped frame would smooth the
+	whole display uniformly and then let upscaling re-magnify whatever
+	speckle survived; doing it per-field, pre-upscale, removes noise while
+	it is still small instead of after it has been blown up to text size.
+	"""
+	_require_cv2()
+	return cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
 
 
 def _ensure_black_text_white_bg(binary_roi: np.ndarray) -> np.ndarray:
-    """Ensure binary image is black text (0) on white background (255)."""
-    if np.mean(binary_roi) < 127:
-        return cv2.bitwise_not(binary_roi)
-    return binary_roi
+	"""Ensure binary image is black text (0) on white background (255)."""
+	if np.mean(binary_roi) < 127:
+		return cv2.bitwise_not(binary_roi)
+	return binary_roi
 
 
 def _denoise_roi_grayscale(roi: np.ndarray) -> np.ndarray:
-    """Applies a bilateral filter to smooth LCD dither texture while preserving sharp text edges."""
-    return cv2.bilateralFilter(roi, d=9, sigmaColor=75, sigmaSpace=75)
+	"""Scrub sensor speckle/static at native resolution, before any upscaling.
+
+	The emissive display shows heavy per-pixel speckle (visible as static
+	across the orange background). A median blur is the right first tool
+	for that: it demolishes salt-and-pepper-style single-pixel noise
+	without smearing edges the way a Gaussian blur would. A light
+	bilateral pass then knocks down residual LCD dither while keeping
+	character strokes crisp.
+	"""
+	despeckled = cv2.medianBlur(roi, 3)
+	return cv2.bilateralFilter(despeckled, d=5, sigmaColor=60, sigmaSpace=60)
 
 
-def _filter_connected_components(bin_img: np.ndarray, min_area: int = 30) -> np.ndarray:
-    """Removes isolated noise specks smaller than min_area pixels from black-text-on-white-bg image."""
-    # Work on inverted image where text/noise is foreground (255)
-    fg_mask = cv2.bitwise_not(bin_img)
-    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(fg_mask, connectivity=8)
+def _filter_connected_components(bin_img: np.ndarray, min_height_ratio: float = 0.35, min_area_px: int = 6) -> np.ndarray:
+	"""Keep only connected components tall enough to plausibly be text glyphs.
 
-    cleaned_fg = np.zeros_like(fg_mask)
-    for i in range(1, num_labels):  # Skip background label 0
-        if stats[i, cv2.CC_STAT_AREA] >= min_area:
-            cleaned_fg[labels == i] = 255
+	Character strokes span a substantial fraction of a tightly-cropped text
+	row's height, whether the field holds large digits (temperature) or
+	medium-sized prose (mode/dashboard lines). Sensor speckle, in contrast,
+	survives thresholding as small blobs that stay short relative to the
+	crop even after upscaling. A height-ratio cutoff therefore generalizes
+	across field sizes automatically, instead of relying on one fixed
+	pixel-area guess tuned for a single font size.
+	"""
+	# Work on inverted image where text/noise is foreground (255)
+	fg_mask = cv2.bitwise_not(bin_img)
+	num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(fg_mask, connectivity=8)
 
-    # Invert back to black text (0) on white background (255)
-    return cv2.bitwise_not(cleaned_fg)
+	roi_height = bin_img.shape[0]
+	min_height_px = max(3, int(roi_height * min_height_ratio))
+
+	cleaned_fg = np.zeros_like(fg_mask)
+	for i in range(1, num_labels):  # Skip background label 0
+		area = stats[i, cv2.CC_STAT_AREA]
+		height = stats[i, cv2.CC_STAT_HEIGHT]
+		if area < min_area_px or height < min_height_px:
+			continue
+		cleaned_fg[labels == i] = 255
+
+	# Invert back to black text (0) on white background (255)
+	return cv2.bitwise_not(cleaned_fg)
 
 
 def _is_roi_blank(bin_img: np.ndarray, min_text_ratio: float = 0.008) -> bool:
-    """Returns True if foreground text pixels account for less than min_text_ratio of the total crop area."""
-    black_pixels = np.count_nonzero(bin_img == 0)
-    total_pixels = bin_img.size
-    return (black_pixels / float(total_pixels)) < min_text_ratio
+	"""Returns True if foreground text pixels account for less than min_text_ratio of the total crop area."""
+	black_pixels = np.count_nonzero(bin_img == 0)
+	total_pixels = bin_img.size
+	return (black_pixels / float(total_pixels)) < min_text_ratio
 
 
 def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np.ndarray]:
-    """Extract upscaled, bilaterally smoothed, and speckle-filtered variants for OCR."""
-    _require_cv2()
+	"""Extract denoised-then-upscaled, speckle-filtered variants for OCR.
 
-    if field is not None and hasattr(field, "ideal"):
-        roi = field.ideal.crop(prepared)
-    else:
-        roi = prepared
+	Order of operations matters: the ROI is denoised at its native, cropped
+	resolution first (while speckle is still pixel-sized), then upscaled
+	for Tesseract, then thresholded and cleaned. Doing it in the opposite
+	order -- upscale first, denoise second -- lets noise get magnified into
+	character-sized blobs before any filtering ever sees it.
+	"""
+	_require_cv2()
 
-    if roi is None or roi.size == 0:
-        return []
+	if field is not None and hasattr(field, "ideal"):
+		roi = field.ideal.crop(prepared)
+	else:
+		roi = prepared
 
-    # 1. Heavy Upscaling to 180px height for optimal Tesseract LSTM font size
-    h, w = roi.shape[:2]
-    target_height = 180
-    if h < target_height:
-        scale = target_height / float(h)
-        new_w = max(1, int(w * scale))
-        roi = cv2.resize(roi, (new_w, target_height), interpolation=cv2.INTER_CUBIC)
+	if roi is None or roi.size == 0:
+		return []
 
-    # 2. Denoise LCD screen dither texture
-    denoised_roi = _denoise_roi_grayscale(roi)
+	# 1. Denoise at native resolution, while speckle is still single-pixel
+	# sized, before upscaling gets a chance to magnify it.
+	denoised_roi = _denoise_roi_grayscale(roi)
 
-    variants = []
+	# 2. Upscale to a comfortable working size for the Tesseract LSTM engine.
+	# INTER_LINEAR avoids the ringing artifacts INTER_CUBIC can introduce
+	# around noisy edges, which would otherwise create new speckle.
+	h, w = denoised_roi.shape[:2]
+	target_height = 180
+	if h < target_height:
+		scale = target_height / float(h)
+		new_w = max(1, int(w * scale))
+		denoised_roi = cv2.resize(denoised_roi, (new_w, target_height), interpolation=cv2.INTER_LINEAR)
 
-    def _finalize(bin_img: np.ndarray) -> np.ndarray:
-        # Enforce black text (0) on white background (255)
-        if np.mean(bin_img) < 127:
-            bin_img = cv2.bitwise_not(bin_img)
-        
-        # Erase small noise specks via Connected Component Analysis
-        bin_img = _filter_connected_components(bin_img, min_area=35)
+	variants: list[np.ndarray] = []
 
-        # Add 25px white quiet zone margin around characters
-        return cv2.copyMakeBorder(
-            bin_img, 25, 25, 25, 25, cv2.BORDER_CONSTANT, value=255
-        )
+	def _finalize(bin_img: np.ndarray) -> Optional[np.ndarray]:
+		bin_img = _ensure_black_text_white_bg(bin_img)
 
-    # --- Variant 1: Denoised Otsu ---
-    _, v1 = cv2.threshold(denoised_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    variants.append(_finalize(v1))
+		# Erase blobs too short to be real glyph strokes (sensor speckle).
+		bin_img = _filter_connected_components(bin_img)
 
-    # --- Variant 2: CLAHE + Otsu ---
-    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-    enhanced = clahe.apply(denoised_roi)
-    _, v2 = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    variants.append(_finalize(v2))
+		# Skip variants that hold no real text after cleaning, rather than
+		# handing Tesseract a blank/noise-only crop to hallucinate on.
+		if _is_roi_blank(bin_img):
+			return None
 
-    # --- Variant 3: Adaptive Gaussian Thresholding ---
-    curr_h, curr_w = denoised_roi.shape[:2]
-    max_block = max(3, (min(curr_h, curr_w) // 2) * 2 - 1)
-    block_size = min(41, max_block)
-    if block_size % 2 == 0:
-        block_size -= 1
+		# Add a white quiet-zone margin around characters.
+		return cv2.copyMakeBorder(bin_img, 25, 25, 25, 25, cv2.BORDER_CONSTANT, value=255)
 
-    v3 = cv2.adaptiveThreshold(
-        denoised_roi,
-        255,
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY,
-        blockSize=max(3, block_size),
-        C=4,
-    )
-    variants.append(_finalize(v3))
+	# --- Variant 1: Denoised Otsu ---
+	_, v1 = cv2.threshold(denoised_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+	finalized = _finalize(v1)
+	if finalized is not None:
+		variants.append(finalized)
 
-    return variants
+	# --- Variant 2: CLAHE + Otsu (helps low-contrast / glare frames) ---
+	clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+	enhanced = clahe.apply(denoised_roi)
+	_, v2 = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+	finalized = _finalize(v2)
+	if finalized is not None:
+		variants.append(finalized)
+
+	# --- Variant 3: Adaptive Gaussian Thresholding (uneven backlight) ---
+	curr_h, curr_w = denoised_roi.shape[:2]
+	max_block = max(3, (min(curr_h, curr_w) // 2) * 2 - 1)
+	block_size = min(41, max_block)
+	if block_size % 2 == 0:
+		block_size -= 1
+
+	v3 = cv2.adaptiveThreshold(
+		denoised_roi,
+		255,
+		cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+		cv2.THRESH_BINARY,
+		blockSize=max(3, block_size),
+		C=4,
+	)
+	finalized = _finalize(v3)
+	if finalized is not None:
+		variants.append(finalized)
+
+	return variants
 
 
 # Cache dictionary for loaded template images
