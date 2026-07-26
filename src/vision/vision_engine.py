@@ -2,7 +2,7 @@
 Bradford White Corporation (BWC) Water Heater Vision Testing System
 Team 14 - Senior Project
 ./src/vision/vision_engine.py - Vision/OCR Engine
-Captures camera frames, isolates the display region, and extracts mode/temperature via OCR.
+Captures camera frames, isolates the display region, and extracts mode/temperature via PaddleOCR.
 """
 from __future__ import annotations
 
@@ -10,15 +10,21 @@ from dataclasses import dataclass
 import re
 from pathlib import Path
 from typing import Any, Optional
+import time
 
 import numpy as np
 import cv2
-import pytesseract
-from .display_layouts import OCRField, ROIBox, STATUS_BAR
-import time
 
-# Camera is assumed to be connected and initialized directly.
+try:
+	from paddleocr import PaddleOCR
+except ImportError:
+	PaddleOCR = None  # type: ignore
+
+from .display_layouts import OCRField, ROIBox, STATUS_BAR
+
+# Camera and OCR Engine Singletons
 _CAMERA: Any = None
+_PADDLE_OCR: Any = None
 
 
 @dataclass(frozen=True)
@@ -35,9 +41,21 @@ def _require_cv2() -> None:
 		raise RuntimeError("opencv-python is required for OCR image processing")
 
 
-def _require_pytesseract() -> None:
-	if pytesseract is None:
-		raise RuntimeError("pytesseract is required for OCR text extraction")
+def _require_paddleocr() -> None:
+	if PaddleOCR is None:
+		raise RuntimeError("paddleocr is required for OCR text extraction")
+
+
+def _get_paddle_ocr() -> Any:
+	"""Lazy load and return the shared PaddleOCR engine singleton."""
+	global _PADDLE_OCR
+	if _PADDLE_OCR is not None:
+		return _PADDLE_OCR
+
+	_require_paddleocr()
+	# Initialize PaddleOCR with English recognition and suppressed logs
+	_PADDLE_OCR = PaddleOCR(use_angle_cls=False, lang="en", show_log=False)
+	return _PADDLE_OCR
 
 
 def _order_points(points: np.ndarray) -> np.ndarray:
@@ -104,7 +122,7 @@ def _build_display_mask(frame: np.ndarray) -> np.ndarray:
 
 
 def _find_display_contour(frame: np.ndarray, mask: np.ndarray, min_area: int = 3000) -> Optional[np.ndarray]:
-	"""Find the raw orange display rectangle without geometric status bar projection."""
+	"""Find the raw display rectangle without geometric status bar projection."""
 	_require_cv2()
 	contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 	if not contours:
@@ -180,7 +198,7 @@ def _process_display_contour_and_warp(
 
 
 def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
-	"""Convert the warped display to grayscale only."""
+	"""Convert the warped display to grayscale."""
 	_require_cv2()
 	return cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
 
@@ -225,7 +243,7 @@ def _is_roi_blank(bin_img: np.ndarray, min_text_ratio: float = 0.008) -> bool:
 
 
 def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np.ndarray]:
-	"""Extract denoised-then-upscaled, speckle-filtered variants for OCR."""
+	"""Extract denoised, upscaled, and enhanced variants optimal for PaddleOCR."""
 	_require_cv2()
 
 	if field is not None and hasattr(field, "ideal"):
@@ -236,6 +254,9 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 	if roi is None or roi.size == 0:
 		return []
 
+	if len(roi.shape) == 3:
+		roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+
 	denoised_roi = _denoise_roi_grayscale(roi)
 
 	h, w = denoised_roi.shape[:2]
@@ -243,52 +264,27 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 	if h < target_height:
 		scale = target_height / float(h)
 		new_w = max(1, int(w * scale))
-		# Use INTER_CUBIC to preserve sharp character edge definitions
 		denoised_roi = cv2.resize(denoised_roi, (new_w, target_height), interpolation=cv2.INTER_CUBIC)
 
 	variants: list[np.ndarray] = []
 
-	def _finalize(bin_img: np.ndarray) -> Optional[np.ndarray]:
-		bin_img = _ensure_black_text_white_bg(bin_img)
-		bin_img = _filter_connected_components(bin_img)
+	# --- Variant 1: Denoised Grayscale (Padding added) ---
+	v1 = cv2.copyMakeBorder(denoised_roi, 25, 25, 25, 25, cv2.BORDER_CONSTANT, value=255)
+	variants.append(v1)
 
-		if _is_roi_blank(bin_img):
-			return None
-
-		return cv2.copyMakeBorder(bin_img, 25, 25, 25, 25, cv2.BORDER_CONSTANT, value=255)
-
-	# --- Variant 1: Denoised Otsu ---
-	_, v1 = cv2.threshold(denoised_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-	finalized = _finalize(v1)
-	if finalized is not None:
-		variants.append(finalized)
-
-	# --- Variant 2: CLAHE + Otsu ---
+	# --- Variant 2: CLAHE Contrast Enhanced ---
 	clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
 	enhanced = clahe.apply(denoised_roi)
-	_, v2 = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-	finalized = _finalize(v2)
-	if finalized is not None:
-		variants.append(finalized)
+	v2 = cv2.copyMakeBorder(enhanced, 25, 25, 25, 25, cv2.BORDER_CONSTANT, value=255)
+	variants.append(v2)
 
-	# --- Variant 3: Adaptive Gaussian Thresholding ---
-	curr_h, curr_w = denoised_roi.shape[:2]
-	max_block = max(3, (min(curr_h, curr_w) // 2) * 2 - 1)
-	block_size = min(41, max_block)
-	if block_size % 2 == 0:
-		block_size -= 1
-
-	v3 = cv2.adaptiveThreshold(
-		denoised_roi,
-		255,
-		cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-		cv2.THRESH_BINARY,
-		blockSize=max(3, block_size),
-		C=4,
-	)
-	finalized = _finalize(v3)
-	if finalized is not None:
-		variants.append(finalized)
+	# --- Variant 3: Otsu Binarization (Fallback for strict high contrast) ---
+	_, bin_img = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+	bin_img = _ensure_black_text_white_bg(bin_img)
+	bin_img = _filter_connected_components(bin_img)
+	if not _is_roi_blank(bin_img):
+		v3 = cv2.copyMakeBorder(bin_img, 25, 25, 25, 25, cv2.BORDER_CONSTANT, value=255)
+		variants.append(v3)
 
 	return variants
 
@@ -296,121 +292,125 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 _ICON_TEMPLATES: dict[str, dict[str, np.ndarray]] = {}
 
 ICON_STATE_MAPPINGS = {
-    "wifi_icon": {
-        "wifi_connected": "CONNECTED",
-        "wifi_not_connected": "NOT_CONNECTED",
-    },
-    "schedule_icon": {
-        "schedule_running": "RUNNING",
-        "schedule_not_running": "NOT_RUNNING",
-    }
+	"wifi_icon": {
+		"wifi_connected": "CONNECTED",
+		"wifi_not_connected": "NOT_CONNECTED",
+	},
+	"schedule_icon": {
+		"schedule_running": "RUNNING",
+		"schedule_not_running": "NOT_RUNNING",
+	},
 }
 
 
 def _load_icon_templates() -> dict[str, dict[str, np.ndarray]]:
-    """Lazy load icon templates from ./templates directory into grayscale memory cache."""
-    global _ICON_TEMPLATES
-    if _ICON_TEMPLATES:
-        return _ICON_TEMPLATES
+	"""Lazy load icon templates from ./templates directory into grayscale memory cache."""
+	global _ICON_TEMPLATES
+	if _ICON_TEMPLATES:
+		return _ICON_TEMPLATES
 
-    base_dir = Path(__file__).resolve().parent / "templates"
-    if not base_dir.exists():
-        base_dir = Path("./templates")
+	base_dir = Path(__file__).resolve().parent / "templates"
+	if not base_dir.exists():
+		base_dir = Path("./templates")
 
-    template_files = {
-        "wifi_icon": {
-            "wifi_connected": base_dir / "wifi_connected.png",
-            "wifi_not_connected": base_dir / "wifi_not_connected.png",
-        },
-        "schedule_icon": {
-            "schedule_running": base_dir / "schedule_running.png",
-            "schedule_not_running": base_dir / "schedule_not_running.png",
-        }
-    }
+	template_files = {
+		"wifi_icon": {
+			"wifi_connected": base_dir / "wifi_connected.png",
+			"wifi_not_connected": base_dir / "wifi_not_connected.png",
+		},
+		"schedule_icon": {
+			"schedule_running": base_dir / "schedule_running.png",
+			"schedule_not_running": base_dir / "schedule_not_running.png",
+		},
+	}
 
-    _require_cv2()
-    for field_key, templates in template_files.items():
-        _ICON_TEMPLATES[field_key] = {}
-        for state_key, file_path in templates.items():
-            if not file_path.exists():
-                print(f"[WARNING] Missing template file: {file_path}")
-                continue
-            
-            img = cv2.imread(str(file_path), cv2.IMREAD_GRAYSCALE)
-            if img is not None:
-                _, template_thresh = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-                t_contours, _ = cv2.findContours(template_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                
-                if t_contours:
-                    tx, ty, tw, th = cv2.boundingRect(np.concatenate(t_contours))
-                    t_crop = template_thresh[ty:ty+th, tx:tx+tw]
-                    
-                    t_max_dim = max(tw, th)
-                    t_pad_top = (t_max_dim - th) // 2
-                    t_pad_bottom = t_max_dim - th - t_pad_top
-                    t_pad_left = (t_max_dim - tw) // 2
-                    t_pad_right = t_max_dim - tw - t_pad_left
-                    t_squared_crop = cv2.copyMakeBorder(t_crop, t_pad_top, t_pad_bottom, t_pad_left, t_pad_right, cv2.BORDER_CONSTANT, value=0)
-                    
-                    template_norm = cv2.resize(t_squared_crop, (64, 64), interpolation=cv2.INTER_AREA)
-                    _, template_norm = cv2.threshold(template_norm, 127, 255, cv2.THRESH_BINARY)
-                    _ICON_TEMPLATES[field_key][state_key] = template_norm
-                else:
-                    _ICON_TEMPLATES[field_key][state_key] = img
+	_require_cv2()
+	for field_key, templates in template_files.items():
+		_ICON_TEMPLATES[field_key] = {}
+		for state_key, file_path in templates.items():
+			if not file_path.exists():
+				print(f"[WARNING] Missing template file: {file_path}")
+				continue
 
-    return _ICON_TEMPLATES
+			img = cv2.imread(str(file_path), cv2.IMREAD_GRAYSCALE)
+			if img is not None:
+				_, template_thresh = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+				t_contours, _ = cv2.findContours(template_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+				if t_contours:
+					tx, ty, tw, th = cv2.boundingRect(np.concatenate(t_contours))
+					t_crop = template_thresh[ty : ty + th, tx : tx + tw]
+
+					t_max_dim = max(tw, th)
+					t_pad_top = (t_max_dim - th) // 2
+					t_pad_bottom = t_max_dim - th - t_pad_top
+					t_pad_left = (t_max_dim - tw) // 2
+					t_pad_right = t_max_dim - tw - t_pad_left
+					t_squared_crop = cv2.copyMakeBorder(
+						t_crop, t_pad_top, t_pad_bottom, t_pad_left, t_pad_right, cv2.BORDER_CONSTANT, value=0
+					)
+
+					template_norm = cv2.resize(t_squared_crop, (64, 64), interpolation=cv2.INTER_AREA)
+					_, template_norm = cv2.threshold(template_norm, 127, 255, cv2.THRESH_BINARY)
+					_ICON_TEMPLATES[field_key][state_key] = template_norm
+				else:
+					_ICON_TEMPLATES[field_key][state_key] = img
+
+	return _ICON_TEMPLATES
 
 
 def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, str]:
-    """Classify an icon by structural XOR overlap against normalized templates."""
-    _require_cv2()
-    templates_dict = _load_icon_templates().get(field_name, {})
-    
-    if not templates_dict or roi_gray is None or roi_gray.size == 0:
-        print(f"[{field_name.upper()}] ERROR: Empty ROI or missing templates.")
-        return "UNKNOWN", "UNKNOWN"
+	"""Classify an icon by structural XOR overlap against normalized templates."""
+	_require_cv2()
+	templates_dict = _load_icon_templates().get(field_name, {})
 
-    if len(roi_gray.shape) == 3:
-        roi_gray = cv2.cvtColor(roi_gray, cv2.COLOR_BGR2GRAY)
+	if not templates_dict or roi_gray is None or roi_gray.size == 0:
+		print(f"[{field_name.upper()}] ERROR: Empty ROI or missing templates.")
+		return "UNKNOWN", "UNKNOWN"
 
-    _, roi_thresh = cv2.threshold(roi_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    contours, _ = cv2.findContours(roi_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
-        return "UNKNOWN", "UNKNOWN"
-        
-    valid_contours = [c for c in contours if cv2.contourArea(c) > 5]
-    if not valid_contours:
-        valid_contours = [max(contours, key=cv2.contourArea)]
+	if len(roi_gray.shape) == 3:
+		roi_gray = cv2.cvtColor(roi_gray, cv2.COLOR_BGR2GRAY)
 
-    x, y, w, h = cv2.boundingRect(np.concatenate(valid_contours))
-    if w < 5 or h < 5:
-        return "UNKNOWN", "UNKNOWN"
-    
-    crop = roi_thresh[y:y+h, x:x+w]
-    max_dim = max(w, h)
-    pad_top = (max_dim - h) // 2
-    pad_bottom = max_dim - h - pad_top
-    pad_left = (max_dim - w) // 2
-    pad_right = max_dim - w - pad_left
-    squared_crop = cv2.copyMakeBorder(crop, pad_top, pad_bottom, pad_left, pad_right, cv2.BORDER_CONSTANT, value=0)
-        
-    roi_norm = cv2.resize(squared_crop, (64, 64), interpolation=cv2.INTER_AREA)
-    _, roi_norm = cv2.threshold(roi_norm, 127, 255, cv2.THRESH_BINARY)
+	_, roi_thresh = cv2.threshold(roi_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+	contours, _ = cv2.findContours(roi_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+	if not contours:
+		return "UNKNOWN", "UNKNOWN"
 
-    scores: dict[str, float] = {}
+	valid_contours = [c for c in contours if cv2.contourArea(c) > 5]
+	if not valid_contours:
+		valid_contours = [max(contours, key=cv2.contourArea)]
 
-    for state_key, template_norm in templates_dict.items():
-        if template_norm.shape != (64, 64):
-            scores[state_key] = float('inf')
-            continue
-            
-        diff = cv2.bitwise_xor(roi_norm, template_norm)
-        score = np.sum(diff == 255) / (64.0 * 64.0)
-        scores[state_key] = float(score)
+	x, y, w, h = cv2.boundingRect(np.concatenate(valid_contours))
+	if w < 5 or h < 5:
+		return "UNKNOWN", "UNKNOWN"
 
-    best_state_key = min(scores, key=scores.get)
-    parsed_state = ICON_STATE_MAPPINGS.get(field_name, {}).get(best_state_key, "UNKNOWN")
-    return best_state_key, parsed_state
+	crop = roi_thresh[y : y + h, x : x + w]
+	max_dim = max(w, h)
+	pad_top = (max_dim - h) // 2
+	pad_bottom = max_dim - h - pad_top
+	pad_left = (max_dim - w) // 2
+	pad_right = max_dim - w - pad_left
+	squared_crop = cv2.copyMakeBorder(
+		crop, pad_top, pad_bottom, pad_left, pad_right, cv2.BORDER_CONSTANT, value=0
+	)
+
+	roi_norm = cv2.resize(squared_crop, (64, 64), interpolation=cv2.INTER_AREA)
+	_, roi_norm = cv2.threshold(roi_norm, 127, 255, cv2.THRESH_BINARY)
+
+	scores: dict[str, float] = {}
+
+	for state_key, template_norm in templates_dict.items():
+		if template_norm.shape != (64, 64):
+			scores[state_key] = float("inf")
+			continue
+
+		diff = cv2.bitwise_xor(roi_norm, template_norm)
+		score = np.sum(diff == 255) / (64.0 * 64.0)
+		scores[state_key] = float(score)
+
+	best_state_key = min(scores, key=scores.get)
+	parsed_state = ICON_STATE_MAPPINGS.get(field_name, {}).get(best_state_key, "UNKNOWN")
+	return best_state_key, parsed_state
 
 
 def _clean_text(raw_text: str) -> str:
@@ -468,7 +468,7 @@ def _is_plausible_word(word: str) -> bool:
 	if length == 2:
 		return vowels >= 1 or clean_alpha.upper() in {
 			"ON", "NO", "GO", "TO", "IN", "IT", "IS", "AT", "BY", "HE",
-			"ME", "WE", "UP", "OR", "IF", "DO", "SO", "AM", "PM", "ID", "OK"
+			"ME", "WE", "UP", "OR", "IF", "DO", "SO", "AM", "PM", "ID", "OK",
 		}
 
 	vowel_ratio = vowels / float(length)
@@ -489,7 +489,6 @@ def _parse_info_line(raw_text: str) -> str:
 	if not text:
 		return ""
 
-	# Correct common isolated glyph misreads on display fonts
 	text = re.sub(r"\bOg\b", "On", text)
 	text = re.sub(r"\b0g\b", "On", text)
 
@@ -590,55 +589,55 @@ def _score_field_candidate(field_name: str, raw_text: str, value: Any) -> float:
 	return 0.0
 
 
-def _parse_tesseract_data(
-	tesseract_output: dict[str, Any],
+def _parse_paddle_data(
+	paddle_output: list[Any],
 	variant_shape: Optional[tuple[int, int]] = None,
 	field_name: str = "",
 ) -> str:
-	"""Extract tokens, filtering out noise relative to ROI box boundaries and confidence."""
-	texts = tesseract_output.get("text", []) or []
-	confs = tesseract_output.get("conf", []) or []
-	heights = tesseract_output.get("height", []) or []
-	widths = tesseract_output.get("width", []) or []
+	"""Extract tokens from PaddleOCR output, filtering out noise by confidence and geometric bounds."""
+	if not paddle_output or paddle_output[0] is None or len(paddle_output[0]) == 0:
+		return ""
 
 	cleaned_tokens: list[str] = []
 	var_h, var_w = variant_shape if variant_shape else (0, 0)
 
-	for i, token in enumerate(texts):
-		if token is None:
+	for line in paddle_output[0]:
+		if not line or len(line) < 2:
 			continue
-		stripped = str(token).strip()
+
+		box_points, text_tuple = line[0], line[1]
+		if not text_tuple or len(text_tuple) < 2:
+			continue
+
+		text, conf = text_tuple[0], float(text_tuple[1])
+		stripped = str(text).strip()
 		if not stripped:
 			continue
 
-		# Confidence gating for info lines
-		if field_name.startswith("dashboard_info_line_") and i < len(confs):
-			try:
-				conf = float(confs[i])
-				if conf >= 0 and conf < 30.0:
-					continue
-			except (ValueError, TypeError):
-				pass
+		# Confidence gating for info lines (PaddleOCR conf range: 0.0 to 1.0)
+		if field_name.startswith("dashboard_info_line_"):
+			if conf < 0.30:
+				continue
 
-		# Relative Scale Filtering based on ROI crop dimensions
+		# Relative scale filtering based on crop dimensions
 		if var_h > 0 and field_name.startswith("dashboard_info_line_"):
-			if i < len(heights) and i < len(widths):
-				try:
-					box_h = float(heights[i])
-					box_w = float(widths[i])
-					rel_height = box_h / float(var_h)
-					aspect_ratio = box_w / max(1.0, box_h)
+			try:
+				box_np = np.array(box_points, dtype="float32")
+				min_y, max_y = np.min(box_np[:, 1]), np.max(box_np[:, 1])
+				min_x, max_x = np.min(box_np[:, 0]), np.max(box_np[:, 0])
+				box_h = max_y - min_y
+				box_w = max_x - min_x
 
-					# Discard tokens shorter than 10% or taller than 85% of crop height.
-					# (Prevents dropping short lowercase words like "for" or "on").
-					if rel_height < 0.10 or rel_height > 0.85:
-						continue
+				rel_height = box_h / float(var_h)
+				aspect_ratio = box_w / max(1.0, box_h)
 
-					# Filter out wide, thin artifacts (e.g. divider line fragments)
-					if aspect_ratio > 10.0 and rel_height < 0.25:
-						continue
-				except (ValueError, TypeError):
-					pass
+				if rel_height < 0.10 or rel_height > 0.85:
+					continue
+
+				if aspect_ratio > 10.0 and rel_height < 0.25:
+					continue
+			except Exception:
+				pass
 
 		cleaned_tokens.append(stripped)
 
@@ -650,41 +649,41 @@ def _parse_tesseract_data(
 
 
 def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
-	"""OCR or classify a field from image variants and keep the best candidate by score."""
+	"""Classify or extract text from image variants using PaddleOCR."""
 	field_name = field.name
 
 	# --- ICON CLASSIFICATION BYPASS ---
 	if field_name in ("wifi_icon", "schedule_icon"):
 		if not variants:
 			return "UNKNOWN", "UNKNOWN"
-		inverted_variant = cv2.bitwise_not(variants[0])
+		first_variant = variants[0]
+		if len(first_variant.shape) == 3:
+			first_variant = cv2.cvtColor(first_variant, cv2.COLOR_BGR2GRAY)
+		inverted_variant = cv2.bitwise_not(first_variant)
 		icon_key, icon_value = _classify_icon_field(inverted_variant, field_name)
 		return icon_key, icon_value
 
-	# --- STANDARD TESSERACT OCR FOR TEXT/DIGITS ---
-	_require_pytesseract()
+	# --- PADDLEOCR FOR TEXT/DIGITS ---
+	_require_paddleocr()
+	ocr_engine = _get_paddle_ocr()
+
 	best_raw = ""
 	best_value: Any = _field_empty_value(field_name)
-	best_score = 0.0
+	best_score = -1.0
 
 	whitelist_set = None
-	if "tessedit_char_whitelist=" in field.tesseract_config:
+	if hasattr(field, "tesseract_config") and "tessedit_char_whitelist=" in field.tesseract_config:
 		whitelist_set = set(field.tesseract_config.split("tessedit_char_whitelist=")[1])
 
-	config = field.tesseract_config
-	if "--oem" not in config:
-		config = f"--oem 1 {config}"
-	if "--psm" not in config:
-		config = f"{config} --psm 7"
-
 	for variant in variants:
-		tesseract_output = pytesseract.image_to_data(
-			variant,
-			config=config,
-			output_type=pytesseract.Output.DICT,
-		)
-		raw = _parse_tesseract_data(
-			tesseract_output,
+		if len(variant.shape) == 2:
+			input_img = cv2.cvtColor(variant, cv2.COLOR_GRAY2BGR)
+		else:
+			input_img = variant
+
+		paddle_output = ocr_engine.ocr(input_img, cls=False)
+		raw = _parse_paddle_data(
+			paddle_output,
 			variant_shape=variant.shape[:2],
 			field_name=field_name,
 		)
@@ -870,9 +869,9 @@ def read_display(
 	current_menu_key: str,
 	menu_fields: tuple[OCRField, ...],
 ) -> OCRReadout:
-	"""Read fields from the display in one frame based on current context."""
+	"""Read fields from the display in one frame based on current context using PaddleOCR."""
 	_require_cv2()
-	_require_pytesseract()
+	_require_paddleocr()
 	mask = _build_display_mask(frame)
 	display_contour = _find_display_contour(frame, mask)
 
@@ -928,8 +927,9 @@ def capture_and_read_display(
 
 
 def warm_up() -> None:
-	"""Hook for camera warmup work to fully flush the hardware pipeline."""
-	camera = _get_camera()
+	"""Hook for camera and OCR engine warmup work to fully flush hardware pipelines."""
+	_ = _get_camera()
+	_ = _get_paddle_ocr()
 
 
 def is_camera_available() -> bool:

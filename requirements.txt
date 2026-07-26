@@ -3,7 +3,9 @@
 # Image processing
 opencv-python
 Pillow
-pytesseract
+# pytesseract
+paddleocr
+paddlepaddle
 numpy
 
 # Utilities
