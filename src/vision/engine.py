@@ -453,29 +453,29 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 	new_w = max(20, int(w * scale))
 	resized = cv2.resize(denoised, (new_w, target_h), interpolation=cv2.INTER_CUBIC)
 
-	# Percentile-based contrast scaling (prevents background noise spikes from blowing up)
+	# Percentile-based contrast scaling
 	p2, p98 = np.percentile(resized, (2, 98))
 	if p98 > p2:
 		norm = np.clip((resized - p2) * (255.0 / (p98 - p2)), 0, 255).astype(np.uint8)
 	else:
 		norm = resized
 
-	# Auto-detect dark background and invert to black text on white background
-	border_pixels = np.concatenate([
-		norm[:5, :].flatten(), norm[-5:, :].flatten(),
-		norm[:, :5].flatten(), norm[:, -5:].flatten()
-	])
-	is_dark_bg = float(np.mean(border_pixels)) < 127
+	# Robust background detection: text/lines occupy <30% of ROI, so median is ALWAYS background
+	is_dark_bg = float(np.median(norm)) < 127
 
 	if is_dark_bg:
 		primary = 255 - norm
 	else:
 		primary = norm
 
-	# Pad with solid white background instead of border replication
-	padded = cv2.copyMakeBorder(primary, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=(255, 255, 255))
+	# Pad with solid white background to give DBNet clean receptive margins
+	padded = cv2.copyMakeBorder(primary, 30, 30, 30, 30, cv2.BORDER_CONSTANT, value=(255, 255, 255))
 
-	return [padded, 255 - padded]
+	# High-contrast binary variant specifically tuned for giant temperature digits
+	_, thresh = cv2.threshold(primary, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+	padded_thresh = cv2.copyMakeBorder(thresh, 30, 30, 30, 30, cv2.BORDER_CONSTANT, value=(255, 255, 255))
+
+	return [padded, padded_thresh, 255 - padded]
 
 
 # =============================================================================
