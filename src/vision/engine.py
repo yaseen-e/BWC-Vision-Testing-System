@@ -2,7 +2,8 @@
 Bradford White Corporation (BWC) Water Heater Vision Testing System
 Team 14 - Senior Project
 ./src/vision/engine.py - Vision/OCR Engine
-Captures camera frames, isolates the display region, and extracts mode/temperature via RapidOCR (ONNX Runtime).
+Captures camera frames, isolates the display region, extracts mode/temperature via RapidOCR,
+and classifies icon states via multi-metric shape/template matching.
 """
 from __future__ import annotations
 
@@ -83,7 +84,13 @@ def read_display(
 
 	fields_result: dict[str, dict[str, Any]] = {}
 	for field in menu_fields:
-		raw, val = _ocr_field(field, _extract_warped_variants(prepared_gray, field))
+		if field.name in ("wifi_icon", "schedule_icon") or field.name.endswith("_icon"):
+			# Pass clean, unpadded crop directly to the classifier
+			unpadded_roi = _crop_roi(prepared_gray, field)
+			raw, val = _classify_icon_field(unpadded_roi, field.name)
+		else:
+			raw, val = _ocr_field(field, _extract_warped_variants(prepared_gray, field))
+
 		fields_result[field.name] = {"raw": raw, "value": val}
 
 	return OCRReadout(
@@ -497,7 +504,6 @@ def _generate_digit_variants(roi_gray: np.ndarray) -> list[np.ndarray]:
 	_require_cv2()
 	variants: list[np.ndarray] = []
 
-	# Isolate bright digits on dark background
 	_, thresh = cv2.threshold(roi_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 	contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -526,17 +532,14 @@ def _generate_digit_variants(roi_gray: np.ndarray) -> list[np.ndarray]:
 		target_w = max(10, int(cw * scale))
 		scaled_digits = cv2.resize(digit_crop, (target_w, target_h), interpolation=cv2.INTER_AREA)
 
-		# Variant 1: Inverted Black-on-White with clean padding
 		inverted = cv2.bitwise_not(scaled_digits)
 		v1 = cv2.copyMakeBorder(inverted, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=255)
 		variants.append(v1)
 
-		# Variant 2: Binary Inverted
 		_, bin_inv = cv2.threshold(scaled_digits, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
 		v2 = cv2.copyMakeBorder(bin_inv, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=255)
 		variants.append(v2)
 
-		# Variant 3: Standard White-on-Black
 		v3 = cv2.copyMakeBorder(scaled_digits, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=0)
 		variants.append(v3)
 
@@ -548,19 +551,8 @@ def _generate_digit_variants(roi_gray: np.ndarray) -> list[np.ndarray]:
 # =============================================================================
 
 def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
-	"""Classify icons or extract text using RapidOCR with geometry & confidence filtering."""
+	"""Extract text using RapidOCR with geometry & confidence filtering."""
 	field_name = field.name
-
-	# --- ICON CLASSIFICATION BYPASS ---
-	if field_name in ("wifi_icon", "schedule_icon"):
-		if not variants:
-			return "UNKNOWN", "UNKNOWN"
-		first_var = variants[0]
-		if len(first_var.shape) == 3:
-			first_var = cv2.cvtColor(first_var, cv2.COLOR_BGR2GRAY)
-		return _classify_icon_field(first_var, field_name)
-
-	# --- RAPIDOCR TEXT EXTRACTION ---
 	_require_rapidocr()
 	ocr_engine = _get_rapid_ocr()
 
@@ -614,11 +606,9 @@ def _parse_and_filter_rapidocr_boxes(
 		box_h = max_y - min_y
 		box_area = box_w * box_h
 
-		# Reject tiny speckles (< 0.5% ROI area) or boxes under 8px tall
 		if box_area < (img_area * 0.005) or box_h < 8:
 			continue
 
-		# Reject single non-alphanumeric noise characters
 		if len(text) == 1 and not text.isalnum():
 			continue
 
@@ -672,9 +662,7 @@ def _parse_mode(raw_text: str) -> str:
 		return "UNKNOWN"
 
 	cleaned = raw_text.strip().upper()
-	# Strip prefix labels like "MODE", "MD", "MOD"
 	cleaned = re.sub(r"^(MODE|MD|MOD)\s*[:;\-\.]*\s*", "", cleaned, flags=re.IGNORECASE).strip()
-	# Keep only letters and spaces
 	cleaned = re.sub(r"[^A-Z\s]", "", cleaned).strip()
 	cleaned = re.sub(r"\s+", " ", cleaned)
 
@@ -726,7 +714,7 @@ def _field_empty_value(field_name: str) -> Any:
 
 
 # =============================================================================
-# ICON MATCHING HELPERS
+# GENERALIZED MULTI-METRIC ICON CLASSIFIER
 # =============================================================================
 
 _ICON_TEMPLATES: dict[str, dict[str, np.ndarray]] = {}
@@ -744,7 +732,12 @@ ICON_STATE_MAPPINGS = {
 
 
 def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, str]:
-	"""Classify an icon by structural XOR overlap against normalized templates."""
+	"""
+	Classify any icon generically by standardizing polarity, cropping tightly to
+	foreground contours, square-normalizing to 64x64, and calculating a composite
+	score combining Hu Moments (shape dissimilarity), template cross-correlation,
+	and bitwise structural XOR.
+	"""
 	_require_cv2()
 	templates_dict = _load_icon_templates().get(field_name, {})
 
@@ -754,20 +747,32 @@ def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, st
 	if len(roi_gray.shape) == 3:
 		roi_gray = cv2.cvtColor(roi_gray, cv2.COLOR_BGR2GRAY)
 
-	_, roi_thresh = cv2.threshold(roi_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+	blurred = cv2.GaussianBlur(roi_gray, (3, 3), 0)
+	_, roi_thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+	# Ensure foreground is white (255) on black (0) background regardless of ROI polarity
+	perimeter = np.concatenate([
+		roi_thresh[0, :], roi_thresh[-1, :],
+		roi_thresh[:, 0], roi_thresh[:, -1]
+	])
+	if np.mean(perimeter) > 127:
+		roi_thresh = cv2.bitwise_not(roi_thresh)
+
 	contours, _ = cv2.findContours(roi_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 	if not contours:
 		return "UNKNOWN", "UNKNOWN"
 
 	valid_contours = [c for c in contours if cv2.contourArea(c) > 5]
 	if not valid_contours:
-		valid_contours = [max(contours, key=cv2.contourArea)]
+		return "UNKNOWN", "UNKNOWN"
 
-	x, y, w, h = cv2.boundingRect(np.concatenate(valid_contours))
-	if w < 5 or h < 5:
+	all_pts = np.concatenate(valid_contours)
+	x, y, w, h = cv2.boundingRect(all_pts)
+	if w < 4 or h < 4:
 		return "UNKNOWN", "UNKNOWN"
 
 	crop = roi_thresh[y : y + h, x : x + w]
+
 	max_dim = max(w, h)
 	pad_top = (max_dim - h) // 2
 	pad_bottom = max_dim - h - pad_top
@@ -787,9 +792,21 @@ def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, st
 			scores[state_key] = float("inf")
 			continue
 
-		diff = cv2.bitwise_xor(roi_norm, template_norm)
-		score = np.sum(diff == 255) / (64.0 * 64.0)
-		scores[state_key] = float(score)
+		# Metric 1: Shape Dissimilarity (Hu Moments) - scale & stroke-thickness invariant
+		shape_diff = cv2.matchShapes(roi_norm, template_norm, cv2.CONTOURS_MATCH_I1, 0.0)
+
+		# Metric 2: Normalized Cross-Correlation
+		corr_matrix = cv2.matchTemplate(roi_norm, template_norm, cv2.TM_CCOEFF_NORMED)
+		max_corr = float(np.max(corr_matrix)) if corr_matrix is not None else 0.0
+		corr_dist = 1.0 - max(0.0, max_corr)
+
+		# Metric 3: Bitwise XOR Structural Error
+		xor_diff = cv2.bitwise_xor(roi_norm, template_norm)
+		xor_dist = np.sum(xor_diff == 255) / (64.0 * 64.0)
+
+		# Composite Score (Lower is better match)
+		composite = (0.45 * shape_diff) + (0.35 * corr_dist) + (0.20 * xor_dist)
+		scores[state_key] = float(composite)
 
 	best_state_key = min(scores, key=scores.get)
 	parsed_state = ICON_STATE_MAPPINGS.get(field_name, {}).get(best_state_key, "UNKNOWN")
@@ -797,7 +814,7 @@ def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, st
 
 
 def _load_icon_templates() -> dict[str, dict[str, np.ndarray]]:
-	"""Lazy load icon templates from ./templates directory."""
+	"""Lazy load icon templates from ./templates directory into normalized memory cache."""
 	global _ICON_TEMPLATES
 	if _ICON_TEMPLATES:
 		return _ICON_TEMPLATES
@@ -808,45 +825,64 @@ def _load_icon_templates() -> dict[str, dict[str, np.ndarray]]:
 
 	template_files = {
 		"wifi_icon": {
-			"wifi_connected": base_dir / "wifi_connected.png",
-			"wifi_not_connected": base_dir / "wifi_not_connected.png",
+			"wifi_connected": ["wifi_connected.png", "wifi_connected.jpg", "wifi_connected.jpeg"],
+			"wifi_not_connected": ["wifi_not_connected.png", "wifi_not_connected.jpg", "wifi_not_connected.jpeg"],
 		},
 		"schedule_icon": {
-			"schedule_running": base_dir / "schedule_running.png",
-			"schedule_not_running": base_dir / "schedule_not_running.png",
+			"schedule_running": ["schedule_running.png", "schedule_running.jpg", "schedule_running.jpeg"],
+			"schedule_not_running": ["schedule_not_running.png", "schedule_not_running.jpg", "schedule_not_running.jpeg"],
 		},
 	}
 
 	_require_cv2()
 	for field_key, templates in template_files.items():
 		_ICON_TEMPLATES[field_key] = {}
-		for state_key, file_path in templates.items():
-			if not file_path.exists():
+		for state_key, filenames in templates.items():
+			file_path = None
+			for fname in filenames:
+				candidate = base_dir / fname
+				if candidate.exists():
+					file_path = candidate
+					break
+
+			if file_path is None:
 				continue
 
 			img = cv2.imread(str(file_path), cv2.IMREAD_GRAYSCALE)
-			if img is not None:
-				_, template_thresh = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-				t_contours, _ = cv2.findContours(template_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+			if img is None:
+				continue
 
-				if t_contours:
-					tx, ty, tw, th = cv2.boundingRect(np.concatenate(t_contours))
-					t_crop = template_thresh[ty : ty + th, tx : tx + tw]
+			blurred = cv2.GaussianBlur(img, (3, 3), 0)
+			_, template_thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-					t_max_dim = max(tw, th)
-					t_pad_top = (t_max_dim - th) // 2
-					t_pad_bottom = t_max_dim - th - t_pad_top
-					t_pad_left = (t_max_dim - tw) // 2
-					t_pad_right = t_max_dim - tw - t_pad_left
-					t_squared_crop = cv2.copyMakeBorder(
-						t_crop, t_pad_top, t_pad_bottom, t_pad_left, t_pad_right, cv2.BORDER_CONSTANT, value=0
-					)
+			perimeter = np.concatenate([
+				template_thresh[0, :], template_thresh[-1, :],
+				template_thresh[:, 0], template_thresh[:, -1]
+			])
+			if np.mean(perimeter) > 127:
+				template_thresh = cv2.bitwise_not(template_thresh)
 
-					template_norm = cv2.resize(t_squared_crop, (64, 64), interpolation=cv2.INTER_AREA)
-					_, template_norm = cv2.threshold(template_norm, 127, 255, cv2.THRESH_BINARY)
-					_ICON_TEMPLATES[field_key][state_key] = template_norm
-				else:
-					_ICON_TEMPLATES[field_key][state_key] = img
+			t_contours, _ = cv2.findContours(template_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+			valid_cnts = [c for c in t_contours if cv2.contourArea(c) > 5]
+
+			if valid_cnts:
+				tx, ty, tw, th = cv2.boundingRect(np.concatenate(valid_cnts))
+				t_crop = template_thresh[ty : ty + th, tx : tx + tw]
+
+				t_max_dim = max(tw, th)
+				t_pad_top = (t_max_dim - th) // 2
+				t_pad_bottom = t_max_dim - th - t_pad_top
+				t_pad_left = (t_max_dim - tw) // 2
+				t_pad_right = t_max_dim - tw - t_pad_left
+				t_squared = cv2.copyMakeBorder(
+					t_crop, t_pad_top, t_pad_bottom, t_pad_left, t_pad_right, cv2.BORDER_CONSTANT, value=0
+				)
+
+				template_norm = cv2.resize(t_squared, (64, 64), interpolation=cv2.INTER_AREA)
+				_, template_norm = cv2.threshold(template_norm, 127, 255, cv2.THRESH_BINARY)
+				_ICON_TEMPLATES[field_key][state_key] = template_norm
+			else:
+				_ICON_TEMPLATES[field_key][state_key] = cv2.resize(template_thresh, (64, 64))
 
 	return _ICON_TEMPLATES
 
