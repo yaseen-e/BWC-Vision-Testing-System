@@ -712,7 +712,7 @@ def _get_field_scale_bounds(field_name: str) -> tuple[float, float, float]:
 
 	if field_name.startswith("dashboard_info_line_"):
 		# Multi-line prose text bounded by horizontal rules
-		return (0.30, 0.82, 10.0)
+		return (0.50, 0.82, 10.0)
 
 	if field_name in ("time_field", "date_field"):
 		# Status bar numbers and text
