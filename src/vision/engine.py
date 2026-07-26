@@ -471,7 +471,7 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 	# Pad with solid white background to give DBNet clean receptive margins
 	padded = cv2.copyMakeBorder(primary, 30, 30, 30, 30, cv2.BORDER_CONSTANT, value=(255, 255, 255))
 
-	# High-contrast binary variant specifically tuned for giant temperature digits
+	# High-contrast binary variant specifically tuned for giant digits and status bar icons/text
 	_, thresh = cv2.threshold(primary, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 	padded_thresh = cv2.copyMakeBorder(thresh, 30, 30, 30, 30, cv2.BORDER_CONSTANT, value=(255, 255, 255))
 
@@ -527,7 +527,8 @@ def _parse_and_filter_rapidocr_boxes(
 			continue
 
 		box, text, conf = item[0], str(item[1]).strip(), float(item[2])
-		if not text or conf < 0.25:
+		# Lowered threshold from 0.25 to 0.15 so thin status-bar text (TIME_FIELD) isn't discarded
+		if not text or conf < 0.15:
 			continue
 
 		box_points = np.array(box, dtype=np.float32)
@@ -597,6 +598,14 @@ def _score_field_candidate(field_name: str, raw_text: str, value: Any, conf: flo
 	elif field_name.startswith("dashboard_info_line"):
 		if isinstance(value, str) and len(value) >= 3:
 			score += 3.0
+	elif field_name == "time_field":
+		if isinstance(value, str) and re.search(r"\d{1,2}:\d{2}", value):
+			score += 4.0
+		else:
+			return -1.0
+	elif field_name == "date_field":
+		if isinstance(value, str) and re.search(r"\d{2}/\d{2}/\d{2}", value):
+			score += 4.0
 
 	return score
 
@@ -674,12 +683,28 @@ def _parse_temperature(raw_text: str) -> Optional[int]:
 
 
 def _parse_time(raw_text: str) -> str:
+	"""Extract and normalize time string (e.g., '7:19 AM', '12:45 PM')."""
+	if not raw_text:
+		return ""
+
 	text = raw_text.strip().upper()
-	if "A" in text:
-		text = text.split("A")[0] + "AM"
-	elif "P" in text:
-		text = text.split("P")[0] + "PM"
-	return text.strip()
+
+	# Convert periods, semicolons, or spaces between digits into colons (e.g. "7.19" -> "7:19")
+	text = re.sub(r"(\d)[;\.\-\s]+(\d{2})", r"\1:\2", text)
+
+	# Fix missing colons in 3- or 4-digit outputs (e.g. "719 AM" -> "7:19 AM")
+	text = re.sub(r"\b(\d{1,2})(\d{2})\b", r"\1:\2", text)
+
+	# Search for hour:minute pattern
+	time_match = re.search(r"(\d{1,2}):(\d{2})", text)
+	if time_match:
+		hour = int(time_match.group(1))
+		minute = time_match.group(2)
+		if 1 <= hour <= 12:
+			period = "PM" if "P" in text else "AM"
+			return f"{hour}:{minute} {period}"
+
+	return ""
 
 
 def _parse_dashboard_info(raw_text: str) -> str:
