@@ -224,7 +224,6 @@ def _denoise_roi_grayscale(roi: np.ndarray) -> np.ndarray:
 	character strokes crisp.
 	"""
 	despeckled = cv2.medianBlur(roi, 3)
-	despeckled = cv2.GaussianBlur(despeckled, (3, 3), 0)
 
 	return cv2.bilateralFilter(despeckled, d=5, sigmaColor=60, sigmaSpace=60)
 
@@ -507,8 +506,8 @@ def _parse_temperature(raw_text: str) -> Optional[int]:
 
 def _parse_info_line(raw_text: str) -> str:
 	# The field's tessedit_char_whitelist has already restricted raw_text to
-	# legal characters; just collapse whitespace and trim stray punctuation.
-	text = _clean_text(raw_text).strip(" .")
+	# legal characters; just collapse whitespace.
+	text = _clean_text(raw_text)
 
 	if not text:
 		return ""
@@ -573,28 +572,120 @@ def _score_temperature(raw_text: str, value: Any) -> float:
 	return score
 
 
+def _is_plausible_word(word: str) -> bool:
+	"""Check if a token has plausible word structure (vowel ratio, pronounceability, digits)."""
+	clean_num = re.sub(r"[^0-9]", "", word)
+	clean_alpha = re.sub(r"[^A-Za-z]", "", word)
+
+	# Pure numeric or temperature/percentage tokens (e.g. "100", "80%") are valid
+	if clean_num and not clean_alpha:
+		return True
+
+	if not clean_alpha:
+		return False
+
+	length = len(clean_alpha)
+	vowels = sum(1 for c in clean_alpha.lower() if c in "aeiouy")
+
+	# Single-letter words must be standard English words ('A', 'I')
+	if length == 1:
+		return clean_alpha.upper() in {"A", "I"}
+
+	# 2-letter words must contain a vowel or be common valid words/acronyms
+	if length == 2:
+		return vowels >= 1 or clean_alpha.upper() in {
+			"ON", "NO", "GO", "TO", "IN", "IT", "IS", "AT", "BY", "HE",
+			"ME", "WE", "UP", "OR", "IF", "DO", "SO", "AM", "PM", "ID", "OK"
+		}
+
+	# 3+ letter words must contain at least 1 vowel and not be >85% vowels
+	vowel_ratio = vowels / float(length)
+	if vowels == 0:
+		return False  # Blocks vowelless gibberish ("CFR", "TRG")
+	if vowel_ratio > 0.85 and length >= 3:
+		return False  # Blocks vowel-only hallucinations ("aoe")
+
+	# Reject 3+ consecutive repeated characters (e.g., "zzz")
+	if re.search(r"(.)\1\1", clean_alpha.lower()):
+		return False
+
+	return True
+
+
+def _parse_info_line(raw_text: str) -> str:
+	"""Parse info lines by evaluating word structure plausibility and character counts."""
+	text = _clean_text(raw_text).strip(" .:-_")
+	if not text:
+		return ""
+
+	words = text.split()
+	if not words:
+		return ""
+
+	plausible_words = [w for w in words if _is_plausible_word(w)]
+
+	# Require at least 60% of words on the line to pass structural sanity checks
+	if len(plausible_words) / float(len(words)) < 0.60:
+		return ""
+
+	# Must contain at least 3 total alphanumeric characters
+	alnum_count = sum(1 for char in text if char.isalnum())
+	if alnum_count < 3:
+		return ""
+
+	return text
+
+
+def _score_temperature(raw_text: str, value: Any) -> float:
+	if not isinstance(value, int):
+		return -1.0
+
+	score = 0.0
+	if 90 <= value <= 160:
+		score += 2.0
+	if 60 <= value <= 199:
+		score += 1.5
+	if len(str(value)) == 3:
+		score += 1.0
+	return score
+
+
 def _score_info_line(raw_text: str, parsed_value: Any) -> float:
+	"""Score info line quality, heavily penalizing non-word noise clusters."""
 	if not isinstance(parsed_value, str) or not parsed_value:
 		return -1.0
 
-	alpha_count = sum(1 for char in parsed_value if char.isalpha())
-	word_count = len([word for word in parsed_value.split(" ") if any(char.isalpha() for char in word)])
-	punct_count = sum(1 for char in parsed_value if not char.isalnum() and char != " ")
-	if alpha_count < 3 or word_count == 0:
+	words = parsed_value.split()
+	if not words:
 		return -1.0
 
-	junk_cluster_penalty = 0.8 if re.search(r"[^A-Za-z0-9\s]{3,}", raw_text) else 0.0
+	plausible_words = [w for w in words if _is_plausible_word(w)]
+	if not plausible_words:
+		return -1.0
+
+	plausible_ratio = len(plausible_words) / float(len(words))
+	if plausible_ratio < 0.60:
+		return -1.0
+
+	alnum_count = sum(1 for char in parsed_value if char.isalnum())
+	if alnum_count < 3:
+		return -1.0
 
 	score = 0.0
-	score += min(3.0, alpha_count * 0.10)
-	score += min(2.0, word_count * 0.70)
-	score += min(1.5, len(parsed_value) * 0.04)
-	score -= min(2.0, punct_count * 0.15)
-	score -= junk_cluster_penalty
+	score += len(plausible_words) * 1.5
+	score += alnum_count * 0.15
+
+	punct_count = sum(1 for char in parsed_value if not char.isalnum() and char != " ")
+	score -= punct_count * 0.5
+
+	if re.search(r"[^A-Za-z0-9\s]{2,}", raw_text):
+		score -= 1.5
+
 	return score
 
 
 def _score_field_candidate(field_name: str, raw_text: str, value: Any) -> float:
+	"""Master scoring router for candidate field OCR values."""
 	if field_name.startswith("dashboard_info_line_"):
 		return _score_info_line(raw_text, value)
 	if field_name == "temperature":
@@ -606,17 +697,55 @@ def _score_field_candidate(field_name: str, raw_text: str, value: Any) -> float:
 	return 0.0
 
 
-def _parse_tesseract_data(tesseract_output: dict[str, Any]) -> str:
+def _parse_tesseract_data(
+	tesseract_output: dict[str, Any],
+	variant_shape: Optional[tuple[int, int]] = None,
+	field_name: str = "",
+) -> str:
+	"""Extract tokens, filtering out noise relative to ROI box boundaries and confidence."""
 	texts = tesseract_output.get("text", []) or []
+	confs = tesseract_output.get("conf", []) or []
+	heights = tesseract_output.get("height", []) or []
+	widths = tesseract_output.get("width", []) or []
 
 	cleaned_tokens: list[str] = []
+	var_h, var_w = variant_shape if variant_shape else (0, 0)
 
-	for token in texts:
+	for i, token in enumerate(texts):
 		if token is None:
 			continue
 		stripped = str(token).strip()
 		if not stripped:
 			continue
+
+		# Confidence gating for info lines
+		if field_name.startswith("dashboard_info_line_") and i < len(confs):
+			try:
+				conf = float(confs[i])
+				if conf >= 0 and conf < 30.0:
+					continue
+			except (ValueError, TypeError):
+				pass
+
+		# Relative Scale Filtering based on ROI crop dimensions
+		if var_h > 0 and field_name.startswith("dashboard_info_line_"):
+			if i < len(heights) and i < len(widths):
+				try:
+					box_h = float(heights[i])
+					box_w = float(widths[i])
+					rel_height = box_h / float(var_h)
+					aspect_ratio = box_w / max(1.0, box_h)
+
+					# Discard tokens shorter than 18% or taller than 82% of crop height
+					if rel_height < 0.18 or rel_height > 0.82:
+						continue
+
+					# Filter out wide, thin artifacts (e.g. divider line fragments)
+					if aspect_ratio > 10.0 and rel_height < 0.25:
+						continue
+				except (ValueError, TypeError):
+					pass
+
 		cleaned_tokens.append(stripped)
 
 	if not cleaned_tokens:
@@ -642,13 +771,12 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 	_require_pytesseract()
 	best_raw = ""
 	best_value: Any = _field_empty_value(field_name)
-	best_score = -1.0
+	best_score = 0.0  # Threshold <= 0.0 leaves empty fields clean
 
 	whitelist_set = None
 	if "tessedit_char_whitelist=" in field.tesseract_config:
 		whitelist_set = set(field.tesseract_config.split("tessedit_char_whitelist=")[1])
 
-	# Enforce pure LSTM Engine Mode (--oem 1) for highest neural net accuracy
 	config = field.tesseract_config
 	if "--oem" not in config:
 		config = f"--oem 1 {config}"
@@ -659,11 +787,12 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 			config=config,
 			output_type=pytesseract.Output.DICT,
 		)
-		raw = _parse_tesseract_data(tesseract_output)
+		raw = _parse_tesseract_data(
+			tesseract_output,
+			variant_shape=variant.shape[:2],
+			field_name=field_name,
+		)
 
-		# The field's own tessedit_char_whitelist is the single source of
-		# truth for what this field can legally contain; apply it uniformly
-		# so every downstream parser only ever sees whitelisted characters.
 		if whitelist_set:
 			raw = "".join(c for c in raw if c in whitelist_set)
 
