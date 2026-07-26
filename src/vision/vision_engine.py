@@ -686,7 +686,7 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 		else:
 			input_img = variant
 
-		paddle_output = ocr_engine.ocr(input_img, cls=False)
+		paddle_output = ocr_engine.ocr(input_img)
 		raw = _parse_paddle_data(
 			paddle_output,
 			variant_shape=variant.shape[:2],
