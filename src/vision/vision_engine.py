@@ -13,16 +13,16 @@ from typing import Any, Optional
 import time
 import os
 
-# Prevent C++ segfaults, signal clashes, and thread race conditions on ARM64 / Pi 5
-os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"  # Skip network check delay
-os.environ["PADDLE_DISABLE_SIGNAL_HANDLER"] = "1"
-os.environ["FLAGS_allocator_strategy"] = "auto_growth"
+# 1. Disable online model hoster checks and auto-downloads
+os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
+
+# 2. Prevent C++ memory/thread crashes on ARM64
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["FLAGS_allocator_strategy"] = "auto_growth"
 os.environ["FLAGS_use_mkldnn"] = "0"
 os.environ["FLAGS_enable_pir_api"] = "0"
-os.environ["FLAGS_use_onnx"] = "1"
 
 import numpy as np
 import cv2
@@ -71,11 +71,18 @@ def _get_paddle_ocr() -> Any:
     import logging
     logging.getLogger("ppocr").setLevel(logging.ERROR)
 
+    # Local paths to the downloaded official models on your Pi
+    base_model_dir = Path.home() / ".paddlex" / "official_models"
+    det_path = str(base_model_dir / "PP-OCRv6_medium_det")
+    rec_path = str(base_model_dir / "PP-OCRv6_medium_rec")
+
     _PADDLE_OCR = PaddleOCR(
+        text_detection_model_dir=det_path,
+        text_recognition_model_dir=rec_path,
         use_doc_orientation_classify=False,
         use_doc_unwarping=False,
         use_textline_orientation=False,
-        enable_mkldnn=False,  # Bypasses oneDNN/PIR CPU routines
+        enable_mkldnn=False,
         lang="en",
     )
     return _PADDLE_OCR
