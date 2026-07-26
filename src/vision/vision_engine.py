@@ -279,9 +279,7 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 
 	denoised_roi = _denoise_roi_grayscale(roi)
 
-	# --- PRE-THRESHOLD CONTRAST GUARD ---
-	# Blank lines have near-zero intensity variance (std < 8.0).
-	# Exit early to prevent thresholding from turning background noise into phantom letters.
+	# Blank line guard
 	if np.std(denoised_roi) < 8.0:
 		return []
 
@@ -290,55 +288,36 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 	if h < target_height:
 		scale = target_height / float(h)
 		new_w = max(1, int(w * scale))
-		denoised_roi = cv2.resize(denoised_roi, (new_w, target_height), interpolation=cv2.INTER_LINEAR)
+		# Use INTER_CUBIC instead of INTER_LINEAR to preserve sharp edge contrast
+		denoised_roi = cv2.resize(denoised_roi, (new_w, target_height), interpolation=cv2.INTER_CUBIC)
+
+	# --- UNSHARP MASK FILTER ---
+	# Boost edge sharpness to preserve character gaps and thin stroke arms (e.g., top bar of 'F')
+	gaussian_blur = cv2.GaussianBlur(denoised_roi, (0, 0), sigmaX=2.0)
+	denoised_roi = cv2.addWeighted(denoised_roi, 1.6, gaussian_blur, -0.6, 0)
 
 	variants: list[np.ndarray] = []
 
 	def _finalize(bin_img: np.ndarray) -> Optional[np.ndarray]:
 		bin_img = _ensure_black_text_white_bg(bin_img)
-
-		# Erase blobs too short to be real glyph strokes (sensor speckle).
 		bin_img = _filter_connected_components(bin_img)
-
-		# Skip variants that hold no real text after cleaning.
 		if _is_roi_blank(bin_img):
 			return None
-
-		# Add a white quiet-zone margin around characters.
 		return cv2.copyMakeBorder(bin_img, 25, 25, 25, 25, cv2.BORDER_CONSTANT, value=255)
 
-	# --- Variant 1: Denoised Otsu ---
+	# Variant 1: Denoised Otsu
 	_, v1 = cv2.threshold(denoised_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-	finalized = _finalize(v1)
-	if finalized is not None:
-		variants.append(finalized)
+	f1 = _finalize(v1)
+	if f1 is not None:
+		variants.append(f1)
 
-	# --- Variant 2: CLAHE + Otsu ---
+	# Variant 2: CLAHE + Otsu
 	clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
 	enhanced = clahe.apply(denoised_roi)
 	_, v2 = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-	finalized = _finalize(v2)
-	if finalized is not None:
-		variants.append(finalized)
-
-	# --- Variant 3: Adaptive Gaussian Thresholding ---
-	curr_h, curr_w = denoised_roi.shape[:2]
-	max_block = max(3, (min(curr_h, curr_w) // 2) * 2 - 1)
-	block_size = min(41, max_block)
-	if block_size % 2 == 0:
-		block_size -= 1
-
-	v3 = cv2.adaptiveThreshold(
-		denoised_roi,
-		255,
-		cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-		cv2.THRESH_BINARY,
-		blockSize=max(3, block_size),
-		C=4,
-	)
-	finalized = _finalize(v3)
-	if finalized is not None:
-		variants.append(finalized)
+	f2 = _finalize(v2)
+	if f2 is not None:
+		variants.append(f2)
 
 	return variants
 
