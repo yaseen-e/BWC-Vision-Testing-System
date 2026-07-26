@@ -711,34 +711,21 @@ def _parse_field_value(field_name: str, raw_text: str) -> Any:
 
 
 def _parse_mode(raw_text: str) -> str:
-	"""Parse mode string cleanly, removing 'MODE:' regardless of position."""
-	if not raw_text:
-		return "UNKNOWN"
+    """Parse mode string by dropping the first token (i.e., 'MODE:') and returning the rest in order."""
+    if not raw_text:
+        return "UNKNOWN"
 
-	cleaned = raw_text.strip().upper()
+    # Split by whitespace into tokens
+    tokens = raw_text.strip().split()
 
-	# Remove MODE / MD / MOD word and labels anywhere in the text
-	cleaned = re.sub(r"\b(MODE|MD|MOD)\b\s*[:;\-\.]*", "", cleaned, flags=re.IGNORECASE).strip()
-	cleaned = re.sub(r"[^A-Z\s]", "", cleaned).strip()
-	cleaned = re.sub(r"\s+", " ", cleaned)
+    # Need at least two tokens (e.g., "MODE:" and "HYBRID") to drop the first and keep a mode
+    if len(tokens) <= 1:
+        return "UNKNOWN"
 
-	# Match word set against known water heater modes to handle remaining word permutations
-	known_modes = [
-		"HYBRID PLUS",
-		"HYBRID",
-		"ELECTRIC",
-		"HEAT PUMP",
-		"VACATION",
-	]
-	detected_words = set(cleaned.split())
-	for known in known_modes:
-		if set(known.split()) == detected_words:
-			return known
+    # Discard the first token, rejoin remaining tokens in original order, and normalize
+    result = " ".join(tokens[1:]).strip().upper()
 
-	if not cleaned or len(cleaned) < 2:
-		return "UNKNOWN"
-
-	return cleaned
+    return result if result else "UNKNOWN"
 
 
 def _parse_temperature(raw_text: str) -> Optional[int]:

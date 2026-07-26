@@ -193,14 +193,14 @@ def _matches_route_prefix(route: tuple[str, ...], stream: tuple[str, ...]) -> bo
 # =============================================================================
 
 # Common Whitelist String Constants
-DASHBOARD_INFO_WHITELIST = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789. !?:-/()"
+DASHBOARD_INFO_WHITELIST = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789. "
 
 # --- Main Dashboard ---
 MODE_FIELD = OCRField(
 	name="mode",
 	ideal=ROIBox(top=0.03, bottom=0.14, left=0.25, right=0.75),
 	fallback=ROIBox(top=0.00, bottom=0.18, left=0.18, right=0.82),
-	whitelisted_chars="ABCDEFGHIJKLMNOPQRSTUVWXYZ ",
+	whitelisted_chars="ABCDEFGHIJKLMNOPQRSTUVWXYZ: ",
 )
 
 TEMPERATURE_FIELD = OCRField(
