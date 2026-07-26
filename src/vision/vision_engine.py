@@ -303,11 +303,18 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 	def _finalize(bin_img: np.ndarray) -> Optional[np.ndarray]:
 		bin_img = _ensure_black_text_white_bg(bin_img)
 
+		# --- STEM & LOOP SEPARATION ---
+		# Convert to foreground mask (text = 255) to sever thin horizontal 
+		# pixel bridges between stems (e.g., 'll' -> 'd' or 'e' -> 'o').
+		fg_mask = cv2.bitwise_not(bin_img)
+		sep_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 1))
+		fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, sep_kernel)
+		bin_img = cv2.bitwise_not(fg_mask)
+
 		# Erase blobs too short to be real glyph strokes (sensor speckle).
 		bin_img = _filter_connected_components(bin_img)
 
-		# Skip variants that hold no real text after cleaning, rather than
-		# handing Tesseract a blank/noise-only crop to hallucinate on.
+		# Skip variants that hold no real text after cleaning.
 		if _is_roi_blank(bin_img):
 			return None
 
