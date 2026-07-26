@@ -13,13 +13,19 @@ from typing import Any, Optional
 import time
 import os
 
-# Prevent Paddle C++ thread race conditions and memory allocator crashes on ARM64
+# Prevent C++ segfaults, signal clashes, and thread race conditions on ARM64 / Pi 5
+os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"  # Skip network check delay
+os.environ["PADDLE_DISABLE_SIGNAL_HANDLER"] = "1"
+os.environ["FLAGS_allocator_strategy"] = "auto_growth"
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["FLAGS_allocator_strategy"] = "auto_growth"
 os.environ["FLAGS_use_mkldnn"] = "0"
 os.environ["FLAGS_enable_pir_api"] = "0"
+os.environ["FLAGS_use_onnx"] = "1"
+
+import numpy as np
+import cv2
 
 import numpy as np
 import cv2
