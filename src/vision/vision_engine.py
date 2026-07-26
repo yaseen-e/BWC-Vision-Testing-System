@@ -17,7 +17,9 @@ import os
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["FLAGS_allocator_strategy"] = "naive"
+os.environ["FLAGS_allocator_strategy"] = "auto_growth"
+os.environ["FLAGS_use_mkldnn"] = "0"
+os.environ["FLAGS_enable_pir_api"] = "0"
 
 import numpy as np
 import cv2
