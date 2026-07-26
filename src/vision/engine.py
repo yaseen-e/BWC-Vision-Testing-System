@@ -85,7 +85,7 @@ def read_display(
 	fields_result: dict[str, dict[str, Any]] = {}
 	for field in menu_fields:
 		if field.name in ("wifi_icon", "schedule_icon") or field.name.endswith("_icon"):
-			# Pass clean, unpadded crop directly to the classifier
+			# Pass clean crop directly to the icon classifier
 			unpadded_roi = _crop_roi(prepared_gray, field)
 			raw, val = _classify_icon_field(unpadded_roi, field.name)
 		else:
@@ -414,7 +414,7 @@ def _order_points(points: np.ndarray) -> np.ndarray:
 
 
 # =============================================================================
-# FAST IMAGE PREPARATION
+# HIGH-PRECISION IMAGE PREPARATION
 # =============================================================================
 
 def _prepare_ocr_grayscale(warped: np.ndarray) -> np.ndarray:
@@ -425,116 +425,52 @@ def _prepare_ocr_grayscale(warped: np.ndarray) -> np.ndarray:
 	return warped
 
 
-def _denoise_roi_grayscale(roi: np.ndarray) -> np.ndarray:
-	"""Fast Gaussian blur noise reduction (replaces slow bilateral filtering)."""
-	return cv2.GaussianBlur(roi, (3, 3), 0)
-
-
 def _crop_roi(prepared: np.ndarray, field: Any) -> np.ndarray:
-	"""Crop field ROI with 2% inset to prevent outer box borders from entering OCR."""
+	"""Crop field ROI without negative inset trimming."""
 	if field is not None and hasattr(field, "ideal"):
-		roi = field.ideal.crop(prepared)
-	else:
-		roi = prepared
-
-	if roi is None or roi.size == 0:
-		return roi
-
-	h, w = roi.shape[:2]
-	inset_y = max(1, int(h * 0.02))
-	inset_x = max(1, int(w * 0.02))
-
-	if h > 2 * inset_y and w > 2 * inset_x:
-		roi = roi[inset_y : h - inset_y, inset_x : w - inset_x]
-
-	return roi
+		return field.ideal.crop(prepared)
+	return prepared
 
 
 def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np.ndarray]:
-	"""Extract single optimized image variant formatted for RapidOCR standard input."""
+	"""Extract clean, high-resolution grayscale variants formatted for RapidOCR."""
 	_require_cv2()
 	roi = _crop_roi(prepared, field)
 
 	if roi is None or roi.size == 0:
 		return []
 
-	field_name = getattr(field, "name", "")
-
-	# --- GIANT LCD DIGIT HANDLING (TEMPERATURE) ---
-	if field_name == "temperature":
-		return _generate_digit_variants(roi)
-
-	# --- STANDARD TEXT LINES (MODE, TIME, DATE, DASHBOARD INFO) ---
-	denoised = _denoise_roi_grayscale(roi)
-	h, w = denoised.shape[:2]
-
-	# Target 48px height (optimal standard height for DBNet/CRNN inference models)
-	target_h = 48
-	if h > 0 and h != target_h:
-		scale = target_h / float(h)
-		new_w = max(10, int(w * scale))
-		denoised = cv2.resize(
-			denoised, (new_w, target_h),
-			interpolation=cv2.INTER_LINEAR if h > target_h else cv2.INTER_CUBIC
-		)
-
-	# Contrast enhancement
-	clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-	enhanced = clahe.apply(denoised)
-
-	# Normalize polarity so text is dark on light background
-	is_bright_on_dark = float(np.mean(enhanced)) < 127
-	if is_bright_on_dark:
-		primary = cv2.bitwise_not(enhanced)
-	else:
-		primary = enhanced
-
-	# Single padded variant with BORDER_REPLICATE to avoid sharp bounding box edge steps
-	v1 = cv2.copyMakeBorder(primary, 15, 15, 15, 15, cv2.BORDER_REPLICATE)
-	return [v1]
-
-
-def _generate_digit_variants(roi_gray: np.ndarray) -> list[np.ndarray]:
-	"""Locate digit contours and scale to standard height (48px) in a single fast pass."""
-	_require_cv2()
-
-	_, thresh = cv2.threshold(roi_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-	contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-	digit_boxes = []
-	roi_h = roi_gray.shape[0]
-	min_digit_height = int(roi_h * 0.25)
-
-	for contour in contours:
-		x, y, w, h = cv2.boundingRect(contour)
-		if h >= min_digit_height and w >= 5:
-			digit_boxes.append((x, y, w, h))
-
-	if digit_boxes:
-		min_x = min(box[0] for box in digit_boxes)
-		min_y = min(box[1] for box in digit_boxes)
-		max_x = max(box[0] + box[2] for box in digit_boxes)
-		max_y = max(box[1] + box[3] for box in digit_boxes)
-		digit_crop = roi_gray[min_y:max_y, min_x:max_x]
-	else:
-		digit_crop = roi_gray
-
-	ch, cw = digit_crop.shape[:2]
-	if ch == 0 or cw == 0:
+	h, w = roi.shape[:2]
+	if h == 0 or w == 0:
 		return []
 
-	target_h = 48
-	scale = target_h / float(ch)
-	target_w = max(10, int(cw * scale))
-	scaled_digits = cv2.resize(digit_crop, (target_w, target_h), interpolation=cv2.INTER_AREA)
+	# Normalize full intensity range [0, 255]
+	norm = cv2.normalize(roi, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
 
-	# Ensure black digits on white background
-	is_bright_on_dark = float(np.mean(scaled_digits)) < 127
-	if is_bright_on_dark:
-		scaled_digits = cv2.bitwise_not(scaled_digits)
+	# Rescale image to optimal OCR height (64px for text, 96px for temperature digits)
+	target_h = 96 if (field and field.name == "temperature") else 64
+	scale = target_h / float(h)
+	new_w = max(20, int(w * scale))
+	resized = cv2.resize(norm, (new_w, target_h), interpolation=cv2.INTER_CUBIC)
 
-	v1 = cv2.copyMakeBorder(scaled_digits, 15, 15, 15, 15, cv2.BORDER_CONSTANT, value=255)
-	return [v1]
+	# Add 20px padding to prevent DBNet bounding box edge clipping
+	padded = cv2.copyMakeBorder(resized, 20, 20, 20, 20, cv2.BORDER_REPLICATE)
+
+	# Check border intensity to auto-detect dark background
+	border_pixels = np.concatenate([
+		padded[:10, :].flatten(), padded[-10:, :].flatten(),
+		padded[:, :10].flatten(), padded[:, -10:].flatten()
+	])
+	is_dark_bg = float(np.mean(border_pixels)) < 127
+
+	if is_dark_bg:
+		primary = 255 - padded
+		secondary = padded
+	else:
+		primary = padded
+		secondary = 255 - padded
+
+	return [primary, secondary]
 
 
 # =============================================================================
@@ -553,7 +489,7 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 
 	for variant in variants:
 		rapid_output, _ = ocr_engine(variant)
-		raw, conf = _parse_and_filter_rapidocr_boxes(rapid_output, variant.shape)
+		raw, conf = _parse_and_filter_rapidocr_boxes(rapid_output)
 
 		if not raw:
 			continue
@@ -566,55 +502,48 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 			best_value = value
 			best_score = score
 
-		# Short-circuit early if high-confidence result is already found
-		if best_score > 5.0:
+		if best_score > 4.0:
 			break
 
 	return best_raw, best_value
 
 
 def _parse_and_filter_rapidocr_boxes(
-	rapid_output: Optional[list[Any]], img_shape: tuple[int, ...]
+	rapid_output: Optional[list[Any]]
 ) -> tuple[str, float]:
-	"""Filter RapidOCR output at the Bounding-Box level to reject noise speckles and border fragments."""
+	"""Filter RapidOCR output and sort boxes spatially top-to-bottom, left-to-right."""
 	if not rapid_output:
 		return "", 0.0
 
-	img_h, img_w = img_shape[:2]
-	img_area = float(img_w * img_h)
-	valid_texts: list[str] = []
-	confidences: list[float] = []
+	items_to_keep: list[dict[str, Any]] = []
 
 	for item in rapid_output:
 		if not item or len(item) < 3:
 			continue
 
 		box, text, conf = item[0], str(item[1]).strip(), float(item[2])
-		if not text or conf < 0.35:
+		if not text or conf < 0.25:
 			continue
 
 		box_points = np.array(box, dtype=np.float32)
 		min_x, max_x = np.min(box_points[:, 0]), np.max(box_points[:, 0])
 		min_y, max_y = np.min(box_points[:, 1]), np.max(box_points[:, 1])
 
-		box_w = max_x - min_x
-		box_h = max_y - min_y
-		box_area = box_w * box_h
+		items_to_keep.append({
+			"text": text,
+			"conf": conf,
+			"min_x": min_x,
+			"min_y": min_y,
+		})
 
-		if box_area < (img_area * 0.005) or box_h < 8:
-			continue
-
-		if len(text) == 1 and not text.isalnum():
-			continue
-
-		# Clean leading stray punctuation from individual box predictions
-		cleaned_box_text = re.sub(r"^[^\w\s]+", "", text).strip()
-		if cleaned_box_text:
-			valid_texts.append(cleaned_box_text)
-			confidences.append(conf)
-
-	if not valid_texts:
+	if not items_to_keep:
 		return "", 0.0
+
+	# Sort spatially by y (top to bottom), then x (left to right)
+	items_to_keep.sort(key=lambda k: (k["min_y"], k["min_x"]))
+
+	valid_texts = [k["text"] for k in items_to_keep]
+	confidences = [k["conf"] for k in items_to_keep]
 
 	return " ".join(valid_texts), float(np.mean(confidences))
 
@@ -637,10 +566,8 @@ def _score_field_candidate(field_name: str, raw_text: str, value: Any, conf: flo
 		else:
 			score += 1.0
 	elif field_name.startswith("dashboard_info_line"):
-		if raw_text and raw_text[0] in ".,;:-_~'\"":
-			score -= 0.5
 		if isinstance(value, str) and len(value) >= 3:
-			score += 2.0
+			score += 3.0
 
 	return score
 
@@ -662,7 +589,7 @@ def _parse_field_value(field_name: str, raw_text: str) -> Any:
 
 
 def _parse_mode(raw_text: str) -> str:
-	"""Parse mode string cleanly, filtering out prefix labels and stray punctuation."""
+	"""Parse mode string cleanly, filtering out prefix labels."""
 	if not raw_text:
 		return "UNKNOWN"
 
@@ -678,7 +605,7 @@ def _parse_mode(raw_text: str) -> str:
 
 
 def _parse_temperature(raw_text: str) -> Optional[int]:
-	"""Extract integer temperature value from raw OCR string using substitution mappings."""
+	"""Extract integer temperature value from raw OCR string."""
 	if not raw_text:
 		return None
 
@@ -693,12 +620,13 @@ def _parse_temperature(raw_text: str) -> Optional[int]:
 	for char, digit in substitutions.items():
 		cleaned = cleaned.replace(char, digit)
 
-	digits = re.sub(r"[^\d]", "", cleaned)
-	if not digits:
-		return None
+	matches = re.findall(r"\d+", cleaned)
+	for match in matches:
+		val = int(match)
+		if 50 <= val <= 199:
+			return val
 
-	val = int(digits)
-	return val if 50 <= val <= 199 else None
+	return None
 
 
 def _parse_time(raw_text: str) -> str:
@@ -711,11 +639,11 @@ def _parse_time(raw_text: str) -> str:
 
 
 def _parse_dashboard_info(raw_text: str) -> str:
-	"""Clean dashboard line strings by removing phantom border noise and correcting LCD misreads."""
+	"""Clean dashboard line strings by removing phantom border noise."""
 	if not raw_text:
 		return ""
 
-	cleaned = re.sub(r"^[^\w\s]+", "", raw_text.strip()).strip()
+	cleaned = re.sub(r"^[^\w\s\.\,\!\?]+", "", raw_text.strip()).strip()
 
 	word_corrections = {
 		r"\bFon\b": "Fan",
