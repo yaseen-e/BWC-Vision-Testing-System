@@ -504,25 +504,6 @@ def _parse_temperature(raw_text: str) -> Optional[int]:
 	return value
 
 
-def _parse_info_line(raw_text: str) -> str:
-	# The field's tessedit_char_whitelist has already restricted raw_text to
-	# legal characters; just collapse whitespace.
-	text = _clean_text(raw_text)
-
-	if not text:
-		return ""
-
-	alpha_count = sum(1 for char in text if char.isalpha())
-	alnum_count = sum(1 for char in text if char.isalnum())
-	if alpha_count < 3 or alnum_count <= 0:
-		return ""
-
-	if (alpha_count / max(1, len(text))) < 0.35:
-		return ""
-
-	return text
-
-
 def _field_empty_value(field_name: str) -> Any:
 	if field_name == "mode":
 		return "UNKNOWN"
@@ -612,8 +593,39 @@ def _is_plausible_word(word: str) -> bool:
 	return True
 
 
+import difflib
+
+# Common English vocabulary pool (or pass standard dictionary words)
+COMMON_WORDS = {
+	"call", "for", "heat", "setpoint", "satisfied", "electric", "heat", "pump",
+	"hybrid", "vacation", "disabled", "enabled", "running", "status", "water",
+	"heater", "system", "normal", "error", "warning", "mode", "standby"
+}
+
+def _autocorrect_word(word: str) -> str:
+	"""Auto-correct 1-character OCR substitutions against general English words."""
+	clean_alpha = re.sub(r"[^A-Za-z]", "", word)
+	if not clean_alpha or len(clean_alpha) < 3:
+		return word
+
+	# Find close matches with high similarity (> 80%)
+	matches = difflib.get_close_matches(clean_alpha.lower(), COMMON_WORDS, n=1, cutoff=0.78)
+	if matches:
+		corrected = matches[0]
+		# Preserve original capitalization structure
+		if clean_alpha.istitle():
+			corrected = corrected.title()
+		elif clean_alpha.isupper():
+			corrected = corrected.upper()
+		
+		# Replace only the alpha part, keeping attached punctuation
+		return word.replace(clean_alpha, corrected)
+
+	return word
+
+
 def _parse_info_line(raw_text: str) -> str:
-	"""Parse info lines by evaluating word structure plausibility and character counts."""
+	"""Parse info line and self-heal 1-character OCR character bleeds."""
 	text = _clean_text(raw_text).strip(" .:-_")
 	if not text:
 		return ""
@@ -622,18 +634,16 @@ def _parse_info_line(raw_text: str) -> str:
 	if not words:
 		return ""
 
-	plausible_words = [w for w in words if _is_plausible_word(w)]
+	# Auto-correct OCR character bleeds word-by-word
+	corrected_words = [_autocorrect_word(w) for w in words]
+	
+	plausible_words = [w for w in corrected_words if _is_plausible_word(w)]
 
-	# Require at least 60% of words on the line to pass structural sanity checks
-	if len(plausible_words) / float(len(words)) < 0.60:
+	# At least 50% of tokens must be valid words
+	if len(plausible_words) / float(len(words)) < 0.50:
 		return ""
 
-	# Must contain at least 3 total alphanumeric characters
-	alnum_count = sum(1 for char in text if char.isalnum())
-	if alnum_count < 3:
-		return ""
-
-	return text
+	return " ".join(corrected_words)
 
 
 def _score_temperature(raw_text: str, value: Any) -> float:
