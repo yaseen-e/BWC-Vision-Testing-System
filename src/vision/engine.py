@@ -425,7 +425,7 @@ def _denoise_roi_grayscale(roi: np.ndarray) -> np.ndarray:
 
 
 def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np.ndarray]:
-	"""Extract denoised and contrast-enhanced image variants optimal for neural OCR."""
+	"""Extract denoised, normalized, and scale-adjusted variants optimal for RapidOCR."""
 	_require_cv2()
 
 	if field is not None and hasattr(field, "ideal"):
@@ -439,8 +439,15 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 	if len(roi.shape) == 3:
 		roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
 
+	field_name = getattr(field, "name", "")
 	denoised_roi = _denoise_roi_grayscale(roi)
 
+	# --- GIANT DIGIT HANDLING (e.g., TEMPERATURE) ---
+	# Scale giant LCD numbers down to standard 48px line height so DBNet detects them.
+	if field_name == "temperature":
+		return _generate_digit_variants(denoised_roi)
+
+	# --- STANDARD TEXT LINES (MODE, TIME, DATE) ---
 	h, w = denoised_roi.shape[:2]
 	target_height = 180
 	if h < target_height:
@@ -450,15 +457,66 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 
 	variants: list[np.ndarray] = []
 
-	# --- Variant 1: Denoised Grayscale (Padding added) ---
 	v1 = cv2.copyMakeBorder(denoised_roi, 25, 25, 25, 25, cv2.BORDER_CONSTANT, value=255)
 	variants.append(v1)
 
-	# --- Variant 2: CLAHE Contrast Enhanced ---
-	clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-	enhanced = clahe.apply(denoised_roi)
-	v2 = cv2.copyMakeBorder(enhanced, 25, 25, 25, 25, cv2.BORDER_CONSTANT, value=255)
+	v2 = cv2.copyMakeBorder(cv2.bitwise_not(denoised_roi), 25, 25, 25, 25, cv2.BORDER_CONSTANT, value=255)
 	variants.append(v2)
+
+	return variants
+
+
+def _generate_digit_variants(roi_gray: np.ndarray) -> list[np.ndarray]:
+	"""
+	Locate digit contours, crop tightly, and scale down to standard OCR height (48px).
+	Guarantees DBNet detection on giant LCD numbers.
+	"""
+	_require_cv2()
+	variants: list[np.ndarray] = []
+
+	# Isolate bright white digits on dark background
+	_, thresh = cv2.threshold(roi_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+	contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+	digit_boxes = []
+	roi_h = roi_gray.shape[0]
+	min_digit_height = int(roi_h * 0.25)
+
+	for contour in contours:
+		x, y, w, h = cv2.boundingRect(contour)
+		if h >= min_digit_height and w >= 5:
+			digit_boxes.append((x, y, w, h))
+
+	if digit_boxes:
+		min_x = min(box[0] for box in digit_boxes)
+		min_y = min(box[1] for box in digit_boxes)
+		max_x = max(box[0] + box[2] for box in digit_boxes)
+		max_y = max(box[1] + box[3] for box in digit_boxes)
+		digit_crop = roi_gray[min_y:max_y, min_x:max_x]
+	else:
+		digit_crop = roi_gray
+
+	# Scale crop to standard 48px OCR height
+	ch, cw = digit_crop.shape[:2]
+	if ch > 0 and cw > 0:
+		target_h = 48
+		scale = target_h / float(ch)
+		target_w = max(10, int(cw * scale))
+		scaled_digits = cv2.resize(digit_crop, (target_w, target_h), interpolation=cv2.INTER_AREA)
+
+		# Variant 1: Inverted Black-on-White with 20px padding
+		inverted = cv2.bitwise_not(scaled_digits)
+		v1 = cv2.copyMakeBorder(inverted, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=255)
+		variants.append(v1)
+
+		# Variant 2: Binary Inverted
+		_, bin_inv = cv2.threshold(scaled_digits, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+		v2 = cv2.copyMakeBorder(bin_inv, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=255)
+		variants.append(v2)
+
+		# Variant 3: Standard White-on-Black
+		v3 = cv2.copyMakeBorder(scaled_digits, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=0)
+		variants.append(v3)
 
 	return variants
 
