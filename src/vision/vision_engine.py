@@ -11,7 +11,6 @@ import re
 from pathlib import Path
 from typing import Any, Optional
 import time
-import os
 
 import numpy as np
 import cv2
@@ -57,8 +56,6 @@ def _get_rapid_ocr() -> Any:
 		return _RAPID_OCR
 
 	_require_rapidocr()
-
-	# Initializes ONNX-backed PaddleOCR models completely offline without C++ crashes
 	_RAPID_OCR = RapidOCR()
 	return _RAPID_OCR
 
@@ -208,47 +205,14 @@ def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
 	return cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
 
 
-def _ensure_black_text_white_bg(binary_roi: np.ndarray) -> np.ndarray:
-	"""Ensure binary image is black text (0) on white background (255)."""
-	if np.mean(binary_roi) < 127:
-		return cv2.bitwise_not(binary_roi)
-	return binary_roi
-
-
 def _denoise_roi_grayscale(roi: np.ndarray) -> np.ndarray:
 	"""Scrub sensor speckle/static at native resolution, before any upscaling."""
 	despeckled = cv2.medianBlur(roi, 3)
 	return cv2.bilateralFilter(despeckled, d=5, sigmaColor=60, sigmaSpace=60)
 
 
-def _filter_connected_components(bin_img: np.ndarray, min_height_ratio: float = 0.35, min_area_px: int = 6) -> np.ndarray:
-	"""Keep only connected components tall enough to plausibly be text glyphs."""
-	fg_mask = cv2.bitwise_not(bin_img)
-	num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(fg_mask, connectivity=8)
-
-	roi_height = bin_img.shape[0]
-	min_height_px = max(3, int(roi_height * min_height_ratio))
-
-	cleaned_fg = np.zeros_like(fg_mask)
-	for i in range(1, num_labels):
-		area = stats[i, cv2.CC_STAT_AREA]
-		height = stats[i, cv2.CC_STAT_HEIGHT]
-		if area < min_area_px or height < min_height_px:
-			continue
-		cleaned_fg[labels == i] = 255
-
-	return cv2.bitwise_not(cleaned_fg)
-
-
-def _is_roi_blank(bin_img: np.ndarray, min_text_ratio: float = 0.008) -> bool:
-	"""Returns True if foreground text pixels account for less than min_text_ratio of total crop area."""
-	black_pixels = np.count_nonzero(bin_img == 0)
-	total_pixels = bin_img.size
-	return (black_pixels / float(total_pixels)) < min_text_ratio
-
-
 def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np.ndarray]:
-	"""Extract denoised, upscaled, and enhanced variants optimal for OCR."""
+	"""Extract denoised and contrast-enhanced image variants optimal for neural OCR."""
 	_require_cv2()
 
 	if field is not None and hasattr(field, "ideal"):
@@ -282,14 +246,6 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 	enhanced = clahe.apply(denoised_roi)
 	v2 = cv2.copyMakeBorder(enhanced, 25, 25, 25, 25, cv2.BORDER_CONSTANT, value=255)
 	variants.append(v2)
-
-	# --- Variant 3: Otsu Binarization (Fallback for strict high contrast) ---
-	_, bin_img = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-	bin_img = _ensure_black_text_white_bg(bin_img)
-	bin_img = _filter_connected_components(bin_img)
-	if not _is_roi_blank(bin_img):
-		v3 = cv2.copyMakeBorder(bin_img, 25, 25, 25, 25, cv2.BORDER_CONSTANT, value=255)
-		variants.append(v3)
 
 	return variants
 
@@ -419,7 +375,7 @@ def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, st
 
 
 def _clean_text(raw_text: str) -> str:
-	"""Collapse OCR whitespace into a stable single-space form."""
+	"""Collapse whitespace into clean single-spaced text."""
 	return re.sub(r"\s+", " ", raw_text).strip()
 
 
@@ -432,85 +388,20 @@ def _parse_mode(raw_text: str) -> str:
 
 
 def _parse_temperature(raw_text: str) -> Optional[int]:
-	if not raw_text or not raw_text.isdigit():
+	digits = re.sub(r"[^\d]", "", raw_text)
+	if not digits:
 		return None
-
-	value = int(raw_text)
-	if value <= 0:
-		return None
-
-	return value
+	val = int(digits)
+	return val if 60 <= val <= 199 else None
 
 
 def _parse_time(raw_text: str) -> str:
 	text = raw_text.upper().strip()
-
 	if "A" in text:
 		text = text.split("A")[0] + "AM"
 	elif "P" in text:
 		text = text.split("P")[0] + "PM"
-
 	return _clean_text(text)
-
-
-def _is_plausible_word(word: str) -> bool:
-	"""Check if a token has plausible word structure."""
-	clean_num = re.sub(r"[^0-9]", "", word)
-	clean_alpha = re.sub(r"[^A-Za-z]", "", word)
-
-	if clean_num and not clean_alpha:
-		return True
-
-	if not clean_alpha:
-		return False
-
-	length = len(clean_alpha)
-	vowels = sum(1 for c in clean_alpha.lower() if c in "aeiouy")
-
-	if length == 1:
-		return clean_alpha.upper() in {"A", "I"}
-
-	if length == 2:
-		return vowels >= 1 or clean_alpha.upper() in {
-			"ON", "NO", "GO", "TO", "IN", "IT", "IS", "AT", "BY", "HE",
-			"ME", "WE", "UP", "OR", "IF", "DO", "SO", "AM", "PM", "ID", "OK",
-		}
-
-	vowel_ratio = vowels / float(length)
-	if vowels == 0:
-		return False
-	if vowel_ratio > 0.85 and length >= 3:
-		return False
-
-	if re.search(r"(.)\1\1", clean_alpha.lower()):
-		return False
-
-	return True
-
-
-def _parse_info_line(raw_text: str) -> str:
-	"""Parse info lines by evaluating word structure plausibility and character counts."""
-	text = _clean_text(raw_text).strip(" .:-_")
-	if not text:
-		return ""
-
-	text = re.sub(r"\bOg\b", "On", text)
-	text = re.sub(r"\b0g\b", "On", text)
-
-	words = text.split()
-	if not words:
-		return ""
-
-	plausible_words = [w for w in words if _is_plausible_word(w)]
-
-	if len(plausible_words) / float(len(words)) < 0.60:
-		return ""
-
-	alnum_count = sum(1 for char in text if char.isalnum())
-	if alnum_count < 3:
-		return ""
-
-	return text
 
 
 def _field_empty_value(field_name: str) -> Any:
@@ -526,131 +417,58 @@ def _parse_field_value(field_name: str, raw_text: str) -> Any:
 		return _parse_mode(raw_text)
 	if field_name == "temperature":
 		return _parse_temperature(raw_text)
-	if field_name.startswith("dashboard_info_line_"):
-		return _parse_info_line(raw_text)
 	if field_name == "time_field":
 		return _parse_time(raw_text)
 	return _clean_text(raw_text)
 
 
-def _score_temperature(raw_text: str, value: Any) -> float:
-	if not isinstance(value, int):
+def _score_field_candidate(field_name: str, raw_text: str, value: Any, conf: float) -> float:
+	"""Score candidate value based on validity and RapidOCR model confidence."""
+	if value is None or (isinstance(value, str) and not value):
 		return -1.0
 
-	score = 0.0
-	if 90 <= value <= 160:
-		score += 2.0
-	if 60 <= value <= 199:
-		score += 1.5
-	if len(str(value)) == 3:
-		score += 1.0
-	return score
+	score = conf * 2.0  # Base score from neural model confidence
 
-
-def _score_info_line(raw_text: str, parsed_value: Any) -> float:
-	"""Score info line quality, heavily penalizing non-word noise clusters."""
-	if not isinstance(parsed_value, str) or not parsed_value:
-		return -1.0
-
-	words = parsed_value.split()
-	if not words:
-		return -1.0
-
-	plausible_words = [w for w in words if _is_plausible_word(w)]
-	if not plausible_words:
-		return -1.0
-
-	plausible_ratio = len(plausible_words) / float(len(words))
-	if plausible_ratio < 0.60:
-		return -1.0
-
-	alnum_count = sum(1 for char in parsed_value if char.isalnum())
-	if alnum_count < 3:
-		return -1.0
-
-	score = 0.0
-	score += len(plausible_words) * 1.5
-	score += alnum_count * 0.15
-
-	punct_count = sum(1 for char in parsed_value if not char.isalnum() and char != " ")
-	score -= punct_count * 0.5
-
-	if re.search(r"[^A-Za-z0-9\s]{2,}", raw_text):
-		score -= 1.5
+	if field_name == "temperature" and isinstance(value, int):
+		if 90 <= value <= 160:
+			score += 3.0
+		else:
+			score += 1.0
+	elif isinstance(value, str):
+		score += min(len(value) * 0.2, 2.0)
 
 	return score
 
 
-def _score_field_candidate(field_name: str, raw_text: str, value: Any) -> float:
-	"""Master scoring router for candidate field OCR values."""
-	if field_name.startswith("dashboard_info_line_"):
-		return _score_info_line(raw_text, value)
-	if field_name == "temperature":
-		return _score_temperature(raw_text, value)
-	if isinstance(value, str):
-		return float(len(value))
-	if value is None:
-		return -1.0
-	return 0.0
-
-
-def _parse_rapidocr_data(
-	rapid_output: Optional[list[Any]],
-	variant_shape: Optional[tuple[int, int]] = None,
-	field_name: str = "",
-) -> str:
-	"""Extract tokens from RapidOCR output structure, filtering noise by confidence and geometric bounds."""
+def _parse_rapidocr_data(rapid_output: Optional[list[Any]]) -> tuple[str, float]:
+	"""Extract text and average confidence score from RapidOCR result array."""
 	if not rapid_output:
-		return ""
+		return "", 0.0
 
 	cleaned_tokens: list[str] = []
-	var_h, var_w = variant_shape if variant_shape else (0, 0)
+	confidences: list[float] = []
 
 	for line in rapid_output:
 		if not line or len(line) < 3:
 			continue
 
-		box_points, text, conf = line[0], line[1], float(line[2])
+		text, conf = line[1], float(line[2])
 		stripped = str(text).strip()
-		if not stripped:
+		if not stripped or conf < 0.25:
 			continue
 
-		# Confidence gating for info lines
-		if field_name.startswith("dashboard_info_line_"):
-			if conf < 0.30:
-				continue
-
-		# Relative scale filtering based on crop dimensions
-		if var_h > 0 and field_name.startswith("dashboard_info_line_"):
-			try:
-				box_np = np.array(box_points, dtype="float32")
-				min_y, max_y = np.min(box_np[:, 1]), np.max(box_np[:, 1])
-				min_x, max_x = np.min(box_np[:, 0]), np.max(box_np[:, 0])
-				box_h = max_y - min_y
-				box_w = max_x - min_x
-
-				rel_height = box_h / float(var_h)
-				aspect_ratio = box_w / max(1.0, box_h)
-
-				if rel_height < 0.10 or rel_height > 0.85:
-					continue
-
-				if aspect_ratio > 10.0 and rel_height < 0.25:
-					continue
-			except Exception:
-				pass
-
 		cleaned_tokens.append(stripped)
+		confidences.append(conf)
 
 	if not cleaned_tokens:
-		return ""
+		return "", 0.0
 
-	raw_text = " ".join(cleaned_tokens)
-	return _clean_text(raw_text)
+	avg_conf = float(np.mean(confidences))
+	return _clean_text(" ".join(cleaned_tokens)), avg_conf
 
 
 def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
-	"""Classify or extract text from image variants using RapidOCR (ONNX Runtime)."""
+	"""Classify icons or extract text using RapidOCR."""
 	field_name = field.name
 
 	# --- ICON CLASSIFICATION BYPASS ---
@@ -661,8 +479,7 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 		if len(first_variant.shape) == 3:
 			first_variant = cv2.cvtColor(first_variant, cv2.COLOR_BGR2GRAY)
 		inverted_variant = cv2.bitwise_not(first_variant)
-		icon_key, icon_value = _classify_icon_field(inverted_variant, field_name)
-		return icon_key, icon_value
+		return _classify_icon_field(inverted_variant, field_name)
 
 	# --- RAPIDOCR FOR TEXT/DIGITS ---
 	_require_rapidocr()
@@ -672,24 +489,12 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 	best_value: Any = _field_empty_value(field_name)
 	best_score = -1.0
 
-	whitelist_set = None
-	if hasattr(field, "tesseract_config") and "tessedit_char_whitelist=" in field.tesseract_config:
-		whitelist_set = set(field.tesseract_config.split("tessedit_char_whitelist=")[1])
-
 	for variant in variants:
-		# RapidOCR accepts both Grayscale (2D) and BGR (3D) numpy arrays natively
 		rapid_output, _ = ocr_engine(variant)
-		raw = _parse_rapidocr_data(
-			rapid_output,
-			variant_shape=variant.shape[:2],
-			field_name=field_name,
-		)
-
-		if whitelist_set:
-			raw = "".join(c for c in raw if c in whitelist_set)
+		raw, conf = _parse_rapidocr_data(rapid_output)
 
 		value = _parse_field_value(field_name, raw)
-		score = _score_field_candidate(field_name, raw, value)
+		score = _score_field_candidate(field_name, raw, value, conf)
 
 		if score > best_score:
 			best_raw = raw
