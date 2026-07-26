@@ -4,247 +4,268 @@ Team 14 - Senior Project
 ./src/motion/servo_driver.py - Servo Driver
 Provides button mapping and servo control hooks for water heater UI actuation.
 """
-# TODO: Add error handling and limited number of retries. Program breaks when servo not connected (bad I2C bus) or when servo is stuck. Should not crash whole program, just report error and skip actuation.
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import Enum
-import time
-from typing import Any
 import json
 from pathlib import Path
+import time
+from typing import Any, Optional
 
 try:
-    from adafruit_servokit import ServoKit
-except Exception:  # pragma: no cover - hardware/environment dependent
-    ServoKit = None
+	from adafruit_servokit import ServoKit
+except Exception:  # Hardware/environment dependent
+	ServoKit = None
 
-from dataclasses import dataclass
 
-"""CONSTANTS"""
+# =============================================================================
+# HARDWARE CONFIGURATION & DATA MODELS
+# =============================================================================
+
 BUS_NUM = 1
-
 MIN_PULSE = 500
 MAX_PULSE = 2500
-
-@dataclass
-class ServoConfig:
-    channel: int
-    home_angle: float
-    press_angle: float
-
-class Button(Enum):
-    """One servo per button on the water heater UI."""
-    UP = "UP"
-    LEFT = "LEFT"
-    SELECT = "SELECT"
-    RIGHT = "RIGHT"
-    BACK = "BACK"
-    DOWN = "DOWN"
-    MENU = "MENU"
-
-
-def _build_servo_config(channel: int, home_angle: float, press_delta: float, press_direction: int) -> ServoConfig:
-    return ServoConfig(channel=channel, home_angle=home_angle, press_angle=home_angle + (press_delta * press_direction))
+STROKE_LENGTH = 55.0
 
 CAL_FILE = Path(__file__).resolve().parents[2] / "playground" / "servo_calibration.json"
 
-DEFAULT_HOME_ANGLES = {
-    Button.UP: 50,
-    Button.LEFT: 155,
-    Button.SELECT: 50,
-    Button.RIGHT: 50,
-    Button.BACK: 50,
-    Button.DOWN: 50,
-    Button.MENU: 155,
+
+@dataclass
+class ServoConfig:
+	channel: int
+	home_angle: float
+	press_angle: float
+
+
+class Button(Enum):
+	"""One servo mapping per physical button on the water heater UI."""
+
+	UP = "UP"
+	LEFT = "LEFT"
+	SELECT = "SELECT"
+	RIGHT = "RIGHT"
+	BACK = "BACK"
+	DOWN = "DOWN"
+	MENU = "MENU"
+
+
+DEFAULT_HOME_ANGLES: dict[Button, float] = {
+	Button.UP: 50.0,
+	Button.LEFT: 155.0,
+	Button.SELECT: 50.0,
+	Button.RIGHT: 50.0,
+	Button.BACK: 50.0,
+	Button.DOWN: 50.0,
+	Button.MENU: 155.0,
 }
 
-def load_home_angles() -> dict[Button, float]:
 
-    home_angles = DEFAULT_HOME_ANGLES.copy()
+# =============================================================================
+# MODULE STATE
+# =============================================================================
 
-    if not CAL_FILE.exists():
-        return home_angles
-
-    try:
-        with open(CAL_FILE, "r") as f:
-            data = json.load(f)
-
-        for name, angle in data.items():
-
-            try:
-                button = Button[name]
-                home_angles[button] = angle
-
-            except KeyError:
-                print(f"[WARNING] Unknown button in calibration file: {name}")
-
-    except Exception as exc:
-        print(f"[WARNING] Failed to load servo calibration: {exc}")
-
-    return home_angles
-
-# edit this definition to change stroke length and servo configuration
-def build_servo_config():
-
-    global BUTTON_SERVO_CONFIG
-
-    home_angles = load_home_angles()
-    stroke_length = 55
-
-    BUTTON_SERVO_CONFIG = {
-        Button.UP: _build_servo_config(
-            channel=0,
-            home_angle=home_angles[Button.UP],
-            press_delta=stroke_length,
-            press_direction=1,
-        ),
-        Button.LEFT: _build_servo_config(
-            channel=1,
-            home_angle=home_angles[Button.LEFT],
-            press_delta=stroke_length,
-            press_direction=-1,
-        ),
-        Button.SELECT: _build_servo_config(
-            channel=2,
-            home_angle=home_angles[Button.SELECT],
-            press_delta=stroke_length,
-            press_direction=1,
-        ),
-        Button.RIGHT: _build_servo_config(
-            channel=3,
-            home_angle=home_angles[Button.RIGHT],
-            press_delta=stroke_length,
-            press_direction=1,
-        ),
-        Button.BACK: _build_servo_config(
-            channel=4,
-            home_angle=home_angles[Button.BACK],
-            press_delta=stroke_length,
-            press_direction=1,
-        ),
-        Button.DOWN: _build_servo_config(
-            channel=5,
-            home_angle=home_angles[Button.DOWN],
-            press_delta=stroke_length,
-            press_direction=1,
-        ),
-        Button.MENU: _build_servo_config(
-            channel=6,
-            home_angle=home_angles[Button.MENU],
-            press_delta=stroke_length,
-            press_direction=-1,
-        ),
-    }
-
-"""Module state"""
-_kit = None
+_kit: Any = None
 _servos: dict[int, Any] = {}
-_initialized = False
-_servo_available = True
+_initialized: bool = False
+_servo_available: bool = True
+BUTTON_SERVO_CONFIG: dict[Button, ServoConfig] = {}
 
+
+# =============================================================================
+# CALIBRATION & CONFIGURATION HELPERS
+# =============================================================================
+
+def load_home_angles() -> dict[Button, float]:
+	"""Load custom calibrated home angles or default to defaults."""
+	home_angles = DEFAULT_HOME_ANGLES.copy()
+
+	if not CAL_FILE.exists():
+		return home_angles
+
+	try:
+		with open(CAL_FILE, "r") as f:
+			data = json.load(f)
+
+		for name, angle in data.items():
+			try:
+				button = Button[name]
+				home_angles[button] = float(angle)
+			except KeyError:
+				print(f"[WARNING] Unknown button in calibration file: {name}")
+
+	except Exception as exc:
+		print(f"[WARNING] Failed to load servo calibration: {exc}")
+
+	return home_angles
+
+
+def _build_servo_config(
+	channel: int, home_angle: float, press_delta: float, press_direction: int
+) -> ServoConfig:
+	"""Build a ServoConfig given baseline angle, stroke length, and direction."""
+	return ServoConfig(
+		channel=channel,
+		home_angle=home_angle,
+		press_angle=home_angle + (press_delta * press_direction),
+	)
+
+
+def build_servo_config() -> None:
+	"""Construct default servo configurations for all active buttons."""
+	global BUTTON_SERVO_CONFIG
+
+	home_angles = load_home_angles()
+
+	BUTTON_SERVO_CONFIG = {
+		Button.UP: _build_servo_config(
+			channel=0,
+			home_angle=home_angles[Button.UP],
+			press_delta=STROKE_LENGTH,
+			press_direction=1,
+		),
+		Button.LEFT: _build_servo_config(
+			channel=1,
+			home_angle=home_angles[Button.LEFT],
+			press_delta=STROKE_LENGTH,
+			press_direction=-1,
+		),
+		Button.SELECT: _build_servo_config(
+			channel=2,
+			home_angle=home_angles[Button.SELECT],
+			press_delta=STROKE_LENGTH,
+			press_direction=1,
+		),
+		Button.RIGHT: _build_servo_config(
+			channel=3,
+			home_angle=home_angles[Button.RIGHT],
+			press_delta=STROKE_LENGTH,
+			press_direction=1,
+		),
+		Button.BACK: _build_servo_config(
+			channel=4,
+			home_angle=home_angles[Button.BACK],
+			press_delta=STROKE_LENGTH,
+			press_direction=1,
+		),
+		Button.DOWN: _build_servo_config(
+			channel=5,
+			home_angle=home_angles[Button.DOWN],
+			press_delta=STROKE_LENGTH,
+			press_direction=1,
+		),
+		Button.MENU: _build_servo_config(
+			channel=6,
+			home_angle=home_angles[Button.MENU],
+			press_delta=STROKE_LENGTH,
+			press_direction=-1,
+		),
+	}
+
+
+# =============================================================================
+# HARDWARE INITIALIZATION & LIFECYCLE
+# =============================================================================
 
 def initialize() -> None:
-    """Initialize PCA9685 and configure servos."""
+	"""Initialize PCA9685 PWM board and configure all active servo channels."""
+	global _kit, _servos, _initialized, _servo_available
 
-    global _kit
-    global _servos
-    global _initialized
-    global _servo_available
+	if _initialized or not _servo_available:
+		return
 
-    if _initialized:
-        return
+	if ServoKit is None:
+		_servo_available = False
+		print("[WARNING] Servo hardware libraries unavailable; servo control disabled.")
+		return
 
-    if not _servo_available:
-        return
+	try:
+		build_servo_config()
+		_kit = ServoKit(channels=16)
 
-    if ServoKit is None:
-        _servo_available = False
-        print("[WARNING] Servo hardware libraries unavailable; servo control disabled.")
-        return
+		for button, config in BUTTON_SERVO_CONFIG.items():
+			servo = _kit.servo[config.channel]
+			servo.set_pulse_width_range(MIN_PULSE, MAX_PULSE)
+			_servos[config.channel] = servo
 
-    try:
-        build_servo_config()
-
-        _kit = ServoKit(channels=16)
-
-        for button, config in BUTTON_SERVO_CONFIG.items():
-            servo = _kit.servo[config.channel]
-            servo.set_pulse_width_range(MIN_PULSE, MAX_PULSE)
-            _servos[config.channel] = servo
-
-        _initialized = True
-    except Exception as exc:
-        _servo_available = False
-        _kit = None
-        _servos = {}
-        print(f"[WARNING] Servo initialization skipped: {exc}")
+		_initialized = True
+	except Exception as exc:
+		_servo_available = False
+		_kit = None
+		_servos = {}
+		print(f"[WARNING] Servo initialization skipped: {exc}")
 
 
 def home_all() -> None:
-    if not _initialized:
-        initialize()
+	"""Park all active servos back to their home resting positions."""
+	if not _initialized:
+		initialize()
 
-    if not _initialized:
-        return
+	if not _initialized:
+		return
 
-    for button, config in BUTTON_SERVO_CONFIG.items():
-        servo = _servos.get(config.channel)
-        if servo is None:
-            continue
+	for button, config in BUTTON_SERVO_CONFIG.items():
+		servo = _servos.get(config.channel)
+		if servo is None:
+			continue
 
-        try:
-            servo.angle = config.home_angle
-            time.sleep(0.2)
-        except Exception as exc:
-            print(f"[Home Error] {button.value}: {exc}")
+		try:
+			servo.angle = config.home_angle
+			time.sleep(0.2)
+		except Exception as exc:
+			print(f"[Home Error] {button.value}: {exc}")
 
 
 def shutdown() -> None:
-    """Disable PWM outputs."""
+	"""Disable PWM output signals to relieve servo motor tension."""
+	if not _initialized:
+		return
 
-    if not _initialized:
-        return
-
-    for servo in _servos.values():
-        servo.angle = None
+	for servo in _servos.values():
+		servo.angle = None
 
 
-def press_button(button: Button, press_ready: list[int] | None = None) -> bool:
-    if press_ready is not None:
-        press_ready[0] = 0
+# =============================================================================
+# ACTUATION API
+# =============================================================================
 
-    if not _initialized:
-        initialize()
+def press_button(button: Button, press_ready: Optional[list[int]] = None) -> bool:
+	"""Actuate a specific button by sweeping to press angle and returning home."""
+	if press_ready is not None:
+		press_ready[0] = 0
 
-    if not _initialized:
-        print(f"[WARNING] Servo control unavailable; skipping {button.value} press.")
-        if press_ready is not None:
-            press_ready[0] = 1
-        return False
+	if not _initialized:
+		initialize()
 
-    try:
-        config = BUTTON_SERVO_CONFIG[button]
-        servo = _servos.get(config.channel)
+	if not _initialized:
+		print(f"[WARNING] Servo control unavailable; skipping {button.value} press.")
+		if press_ready is not None:
+			press_ready[0] = 1
+		return False
 
-        if servo is None:
-            print(f"[Servo Error] Missing servo for {button.value}")
-            if press_ready is not None:
-                press_ready[0] = 1
-            return False
+	try:
+		config = BUTTON_SERVO_CONFIG[button]
+		servo = _servos.get(config.channel)
 
-        servo.angle = config.press_angle
-        time.sleep(0.5)
+		if servo is None:
+			print(f"[Servo Error] Missing servo for {button.value}")
+			if press_ready is not None:
+				press_ready[0] = 1
+			return False
 
-        servo.angle = config.home_angle
-        time.sleep(0.5)
+		servo.angle = config.press_angle
+		time.sleep(0.5)
 
-        if press_ready is not None:
-            press_ready[0] = 1
+		servo.angle = config.home_angle
+		time.sleep(0.5)
 
-        return True
+		if press_ready is not None:
+			press_ready[0] = 1
 
-    except Exception as exc:
-        print(f"Servo error ({button.value}): {exc}")
-        if press_ready is not None:
-            press_ready[0] = 1
-        return False
+		return True
+
+	except Exception as exc:
+		print(f"Servo error ({button.value}): {exc}")
+		if press_ready is not None:
+			press_ready[0] = 1
+		return False

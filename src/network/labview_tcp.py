@@ -1,174 +1,166 @@
+"""
+Bradford White Corporation (BWC) Water Heater Vision Testing System
+Team 14 - Senior Project
+./src/network/labview_tcp.py - LabVIEW TCP Server & Simulation Engine
+Manages TCP socket connection with LabVIEW and playback of simulated testing sequences.
+"""
+from __future__ import annotations
+
 import collections
 import socket
-from xmlrpc import server
+from typing import Optional
 
 
-# Simulated sequences for the 5 modes (first five rows). Concluding with READ (RUN_OCR equivalent).
-# These mimic what LabVIEW would send over TCP/IP during automated mode testing.
-_SIMULATED_COMMANDS = collections.deque(
-    [
-        # homescreen x 3 times
-        "BACK", "RUN_OCR", "BACK", "RUN_OCR", "BACK", "RUN_OCR", "SHUTDOWN",
-        # active_faults_list
-        #"RIGHT", "SELECT", "RUN_OCR", "BACK", "LEFT",
-        
-        # system_status_top
-        #"MENU", "DOWN", "SELECT", "RUN_OCR",
+# =============================================================================
+# SIMULATION DATA QUEUE
+# =============================================================================
 
-        # system_status_bottom
-        #"DOWN", "RUN_OCR", "UP", "BACK", "UP", "SELECT",
-
-        # location
-        "MENU", "RIGHT", "DOWN", "SELECT", "DOWN", "DOWN", "SELECT", "DOWN", "DOWN", "SELECT",
-        
-        # TEST ALL LOCATIONS
-        
-        # USA
-        "SELECT", "SELECT", "RUN_OCR",
-        # CANADA
-        "LEFT", "SELECT", "DOWN", "SELECT", "RUN_OCR",
-        # MEXICO
-        "LEFT", "SELECT", "DOWN", "DOWN","SELECT", "RUN_OCR",
-        # OTHER
-        "LEFT", "SELECT", "DOWN", "DOWN", "DOWN", "SELECT", "RUN_OCR", "SHUTDOWN",
-        "BACK", "BACK", "BACK", "BACK",
-
-        # user_schedules_list
-        "MENU", "RIGHT", "RIGHT", "SELECT", "SELECT", "SELECT", "RUN_OCR",
-        # WARNING: Make sure to have a second user schedule to delete!
-        "DOWN", "SELECT", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "SELECT", "SELECT", "RUN_OCR",
-        "SELECT", "BACK", "BACK", "BACK", "BACK",
-
-        # TODO: Still need to test tou_schedule_deleted_confirmation
-        
-        # TEST ALL MODES
-
-        # HEAT_PUMP
-        "BACK", "MENU", "SELECT", "LEFT", "LEFT", "SELECT", "DOWN", "DOWN", "SELECT", "RIGHT", "RIGHT", "RUN_OCR",
-        # HYBRID_STANDARD
-        "BACK", "MENU", "SELECT", "LEFT", "LEFT", "SELECT", "SELECT", "RIGHT", "RIGHT", "RUN_OCR",
-        # HYBRID_PLUS
-        "BACK", "MENU", "SELECT", "LEFT", "LEFT", "SELECT", "DOWN", "SELECT", "RIGHT", "RIGHT", "RUN_OCR",
-        # ELECTRIC
-        "BACK", "MENU", "SELECT", "LEFT", "LEFT", "SELECT", "DOWN", "DOWN", "DOWN", "SELECT", "RIGHT", "RIGHT", "RUN_OCR",
-        # VACATION
-        "BACK", "MENU", "SELECT", "LEFT", "LEFT", "SELECT", "DOWN", "DOWN", "DOWN", "DOWN", "SELECT", "RIGHT", "RIGHT", "RUN_OCR",
-        # Finally shutdown test when done
-        "SHUTDOWN"
-    ]
+_SIMULATED_COMMANDS: collections.deque[str] = collections.deque(
+	[
+		# Homescreen Verification
+		"BACK", "RUN_OCR", "BACK", "RUN_OCR", "BACK", "RUN_OCR", "SHUTDOWN",
+		# Location Selection Test Sequence
+		"MENU", "RIGHT", "DOWN", "SELECT", "DOWN", "DOWN", "SELECT", "DOWN", "DOWN", "SELECT",
+		# USA
+		"SELECT", "SELECT", "RUN_OCR",
+		# CANADA
+		"LEFT", "SELECT", "DOWN", "SELECT", "RUN_OCR",
+		# MEXICO
+		"LEFT", "SELECT", "DOWN", "DOWN", "SELECT", "RUN_OCR",
+		# OTHER
+		"LEFT", "SELECT", "DOWN", "DOWN", "DOWN", "SELECT", "RUN_OCR", "SHUTDOWN",
+		"BACK", "BACK", "BACK", "BACK",
+		# User Schedules Test Sequence
+		"MENU", "RIGHT", "RIGHT", "SELECT", "SELECT", "SELECT", "RUN_OCR",
+		"DOWN", "SELECT", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "SELECT", "SELECT", "RUN_OCR",
+		"SELECT", "BACK", "BACK", "BACK", "BACK",
+		# Mode Transition Test Sequence
+		# HEAT_PUMP
+		"BACK", "MENU", "SELECT", "LEFT", "LEFT", "SELECT", "DOWN", "DOWN", "SELECT", "RIGHT", "RIGHT", "RUN_OCR",
+		# HYBRID_STANDARD
+		"BACK", "MENU", "SELECT", "LEFT", "LEFT", "SELECT", "SELECT", "RIGHT", "RIGHT", "RUN_OCR",
+		# HYBRID_PLUS
+		"BACK", "MENU", "SELECT", "LEFT", "LEFT", "SELECT", "DOWN", "SELECT", "RIGHT", "RIGHT", "RUN_OCR",
+		# ELECTRIC
+		"BACK", "MENU", "SELECT", "LEFT", "LEFT", "SELECT", "DOWN", "DOWN", "DOWN", "SELECT", "RIGHT", "RIGHT", "RUN_OCR",
+		# VACATION
+		"BACK", "MENU", "SELECT", "LEFT", "LEFT", "SELECT", "DOWN", "DOWN", "DOWN", "DOWN", "SELECT", "RIGHT", "RIGHT", "RUN_OCR",
+		"SHUTDOWN",
+	]
 )
 
-
-_SERVER_SOCKET = None
-conn = None
-
-def start_tcp_server() -> bool:
-    """Start TCP server to listen for LabVIEW commands."""
-    HOST = '0.0.0.0' # Listen on all interfaces
-    PORT = 5000
-    global _SERVER_SOCKET, conn
-
-    try:
-        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        server.bind((HOST, PORT))
-        server.listen(1)
-        server.settimeout(0.1)
-        _SERVER_SOCKET = server
-        conn = None
-        print(f"[NETWORK] TCP server listening on {HOST}:{PORT}")
-        print("[NETWORK] Waiting for connection...")
-        return True
-    except Exception as exc:
-        _SERVER_SOCKET = None
-        conn = None
-        print(f"[ERROR] Failed to start TCP server on {HOST}:{PORT}: {exc}")
-        return False
-
-
-def _accept_connection_if_needed() -> bool:
-    """Accept the first LabVIEW connection without blocking the main loop."""
-    global conn
-    if conn is not None or _SERVER_SOCKET is None:
-        return conn is not None
-
-    try:
-        new_conn, addr = _SERVER_SOCKET.accept()
-        new_conn.settimeout(0.1)
-        conn = new_conn
-        print(f"[NETWORK] Connected by {addr}")
-        return True
-    except socket.timeout:
-        return False
-    except Exception as exc:
-        print(f"[WARNING] TCP accept failed: {exc}")
-        return False
-
-
-_COMMAND_RESPONSES = {
-    "UP": "Button_Pressed",
-    "SELECT": "Button_Pressed",
-    "DOWN": "Button_Pressed",
-    "LEFT": "Button_Pressed",
-    "RIGHT": "Button_Pressed",
-    "BACK": "Button_Pressed",
-    "MENU": "Button_Pressed",
-    "RUN_OCR": "Running_OCR123",
-    "SEND_OCR_RESULT": "Sending_OCR123",
+_COMMAND_RESPONSES: dict[str, str] = {
+	"UP": "Button_Pressed",
+	"SELECT": "Button_Pressed",
+	"DOWN": "Button_Pressed",
+	"LEFT": "Button_Pressed",
+	"RIGHT": "Button_Pressed",
+	"BACK": "Button_Pressed",
+	"MENU": "Button_Pressed",
+	"RUN_OCR": "Running_OCR123",
+	"SEND_OCR_RESULT": "Sending_OCR123",
 }
 
 
+# =============================================================================
+# MODULE STATE
+# =============================================================================
+
+_SERVER_SOCKET: Optional[socket.socket] = None
+_CONN: Optional[socket.socket] = None
+
+
+# =============================================================================
+# SERVER LIFECYCLE & CONNECTION MANAGEMENT
+# =============================================================================
+
+def start_tcp_server(host: str = "0.0.0.0", port: int = 5000) -> bool:
+	"""Start TCP server to listen for LabVIEW client connections."""
+	global _SERVER_SOCKET, _CONN
+
+	try:
+		server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+		server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+		server.bind((host, port))
+		server.listen(1)
+		server.settimeout(0.1)
+		_SERVER_SOCKET = server
+		_CONN = None
+		print(f"[NETWORK] TCP server listening on {host}:{port}")
+		print("[NETWORK] Waiting for connection...")
+		return True
+	except Exception as exc:
+		_SERVER_SOCKET = None
+		_CONN = None
+		print(f"[ERROR] Failed to start TCP server on {host}:{port}: {exc}")
+		return False
+
+
+def _accept_connection_if_needed() -> bool:
+	"""Accept the first LabVIEW client connection without blocking the loop."""
+	global _CONN
+	if _CONN is not None or _SERVER_SOCKET is None:
+		return _CONN is not None
+
+	try:
+		new_conn, addr = _SERVER_SOCKET.accept()
+		new_conn.settimeout(0.1)
+		_CONN = new_conn
+		print(f"[NETWORK] Connected by {addr}")
+		return True
+	except socket.timeout:
+		return False
+	except Exception as exc:
+		print(f"[WARNING] TCP accept failed: {exc}")
+		return False
+
+
+# =============================================================================
+# COMMAND & REPORTING API
+# =============================================================================
+
 def get_next_command(simulated: bool = False) -> str:
-    """Receive next command from LabVIEW."""
-    # TODO: listen to LabVIEW via Serial or TCP/IP socket
-    if simulated:
-        if _SIMULATED_COMMANDS:
-            command = _SIMULATED_COMMANDS.popleft()
-            print(f"[SIMULATION] Replaying command: {command}")
-            return command
-        print("[SIMULATION] No more simulated commands.")
-        return ""  # No more simulated commands
+	"""Receive next command from simulated queue or LabVIEW TCP socket."""
+	if simulated:
+		if _SIMULATED_COMMANDS:
+			command = _SIMULATED_COMMANDS.popleft()
+			print(f"[SIMULATION] Replaying command: {command}")
+			return command
+		print("[SIMULATION] No more simulated commands.")
+		return ""
 
-    #if there is a Labview command, capture it with data
-    if not _accept_connection_if_needed():
-        return ""
+	if not _accept_connection_if_needed() or _CONN is None:
+		return ""
 
-    try:
-        data = conn.recv(1024)  #1024 byte string limit
-
-        if data:
-            command = data.decode().strip()
-            print("Received:", command)
-            response = _COMMAND_RESPONSES.get(command, "Unknown Command\n")
-            conn.sendall(response.encode())
-            return data.decode().strip()
-        
-        else:
-            return ""
-        
-    #ensures that if no data is found in data = conn.recv(1024) line then the program #doesn’t timeout
-    except socket.timeout:
-        pass 
-    except Exception as exc:
-        print(f"[WARNING] TCP receive failed: {exc}")
-        return ""
+	try:
+		data = _CONN.recv(1024)
+		if data:
+			command = data.decode().strip()
+			print(f"[NETWORK] Received: {command}")
+			response = _COMMAND_RESPONSES.get(command, "Unknown Command\n")
+			_CONN.sendall(response.encode())
+			return command
+		return ""
+	except socket.timeout:
+		return ""
+	except Exception as exc:
+		print(f"[WARNING] TCP receive failed: {exc}")
+		return ""
 
 
-#def send_report(ocr_result: str) -> None:
 def send_report(ocr_result: str, simulated: bool = False) -> None:
-    """Send data back to LabVIEW."""
-    # TODO: send ocr_result back to LabVIEW via Serial or TCP/IP socket
-    if simulated:
-        print(f"[SIMULATION] OCR report ready:\n{ocr_result}")
-        return
+	"""Send OCR test result back to LabVIEW over TCP socket or print simulation."""
+	if simulated:
+		print(f"[SIMULATION] OCR report ready:\n{ocr_result}")
+		return
 
-    if conn is None:
-        print("[WARNING] Cannot send OCR report: no LabVIEW connection yet.")
-        return
+	if _CONN is None:
+		print("[WARNING] Cannot send OCR report: no LabVIEW connection yet.")
+		return
 
-    try:
-        response = f"OCR ready\n{ocr_result}\n"
-        conn.sendall(response.encode())
-        print("[NETWORK] Sent OCR report to LabVIEW.")
-    except Exception as exc:
-        print(f"[WARNING] Failed to send OCR report: {exc}")
+	try:
+		response = f"OCR ready\n{ocr_result}\n"
+		_CONN.sendall(response.encode())
+		print("[NETWORK] Sent OCR report to LabVIEW.")
+	except Exception as exc:
+		print(f"[WARNING] Failed to send OCR report: {exc}")
