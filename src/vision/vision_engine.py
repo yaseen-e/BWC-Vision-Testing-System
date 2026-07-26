@@ -2,7 +2,7 @@
 Bradford White Corporation (BWC) Water Heater Vision Testing System
 Team 14 - Senior Project
 ./src/vision/vision_engine.py - Vision/OCR Engine
-Captures camera frames, isolates the display region, and extracts mode/temperature via PaddleOCR.
+Captures camera frames, isolates the display region, and extracts mode/temperature via RapidOCR (ONNX Runtime).
 """
 from __future__ import annotations
 
@@ -13,33 +13,19 @@ from typing import Any, Optional
 import time
 import os
 
-# 1. Disable online model hoster checks and auto-downloads
-os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
-
-# 2. Prevent C++ memory/thread crashes on ARM64
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["OPENBLAS_NUM_THREADS"] = "1"
-os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["FLAGS_allocator_strategy"] = "auto_growth"
-os.environ["FLAGS_use_mkldnn"] = "0"
-os.environ["FLAGS_enable_pir_api"] = "0"
-
-import numpy as np
-import cv2
-
 import numpy as np
 import cv2
 
 try:
-	from paddleocr import PaddleOCR
+	from rapidocr_onnxruntime import RapidOCR
 except ImportError:
-	PaddleOCR = None  # type: ignore
+	RapidOCR = None  # type: ignore
 
 from .display_layouts import OCRField, ROIBox, STATUS_BAR
 
 # Camera and OCR Engine Singletons
 _CAMERA: Any = None
-_PADDLE_OCR: Any = None
+_RAPID_OCR: Any = None
 
 
 @dataclass(frozen=True)
@@ -56,36 +42,25 @@ def _require_cv2() -> None:
 		raise RuntimeError("opencv-python is required for OCR image processing")
 
 
-def _require_paddleocr() -> None:
-	if PaddleOCR is None:
-		raise RuntimeError("paddleocr is required for OCR text extraction")
+def _require_rapidocr() -> None:
+	if RapidOCR is None:
+		raise RuntimeError(
+			"rapidocr_onnxruntime is required for OCR text extraction. "
+			"Run: pip install rapidocr_onnxruntime onnxruntime"
+		)
 
 
-def _get_paddle_ocr() -> Any:
-    global _PADDLE_OCR
-    if _PADDLE_OCR is not None:
-        return _PADDLE_OCR
+def _get_rapid_ocr() -> Any:
+	"""Initialize and return the RapidOCR (ONNX Runtime) engine singleton."""
+	global _RAPID_OCR
+	if _RAPID_OCR is not None:
+		return _RAPID_OCR
 
-    _require_paddleocr()
+	_require_rapidocr()
 
-    import logging
-    logging.getLogger("ppocr").setLevel(logging.ERROR)
-
-    # Local paths to the downloaded official models on your Pi
-    base_model_dir = Path.home() / ".paddlex" / "official_models"
-    det_path = str(base_model_dir / "PP-OCRv6_medium_det")
-    rec_path = str(base_model_dir / "PP-OCRv6_medium_rec")
-
-    _PADDLE_OCR = PaddleOCR(
-        text_detection_model_dir=det_path,
-        text_recognition_model_dir=rec_path,
-        use_doc_orientation_classify=False,
-        use_doc_unwarping=False,
-        use_textline_orientation=False,
-        enable_mkldnn=False,
-        lang="en",
-    )
-    return _PADDLE_OCR
+	# Initializes ONNX-backed PaddleOCR models completely offline without C++ crashes
+	_RAPID_OCR = RapidOCR()
+	return _RAPID_OCR
 
 
 def _order_points(points: np.ndarray) -> np.ndarray:
@@ -147,7 +122,7 @@ def _build_display_mask(frame: np.ndarray) -> np.ndarray:
 	mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 15)))
 
 	mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)))
-	
+
 	return mask
 
 
@@ -160,7 +135,7 @@ def _find_display_contour(frame: np.ndarray, mask: np.ndarray, min_area: int = 3
 
 	frame_area = max(1, mask.shape[0] * mask.shape[1])
 	min_area = max(min_area, int(frame_area * 0.05))
-	
+
 	best_contour: Optional[np.ndarray] = None
 	best_score = float("-inf")
 
@@ -180,7 +155,7 @@ def _find_display_contour(frame: np.ndarray, mask: np.ndarray, min_area: int = 3
 			continue
 
 		solidity = area / hull_area
-		if solidity < 0.50: 
+		if solidity < 0.50:
 			continue
 
 		score = area * solidity
@@ -223,7 +198,7 @@ def _process_display_contour_and_warp(
 	extended_contour = np.array([top_left, top_right, extended_bottom_right, extended_bottom_left], dtype="float32")
 
 	warped_extended = _warp_image(frame, extended_contour)
-	
+
 	return extended_contour, warped_extended
 
 
@@ -273,7 +248,7 @@ def _is_roi_blank(bin_img: np.ndarray, min_text_ratio: float = 0.008) -> bool:
 
 
 def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np.ndarray]:
-	"""Extract denoised, upscaled, and enhanced variants optimal for PaddleOCR."""
+	"""Extract denoised, upscaled, and enhanced variants optimal for OCR."""
 	_require_cv2()
 
 	if field is not None and hasattr(field, "ideal"):
@@ -619,32 +594,28 @@ def _score_field_candidate(field_name: str, raw_text: str, value: Any) -> float:
 	return 0.0
 
 
-def _parse_paddle_data(
-	paddle_output: list[Any],
+def _parse_rapidocr_data(
+	rapid_output: Optional[list[Any]],
 	variant_shape: Optional[tuple[int, int]] = None,
 	field_name: str = "",
 ) -> str:
-	"""Extract tokens from PaddleOCR output, filtering out noise by confidence and geometric bounds."""
-	if not paddle_output or paddle_output[0] is None or len(paddle_output[0]) == 0:
+	"""Extract tokens from RapidOCR output structure, filtering noise by confidence and geometric bounds."""
+	if not rapid_output:
 		return ""
 
 	cleaned_tokens: list[str] = []
 	var_h, var_w = variant_shape if variant_shape else (0, 0)
 
-	for line in paddle_output[0]:
-		if not line or len(line) < 2:
+	for line in rapid_output:
+		if not line or len(line) < 3:
 			continue
 
-		box_points, text_tuple = line[0], line[1]
-		if not text_tuple or len(text_tuple) < 2:
-			continue
-
-		text, conf = text_tuple[0], float(text_tuple[1])
+		box_points, text, conf = line[0], line[1], float(line[2])
 		stripped = str(text).strip()
 		if not stripped:
 			continue
 
-		# Confidence gating for info lines (PaddleOCR conf range: 0.0 to 1.0)
+		# Confidence gating for info lines
 		if field_name.startswith("dashboard_info_line_"):
 			if conf < 0.30:
 				continue
@@ -679,7 +650,7 @@ def _parse_paddle_data(
 
 
 def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
-	"""Classify or extract text from image variants using PaddleOCR."""
+	"""Classify or extract text from image variants using RapidOCR (ONNX Runtime)."""
 	field_name = field.name
 
 	# --- ICON CLASSIFICATION BYPASS ---
@@ -693,9 +664,9 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 		icon_key, icon_value = _classify_icon_field(inverted_variant, field_name)
 		return icon_key, icon_value
 
-	# --- PADDLEOCR FOR TEXT/DIGITS ---
-	_require_paddleocr()
-	ocr_engine = _get_paddle_ocr()
+	# --- RAPIDOCR FOR TEXT/DIGITS ---
+	_require_rapidocr()
+	ocr_engine = _get_rapid_ocr()
 
 	best_raw = ""
 	best_value: Any = _field_empty_value(field_name)
@@ -706,14 +677,10 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 		whitelist_set = set(field.tesseract_config.split("tessedit_char_whitelist=")[1])
 
 	for variant in variants:
-		if len(variant.shape) == 2:
-			input_img = cv2.cvtColor(variant, cv2.COLOR_GRAY2BGR)
-		else:
-			input_img = variant
-
-		paddle_output = ocr_engine.ocr(input_img)
-		raw = _parse_paddle_data(
-			paddle_output,
+		# RapidOCR accepts both Grayscale (2D) and BGR (3D) numpy arrays natively
+		rapid_output, _ = ocr_engine(variant)
+		raw = _parse_rapidocr_data(
+			rapid_output,
 			variant_shape=variant.shape[:2],
 			field_name=field_name,
 		)
@@ -862,7 +829,7 @@ def save_roi_ocr_overlay(
 			menu_fields=menu_fields,
 		)
 		source_points = _order_points(final_contour.reshape(4, 2))
-		
+
 		width_a = np.linalg.norm(source_points[2] - source_points[3])
 		width_b = np.linalg.norm(source_points[1] - source_points[0])
 		warped_width = max(int(width_a), int(width_b))
@@ -899,9 +866,9 @@ def read_display(
 	current_menu_key: str,
 	menu_fields: tuple[OCRField, ...],
 ) -> OCRReadout:
-	"""Read fields from the display in one frame based on current context using PaddleOCR."""
+	"""Read fields from the display in one frame based on current context using RapidOCR."""
 	_require_cv2()
-	_require_paddleocr()
+	_require_rapidocr()
 	mask = _build_display_mask(frame)
 	display_contour = _find_display_contour(frame, mask)
 
@@ -959,7 +926,7 @@ def capture_and_read_display(
 def warm_up() -> None:
 	"""Hook for camera and OCR engine warmup work to fully flush hardware pipelines."""
 	_ = _get_camera()
-	_ = _get_paddle_ocr()
+	_ = _get_rapid_ocr()
 
 
 def is_camera_available() -> bool:
