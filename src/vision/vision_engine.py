@@ -760,7 +760,6 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 	"""OCR or classify a field from image variants and keep the best candidate by score."""
 	field_name = field.name
 
-	# --- ICON CLASSIFICATION BYPASS ---
 	if field_name in ("wifi_icon", "schedule_icon"):
 		if not variants:
 			return "UNKNOWN", "UNKNOWN"
@@ -768,19 +767,31 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 		icon_key, icon_value = _classify_icon_field(inverted_variant, field_name)
 		return icon_key, icon_value
 
-	# --- STANDARD TESSERACT OCR FOR TEXT/DIGITS ---
 	_require_pytesseract()
 	best_raw = ""
 	best_value: Any = _field_empty_value(field_name)
-	best_score = 0.0  # Threshold <= 0.0 leaves empty fields clean
+	best_score = 0.0
 
 	whitelist_set = None
 	if "tessedit_char_whitelist=" in field.tesseract_config:
 		whitelist_set = set(field.tesseract_config.split("tessedit_char_whitelist=")[1])
 
+	# --- PURE OPTICAL OCR CONFIGURATION ---
 	config = field.tesseract_config
 	if "--oem" not in config:
 		config = f"--oem 1 {config}"
+	if "--psm" not in config:
+		config = f"--psm 7 {config}"  # Treat as a single line of text
+
+	# Disable internal Tesseract DAWG dictionary word-forcing
+	dawg_flags = (
+		"-c load_system_dawg=0 "
+		"-c load_freq_dawg=0 "
+		"-c load_punc_dawg=0 "
+		"-c load_number_dawg=0 "
+		"-c load_bigram_dawg=0"
+	)
+	config = f"{config} {dawg_flags}"
 
 	for variant in variants:
 		tesseract_output = pytesseract.image_to_data(
