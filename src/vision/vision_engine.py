@@ -82,18 +82,29 @@ def _warp_image(image: np.ndarray, points: np.ndarray) -> np.ndarray:
 
 
 def _build_display_mask(frame: np.ndarray) -> np.ndarray:
-	"""Build a single mask for the emissive orange display window."""
+	"""Build a mask for the emissive display window, regardless of its backlight color.
+
+	The display's background color changes with operating mode (observed as
+	both orange and blue), so detection keys off saturation and brightness --
+	properties any vividly backlit screen shares -- instead of a single
+	hardcoded hue range that would only match one color.
+	"""
 	_require_cv2()
 	if frame is None or frame.size == 0:
 		raise ValueError("frame must be a non-empty image")
 
 	hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+	saturation = hsv[:, :, 1]
+	value = hsv[:, :, 2]
 
-	# Secure the vibrant orange/amber background perfectly.
-	orange_mask = cv2.inRange(hsv, np.array([0, 50, 50]), np.array([35, 255, 255]))
+	# Otsu finds the saturation/brightness split point per-frame instead of a
+	# fixed guess, so the mask adapts to actual lighting/backlight conditions.
+	_, saturated_mask = cv2.threshold(saturation, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+	_, bright_mask = cv2.threshold(value, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+	display_mask = cv2.bitwise_and(saturated_mask, bright_mask)
 
 	# Fuse any inner text gaps horizontally/vertically without spilling into bezels
-	mask = cv2.morphologyEx(orange_mask, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (15, 5)))
+	mask = cv2.morphologyEx(display_mask, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (15, 5)))
 	mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 15)))
 
 	# Clean up any lingering tiny noise specs
@@ -479,18 +490,13 @@ def _parse_mode(raw_text: str) -> str:
 
 
 def _parse_temperature(raw_text: str) -> Optional[int]:
-	if not raw_text:
+	# TEMPERATURE_FIELD's tessedit_char_whitelist is digits-only, and that
+	# whitelist is applied uniformly before this function ever sees the
+	# text, so raw_text is already guaranteed to contain nothing but digits.
+	if not raw_text or not raw_text.isdigit():
 		return None
 
-	normalized = raw_text.upper()
-	normalized = normalized.replace("O", "0").replace("I", "1").replace("L", "1")
-	normalized = normalized.replace("|", "1").replace("S", "5").replace("B", "8").replace("Z", "2")
-	all_matches = list(re.finditer(r"\d+", normalized))
-	if not all_matches:
-		return None
-
-	best_match = max(all_matches, key=lambda match: (len(match.group()), -match.start()))
-	value = int(best_match.group())
+	value = int(raw_text)
 	if value <= 0:
 		return None
 
@@ -498,12 +504,10 @@ def _parse_temperature(raw_text: str) -> Optional[int]:
 
 
 def _parse_info_line(raw_text: str) -> str:
-	# Strictly enforce only letters, numbers, spaces, and periods
-	text = re.sub(r"[^a-zA-Z0-9 \.]", "", raw_text)
-	
-	# Clean up any duplicated whitespace and strip trailing/leading spaces or periods
-	text = _clean_text(text).strip(" .")
-	
+	# The field's tessedit_char_whitelist has already restricted raw_text to
+	# legal characters; just collapse whitespace and trim stray punctuation.
+	text = _clean_text(raw_text).strip(" .")
+
 	if not text:
 		return ""
 
@@ -527,18 +531,16 @@ def _field_empty_value(field_name: str) -> Any:
 
 
 def _parse_time(raw_text: str) -> str:
-	# Normalize to uppercase for uniform string analysis
+	# The field's tessedit_char_whitelist has already restricted raw_text to
+	# legal characters. Normalize case and self-heal a dropped/misread
+	# trailing 'M' (a real, recurring OCR failure mode for this font).
 	text = raw_text.upper().strip()
-	
-	# Self-heal dropped or misinterpreted 'M' characters at the end of the timestamp
+
 	if text.endswith("A") or text.endswith("AN") or text.endswith("AH"):
 		text = text.split("A")[0] + "AM"
 	elif text.endswith("P") or text.endswith("PN") or text.endswith("PH"):
 		text = text.split("P")[0] + "PM"
 
-	# Strictly enforce only numbers, spaces, A, M, P, and colon ':'
-	text = re.sub(r"[^0-9 AMP:]", "", text)
-	
 	return _clean_text(text)
 
 
@@ -657,7 +659,10 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 		)
 		raw = _parse_tesseract_data(tesseract_output)
 
-		if whitelist_set and field_name != "temperature":
+		# The field's own tessedit_char_whitelist is the single source of
+		# truth for what this field can legally contain; apply it uniformly
+		# so every downstream parser only ever sees whitelisted characters.
+		if whitelist_set:
 			raw = "".join(c for c in raw if c in whitelist_set)
 
 		value = _parse_field_value(field_name, raw)
@@ -667,11 +672,6 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 			best_raw = raw
 			best_value = value
 			best_score = score
-
-	if whitelist_set:
-		best_raw = "".join(c for c in best_raw if c in whitelist_set)
-		if isinstance(best_value, str):
-			best_value = "".join(c for c in best_value if c in whitelist_set)
 
 	return best_raw, best_value
 
@@ -941,14 +941,31 @@ def _get_camera() -> Any:
 
 	# --- HARDWARE STABILIZATION SETTLE ---
 	# Ensures the voice coil physical motor has moved to position 9 and 
-	# the image sensor has applied initial auto-exposure parameters 
-	# before ANY frame is handed out to the pipeline.
+	# the image sensor has applied initial auto-exposure/white-balance
+	# convergence before ANY frame is handed out to the pipeline.
 	time.sleep(0.6)
 	for _ in range(6):
 		try:
 			camera.capture_array()
 		except Exception:
 			pass
+
+	# --- LOCK AUTO-EXPOSURE AND AUTO-WHITE-BALANCE ---
+	# The display is a saturated, colored light source, which can fool
+	# continuous auto-exposure/auto-white-balance into hunting or drifting
+	# between frames (visible as color shifts and grainy noise from the gain
+	# compensating). Rather than guessing fixed exposure/gain numbers, let
+	# AE/AWB converge during the warmup above, read back whatever values they
+	# landed on, and freeze those so every subsequent capture is consistent.
+	try:
+		converged = camera.capture_metadata()
+		lock_controls: dict[str, Any] = {"AeEnable": False, "AwbEnable": False}
+		for key in ("ExposureTime", "AnalogueGain", "ColourGains"):
+			if key in converged:
+				lock_controls[key] = converged[key]
+		camera.set_controls(lock_controls)
+	except Exception:
+		pass  # Fall back to continuous AE/AWB if metadata isn't available.
 
 	_CAMERA = camera
 	return _CAMERA
