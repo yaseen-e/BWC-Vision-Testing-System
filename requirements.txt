@@ -3,9 +3,7 @@
 # Image processing
 opencv-python
 Pillow
-# pytesseract
-paddleocr
-paddlepaddle
+rapidocr_onnxruntime
 numpy
 
 # Utilities
@@ -17,8 +15,9 @@ adafruit-circuitpython-pca9685
 adafruit-blinka
 lgpio
 
-# Notes: The following system packages must be installed via apt on Raspberry Pi OS
-# (they are not provided reliably via pip):
-# - Tesseract OCR engine: sudo apt install tesseract-ocr
+# Notes:
+# The following system packages should be installed via apt on Raspberry Pi OS:
 # - Picamera2 / libcamera Python bindings: sudo apt install python3-picamera2 python3-libcamera libcamera-apps
-# If you run inside a virtualenv, create it with --system-site-packages so the OS-installed picamera2/libcamera packages are available.
+#
+# Create your virtual environment with system site-packages so Picamera2 is accessible:
+# python3 -m venv .venv --system-site-packages
