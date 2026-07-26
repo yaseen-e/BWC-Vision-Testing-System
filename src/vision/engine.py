@@ -424,14 +424,61 @@ def _denoise_roi_grayscale(roi: np.ndarray) -> np.ndarray:
 	return cv2.bilateralFilter(despeckled, d=5, sigmaColor=60, sigmaSpace=60)
 
 
-def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np.ndarray]:
-	"""Extract denoised, normalized, and scale-adjusted variants optimal for RapidOCR."""
-	_require_cv2()
-
+def _crop_and_clean_roi(prepared: np.ndarray, field: Any) -> np.ndarray:
+	"""Crop field ROI with a safe inner margin to strip surrounding box border line bleed."""
 	if field is not None and hasattr(field, "ideal"):
 		roi = field.ideal.crop(prepared)
 	else:
 		roi = prepared
+
+	if roi is None or roi.size == 0:
+		return roi
+
+	h, w = roi.shape[:2]
+	margin_y = max(1, int(h * 0.02))
+	margin_x = max(1, int(w * 0.02))
+
+	if h > 2 * margin_y and w > 2 * margin_x:
+		roi = roi[margin_y : h - margin_y, margin_x : w - margin_x]
+
+	return roi
+
+
+def _has_text_signal(img_gray: np.ndarray) -> bool:
+	"""Return False if the ROI image is blank, uniform, or lacks valid text-like contours."""
+	if img_gray is None or img_gray.size == 0:
+		return False
+
+	# Standard deviation check: Blank or purely noisy ROIs have extremely low variance
+	std_dev = float(np.std(img_gray))
+	if std_dev < 7.0:
+		return False
+
+	# Contour geometry check: Search for structures matching standard text stroke sizes
+	_, thresh = cv2.threshold(img_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+	if np.mean(thresh) > 127:
+		thresh = cv2.bitwise_not(thresh)
+
+	contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+	if not contours:
+		return False
+
+	img_h, img_w = img_gray.shape[:2]
+	min_text_h = max(3, int(img_h * 0.12))
+
+	for c in contours:
+		_, _, w, h = cv2.boundingRect(c)
+		if min_text_h <= h <= int(img_h * 0.95) and w >= 3 and w <= int(img_w * 0.98):
+			return True
+
+	return False
+
+
+def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np.ndarray]:
+	"""Extract denoised, normalized, and scale-adjusted variants optimal for RapidOCR."""
+	_require_cv2()
+
+	roi = _crop_and_clean_roi(prepared, field)
 
 	if roi is None or roi.size == 0:
 		return []
@@ -443,11 +490,10 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 	denoised_roi = _denoise_roi_grayscale(roi)
 
 	# --- GIANT DIGIT HANDLING (e.g., TEMPERATURE) ---
-	# Scale giant LCD numbers down to standard 48px line height so DBNet detects them.
 	if field_name == "temperature":
 		return _generate_digit_variants(denoised_roi)
 
-	# --- STANDARD TEXT LINES (MODE, TIME, DATE) ---
+	# --- STANDARD TEXT LINES (MODE, TIME, DATE, DASHBOARD LINES) ---
 	h, w = denoised_roi.shape[:2]
 	target_height = 180
 	if h < target_height:
@@ -467,14 +513,10 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 
 
 def _generate_digit_variants(roi_gray: np.ndarray) -> list[np.ndarray]:
-	"""
-	Locate digit contours, crop tightly, and scale down to standard OCR height (48px).
-	Guarantees DBNet detection on giant LCD numbers.
-	"""
+	"""Locate digit contours, crop tightly, and scale down to standard OCR height (48px)."""
 	_require_cv2()
 	variants: list[np.ndarray] = []
 
-	# Isolate bright white digits on dark background
 	_, thresh = cv2.threshold(roi_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 	contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -496,7 +538,6 @@ def _generate_digit_variants(roi_gray: np.ndarray) -> list[np.ndarray]:
 	else:
 		digit_crop = roi_gray
 
-	# Scale crop to standard 48px OCR height
 	ch, cw = digit_crop.shape[:2]
 	if ch > 0 and cw > 0:
 		target_h = 48
@@ -504,17 +545,14 @@ def _generate_digit_variants(roi_gray: np.ndarray) -> list[np.ndarray]:
 		target_w = max(10, int(cw * scale))
 		scaled_digits = cv2.resize(digit_crop, (target_w, target_h), interpolation=cv2.INTER_AREA)
 
-		# Variant 1: Inverted Black-on-White with 20px padding
 		inverted = cv2.bitwise_not(scaled_digits)
 		v1 = cv2.copyMakeBorder(inverted, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=255)
 		variants.append(v1)
 
-		# Variant 2: Binary Inverted
 		_, bin_inv = cv2.threshold(scaled_digits, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
 		v2 = cv2.copyMakeBorder(bin_inv, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=255)
 		variants.append(v2)
 
-		# Variant 3: Standard White-on-Black
 		v3 = cv2.copyMakeBorder(scaled_digits, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=0)
 		variants.append(v3)
 
@@ -526,7 +564,7 @@ def _generate_digit_variants(roi_gray: np.ndarray) -> list[np.ndarray]:
 # =============================================================================
 
 def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
-	"""Classify icons or extract text using RapidOCR."""
+	"""Classify icons or extract text using RapidOCR with multi-layer noise rejection."""
 	field_name = field.name
 
 	# --- ICON CLASSIFICATION BYPASS ---
@@ -545,17 +583,24 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 
 	best_raw = ""
 	best_value: Any = _field_empty_value(field_name)
-	best_score = -1.0
+	best_score = 0.0  # Require candidate score > 0.0 to accept
 
 	for variant in variants:
+		if not _has_text_signal(variant):
+			continue
+
 		rapid_output, _ = ocr_engine(variant)
 		raw, conf = _parse_rapidocr_data(rapid_output)
 
-		value = _parse_field_value(field_name, raw)
-		score = _score_field_candidate(field_name, raw, value, conf)
+		cleaned_raw = _sanitize_ocr_text(raw)
+		if not cleaned_raw:
+			continue
+
+		value = _parse_field_value(field_name, cleaned_raw)
+		score = _score_field_candidate(field_name, cleaned_raw, value, conf)
 
 		if score > best_score:
-			best_raw = raw
+			best_raw = cleaned_raw
 			best_value = value
 			best_score = score
 
@@ -576,7 +621,7 @@ def _parse_rapidocr_data(rapid_output: Optional[list[Any]]) -> tuple[str, float]
 
 		text, conf = line[1], float(line[2])
 		stripped = str(text).strip()
-		if not stripped or conf < 0.25:
+		if not stripped or conf < 0.45:  # Reject low-confidence neural hallucinations
 			continue
 
 		cleaned_tokens.append(stripped)
@@ -586,23 +631,26 @@ def _parse_rapidocr_data(rapid_output: Optional[list[Any]]) -> tuple[str, float]
 		return "", 0.0
 
 	avg_conf = float(np.mean(confidences))
-	return _clean_text(" ".join(cleaned_tokens)), avg_conf
+	return " ".join(cleaned_tokens), avg_conf
 
 
 def _score_field_candidate(field_name: str, raw_text: str, value: Any, conf: float) -> float:
-	"""Score candidate value based on validity and RapidOCR model confidence."""
-	if value is None or (isinstance(value, str) and not value):
-		return -1.0
+	"""Score candidate value based on validity, length, and RapidOCR model confidence."""
+	if value is None or (isinstance(value, str) and not value) or value == "UNKNOWN":
+		return 0.0
 
-	score = conf * 2.0  # Base score from neural model confidence
+	if conf < 0.45:
+		return 0.0
+
+	score = conf * 2.0
 
 	if field_name == "temperature" and isinstance(value, int):
-		if 90 <= value <= 160:
+		if 60 <= value <= 199:
 			score += 3.0
 		else:
-			score += 1.0
+			return 0.0
 	elif isinstance(value, str):
-		score += min(len(value) * 0.2, 2.0)
+		score += min(len(value) * 0.1, 1.5)
 
 	return score
 
@@ -614,38 +662,79 @@ def _parse_field_value(field_name: str, raw_text: str) -> Any:
 		return _parse_temperature(raw_text)
 	if field_name == "time_field":
 		return _parse_time(raw_text)
-	return _clean_text(raw_text)
+	return _sanitize_ocr_text(raw_text)
 
 
 def _parse_mode(raw_text: str) -> str:
-	cleaned = _clean_text(raw_text).upper().strip()
-	parts = cleaned.split(" ", 1)
-	if len(parts) > 1:
-		return parts[1]
-	return ""
+	cleaned = _sanitize_ocr_text(raw_text)
+	if not cleaned:
+		return "UNKNOWN"
+
+	# Generically strip label prefix "MODE:" or "MODE" if present
+	cleaned = re.sub(r"^(?i)MODE\s*[:;\-\.]*\s*", "", cleaned).strip()
+	cleaned = _sanitize_ocr_text(cleaned).upper()
+
+	return cleaned if cleaned else "UNKNOWN"
 
 
 def _parse_temperature(raw_text: str) -> Optional[int]:
 	"""Extract integer temperature value from raw OCR string."""
-	digits = re.sub(r"[^\d]", "", raw_text)
+	if not raw_text:
+		return None
+
+	substitutions = {
+		"O": "0", "o": "0", "Q": "0", "D": "0",
+		"I": "1", "l": "1", "|": "1", "!": "1",
+		"Z": "2", "z": "2",
+		"S": "5", "s": "5",
+		"B": "8", "g": "9",
+	}
+	cleaned = raw_text
+	for char, digit in substitutions.items():
+		cleaned = cleaned.replace(char, digit)
+
+	digits = re.sub(r"[^\d]", "", cleaned)
 	if not digits:
 		return None
+
 	val = int(digits)
 	return val if 50 <= val <= 199 else None
 
 
 def _parse_time(raw_text: str) -> str:
-	text = raw_text.upper().strip()
+	text = _sanitize_ocr_text(raw_text).upper()
 	if "A" in text:
 		text = text.split("A")[0] + "AM"
 	elif "P" in text:
 		text = text.split("P")[0] + "PM"
-	return _clean_text(text)
+	return _sanitize_ocr_text(text)
 
 
-def _clean_text(raw_text: str) -> str:
-	"""Collapse whitespace into clean single-spaced text."""
-	return re.sub(r"\s+", " ", raw_text).strip()
+def _sanitize_ocr_text(raw_text: str) -> str:
+	"""
+	Generically clean OCR text output by removing surrounding noise symbols,
+	edge border artifacts, and isolated single-character tokens.
+	"""
+	if not raw_text:
+		return ""
+
+	text = re.sub(r"\s+", " ", raw_text).strip()
+
+	# Strip non-alphanumeric noise at start/end
+	text = re.sub(r"^[^a-zA-Z0-9]+|[^a-zA-Z0-9.\%]+$", "", text).strip()
+	if not text:
+		return ""
+
+	# Reject standalone single non-digit noise characters (e.g. ".", "-", "a")
+	if len(text) == 1 and not text.isdigit():
+		return ""
+
+	# Remove stray isolated single-character letter artifacts attached to multi-word text
+	# Example: "a Fan On." -> "Fan On.", "H HEAT PUMP" -> "HEAT PUMP"
+	text = re.sub(r"^[a-zA-Z]\s+(?=[a-zA-Z0-9]{2,})", "", text).strip()
+	text = re.sub(r"\s+[a-zA-Z]$", "", text).strip()
+
+	return text
 
 
 def _field_empty_value(field_name: str) -> Any:
@@ -680,7 +769,6 @@ def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, st
 	templates_dict = _load_icon_templates().get(field_name, {})
 
 	if not templates_dict or roi_gray is None or roi_gray.size == 0:
-		print(f"[{field_name.upper()}] ERROR: Empty ROI or missing templates.")
 		return "UNKNOWN", "UNKNOWN"
 
 	if len(roi_gray.shape) == 3:
@@ -754,7 +842,6 @@ def _load_icon_templates() -> dict[str, dict[str, np.ndarray]]:
 		_ICON_TEMPLATES[field_key] = {}
 		for state_key, file_path in templates.items():
 			if not file_path.exists():
-				print(f"[WARNING] Missing template file: {file_path}")
 				continue
 
 			img = cv2.imread(str(file_path), cv2.IMREAD_GRAYSCALE)
