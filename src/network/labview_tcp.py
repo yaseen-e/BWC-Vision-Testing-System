@@ -30,7 +30,7 @@ _SIMULATED_COMMANDS = collections.deque(
         # MEXICO
         "LEFT", "SELECT", "DOWN", "DOWN","SELECT", "RUN_OCR",
         # OTHER
-        "LEFT", "SELECT", "DOWN", "DOWN", "DOWN", "SELECT", "RUN_OCR",
+        "LEFT", "SELECT", "DOWN", "DOWN", "DOWN", "SELECT", "RUN_OCR", "SHUTDOWN",
         "BACK", "BACK", "BACK", "BACK",
 
         # user_schedules_list
