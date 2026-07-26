@@ -1,7 +1,7 @@
 """
 Bradford White Corporation (BWC) Water Heater Vision Testing System
 Team 14 - Senior Project
-./src/vision/engine.py - Vision/OCR Engine
+./src/vision/vision_engine.py - Vision/OCR Engine
 Captures camera frames, isolates the display region, and extracts mode/temperature via RapidOCR (ONNX Runtime).
 """
 from __future__ import annotations
@@ -79,11 +79,11 @@ def read_display(
 		display_contour,
 		menu_fields=menu_fields,
 	)
-	prepared_gray = _prepare_ocr_grayscale(warped)
+	binary = _prepare_ocr_binary(warped)
 
 	fields_result: dict[str, dict[str, Any]] = {}
 	for field in menu_fields:
-		raw, val = _ocr_field(field, _extract_warped_variants(prepared_gray, field))
+		raw, val = _ocr_field(field, _extract_warped_variants(binary, field))
 		fields_result[field.name] = {"raw": raw, "value": val}
 
 	return OCRReadout(
@@ -255,7 +255,7 @@ def _get_camera() -> Any:
 
 
 def _get_rapid_ocr() -> Any:
-	"""Initialize RapidOCR singleton."""
+	"""Initialize and return the RapidOCR (ONNX Runtime) engine singleton."""
 	global _RAPID_OCR
 	if _RAPID_OCR is not None:
 		return _RAPID_OCR
@@ -270,7 +270,7 @@ def _get_rapid_ocr() -> Any:
 # =============================================================================
 
 def _build_display_mask(frame: np.ndarray) -> np.ndarray:
-	"""Build a mask for the emissive display window."""
+	"""Build a mask for the emissive display window, regardless of its backlight color."""
 	_require_cv2()
 	if frame is None or frame.size == 0:
 		raise ValueError("frame must be a non-empty image")
@@ -285,13 +285,14 @@ def _build_display_mask(frame: np.ndarray) -> np.ndarray:
 
 	mask = cv2.morphologyEx(display_mask, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (15, 5)))
 	mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 15)))
+
 	mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)))
 
 	return mask
 
 
 def _find_display_contour(frame: np.ndarray, mask: np.ndarray, min_area: int = 3000) -> Optional[np.ndarray]:
-	"""Find the raw display rectangle."""
+	"""Find the raw display rectangle without geometric status bar projection."""
 	_require_cv2()
 	contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 	if not contours:
@@ -331,7 +332,7 @@ def _find_display_contour(frame: np.ndarray, mask: np.ndarray, min_area: int = 3
 
 
 def _should_use_extended_warp(menu_fields: Optional[tuple[OCRField, ...]]) -> bool:
-	"""Only extend when the current ContextNode includes status bar fields."""
+	"""Only extend when the current ContextNode includes the full status bar field set."""
 	if not menu_fields:
 		return False
 
@@ -345,7 +346,7 @@ def _process_display_contour_and_warp(
 	orange_contour: np.ndarray,
 	menu_fields: Optional[tuple[OCRField, ...]] = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-	"""Warp display area into flat front-facing view."""
+	"""Warp the display area once and optionally extend the contour for ContextNodes that include status bar fields."""
 	_require_cv2()
 	if not _should_use_extended_warp(menu_fields):
 		return orange_contour, _warp_image(frame, orange_contour)
@@ -362,11 +363,12 @@ def _process_display_contour_and_warp(
 	extended_contour = np.array([top_left, top_right, extended_bottom_right, extended_bottom_left], dtype="float32")
 
 	warped_extended = _warp_image(frame, extended_contour)
+
 	return extended_contour, warped_extended
 
 
 def _warp_image(image: np.ndarray, points: np.ndarray) -> np.ndarray:
-	"""Flatten angled display into front-facing view."""
+	"""Flatten the angled display into a front-facing view."""
 	_require_cv2()
 	rect = _order_points(points)
 	top_left, top_right, bottom_right, bottom_left = rect
@@ -410,81 +412,56 @@ def _order_points(points: np.ndarray) -> np.ndarray:
 # IMAGE PREPARATION & VARIANT GENERATION
 # =============================================================================
 
-def _prepare_ocr_grayscale(warped: np.ndarray) -> np.ndarray:
-	"""Convert warped image to grayscale."""
+def _prepare_ocr_binary(warped: np.ndarray) -> np.ndarray:
+	"""Convert the warped display to grayscale."""
 	_require_cv2()
-	if len(warped.shape) == 3:
-		return cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
-	return warped
+	return cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
 
 
 def _denoise_roi_grayscale(roi: np.ndarray) -> np.ndarray:
-	"""Scrub sensor noise at native ROI resolution."""
+	"""Scrub sensor speckle/static at native resolution, before any upscaling."""
 	despeckled = cv2.medianBlur(roi, 3)
 	return cv2.bilateralFilter(despeckled, d=5, sigmaColor=60, sigmaSpace=60)
 
 
-def _crop_roi(prepared: np.ndarray, field: Any) -> np.ndarray:
-	"""Crop field ROI with 2% inset to prevent outer box borders from entering OCR."""
+def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np.ndarray]:
+	"""Extract denoised, normalized, and scale-adjusted variants optimal for RapidOCR."""
+	_require_cv2()
+
 	if field is not None and hasattr(field, "ideal"):
 		roi = field.ideal.crop(prepared)
 	else:
 		roi = prepared
 
 	if roi is None or roi.size == 0:
-		return roi
-
-	h, w = roi.shape[:2]
-	inset_y = max(1, int(h * 0.02))
-	inset_x = max(1, int(w * 0.02))
-
-	if h > 2 * inset_y and w > 2 * inset_x:
-		roi = roi[inset_y : h - inset_y, inset_x : w - inset_x]
-
-	return roi
-
-
-def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np.ndarray]:
-	"""Extract denoised, contrast-enhanced variants optimized for RapidOCR."""
-	_require_cv2()
-	roi = _crop_roi(prepared, field)
-
-	if roi is None or roi.size == 0:
 		return []
 
-	field_name = getattr(field, "name", "")
-	denoised = _denoise_roi_grayscale(roi)
+	if len(roi.shape) == 3:
+		roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
 
-	# --- GIANT LCD DIGIT HANDLING (TEMPERATURE) ---
+	field_name = getattr(field, "name", "")
+	denoised_roi = _denoise_roi_grayscale(roi)
+
+	# --- GIANT DIGIT HANDLING (e.g., TEMPERATURE) ---
+	# Scale giant LCD numbers down to standard 48px line height so DBNet detects them.
 	if field_name == "temperature":
-		return _generate_digit_variants(denoised)
+		return _generate_digit_variants(denoised_roi)
 
 	# --- STANDARD TEXT LINES (MODE, TIME, DATE) ---
-	h, w = denoised.shape[:2]
-	target_h = 160
-	if h < target_h:
-		scale = target_h / float(h)
+	h, w = denoised_roi.shape[:2]
+	target_height = 180
+	if h < target_height:
+		scale = target_height / float(h)
 		new_w = max(1, int(w * scale))
-		denoised = cv2.resize(denoised, (new_w, target_h), interpolation=cv2.INTER_CUBIC)
-
-	# CLAHE contrast enhancement
-	clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-	enhanced = clahe.apply(denoised)
+		denoised_roi = cv2.resize(denoised_roi, (new_w, target_height), interpolation=cv2.INTER_CUBIC)
 
 	variants: list[np.ndarray] = []
 
-	# Variant 1: Enhanced grayscale with clean white border padding
-	v1 = cv2.copyMakeBorder(enhanced, 25, 25, 25, 25, cv2.BORDER_CONSTANT, value=255)
+	v1 = cv2.copyMakeBorder(denoised_roi, 25, 25, 25, 25, cv2.BORDER_CONSTANT, value=255)
 	variants.append(v1)
 
-	# Variant 2: Inverted grayscale with clean white border padding
-	v2 = cv2.copyMakeBorder(cv2.bitwise_not(enhanced), 25, 25, 25, 25, cv2.BORDER_CONSTANT, value=255)
+	v2 = cv2.copyMakeBorder(cv2.bitwise_not(denoised_roi), 25, 25, 25, 25, cv2.BORDER_CONSTANT, value=255)
 	variants.append(v2)
-
-	# Variant 3: Otsu Binary Thresholded
-	_, bin_img = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-	v3 = cv2.copyMakeBorder(bin_img, 25, 25, 25, 25, cv2.BORDER_CONSTANT, value=255)
-	variants.append(v3)
 
 	return variants
 
@@ -492,12 +469,12 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 def _generate_digit_variants(roi_gray: np.ndarray) -> list[np.ndarray]:
 	"""
 	Locate digit contours, crop tightly, and scale down to standard OCR height (48px).
-	Guarantees DBNet detection on giant LCD temperature numbers.
+	Guarantees DBNet detection on giant LCD numbers.
 	"""
 	_require_cv2()
 	variants: list[np.ndarray] = []
 
-	# Isolate bright digits on dark background
+	# Isolate bright white digits on dark background
 	_, thresh = cv2.threshold(roi_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 	contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -519,6 +496,7 @@ def _generate_digit_variants(roi_gray: np.ndarray) -> list[np.ndarray]:
 	else:
 		digit_crop = roi_gray
 
+	# Scale crop to standard 48px OCR height
 	ch, cw = digit_crop.shape[:2]
 	if ch > 0 and cw > 0:
 		target_h = 48
@@ -526,7 +504,7 @@ def _generate_digit_variants(roi_gray: np.ndarray) -> list[np.ndarray]:
 		target_w = max(10, int(cw * scale))
 		scaled_digits = cv2.resize(digit_crop, (target_w, target_h), interpolation=cv2.INTER_AREA)
 
-		# Variant 1: Inverted Black-on-White with clean padding
+		# Variant 1: Inverted Black-on-White with 20px padding
 		inverted = cv2.bitwise_not(scaled_digits)
 		v1 = cv2.copyMakeBorder(inverted, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=255)
 		variants.append(v1)
@@ -544,23 +522,24 @@ def _generate_digit_variants(roi_gray: np.ndarray) -> list[np.ndarray]:
 
 
 # =============================================================================
-# OCR PROCESSING & GEOMETRIC BOUNDING-BOX FILTERING
+# OCR PROCESSING & TEXT PARSING
 # =============================================================================
 
 def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
-	"""Classify icons or extract text using RapidOCR with geometry & confidence filtering."""
+	"""Classify icons or extract text using RapidOCR."""
 	field_name = field.name
 
 	# --- ICON CLASSIFICATION BYPASS ---
 	if field_name in ("wifi_icon", "schedule_icon"):
 		if not variants:
 			return "UNKNOWN", "UNKNOWN"
-		first_var = variants[0]
-		if len(first_var.shape) == 3:
-			first_var = cv2.cvtColor(first_var, cv2.COLOR_BGR2GRAY)
-		return _classify_icon_field(first_var, field_name)
+		first_variant = variants[0]
+		if len(first_variant.shape) == 3:
+			first_variant = cv2.cvtColor(first_variant, cv2.COLOR_BGR2GRAY)
+		inverted_variant = cv2.bitwise_not(first_variant)
+		return _classify_icon_field(inverted_variant, field_name)
 
-	# --- RAPIDOCR TEXT EXTRACTION ---
+	# --- RAPIDOCR FOR TEXT/DIGITS ---
 	_require_rapidocr()
 	ocr_engine = _get_rapid_ocr()
 
@@ -570,10 +549,7 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 
 	for variant in variants:
 		rapid_output, _ = ocr_engine(variant)
-		raw, conf = _parse_and_filter_rapidocr_boxes(rapid_output, variant.shape)
-
-		if not raw:
-			continue
+		raw, conf = _parse_rapidocr_data(rapid_output)
 
 		value = _parse_field_value(field_name, raw)
 		score = _score_field_candidate(field_name, raw, value, conf)
@@ -586,75 +562,50 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 	return best_raw, best_value
 
 
-def _parse_and_filter_rapidocr_boxes(
-	rapid_output: Optional[list[Any]], img_shape: tuple[int, ...]
-) -> tuple[str, float]:
-	"""Filter RapidOCR output at the Bounding-Box level to reject noise speckles and border fragments."""
+def _parse_rapidocr_data(rapid_output: Optional[list[Any]]) -> tuple[str, float]:
+	"""Extract text and average confidence score from RapidOCR result array."""
 	if not rapid_output:
 		return "", 0.0
 
-	img_h, img_w = img_shape[:2]
-	img_area = float(img_w * img_h)
-	valid_texts: list[str] = []
+	cleaned_tokens: list[str] = []
 	confidences: list[float] = []
 
-	for item in rapid_output:
-		if not item or len(item) < 3:
+	for line in rapid_output:
+		if not line or len(line) < 3:
 			continue
 
-		box, text, conf = item[0], str(item[1]).strip(), float(item[2])
-		if not text or conf < 0.35:
+		text, conf = line[1], float(line[2])
+		stripped = str(text).strip()
+		if not stripped or conf < 0.25:
 			continue
 
-		box_points = np.array(box, dtype=np.float32)
-		min_x, max_x = np.min(box_points[:, 0]), np.max(box_points[:, 0])
-		min_y, max_y = np.min(box_points[:, 1]), np.max(box_points[:, 1])
-
-		box_w = max_x - min_x
-		box_h = max_y - min_y
-		box_area = box_w * box_h
-
-		# Reject tiny speckles (< 0.5% ROI area) or boxes under 8px tall
-		if box_area < (img_area * 0.005) or box_h < 8:
-			continue
-
-		# Reject single non-alphanumeric noise characters
-		if len(text) == 1 and not text.isalnum():
-			continue
-
-		valid_texts.append(text)
+		cleaned_tokens.append(stripped)
 		confidences.append(conf)
 
-	if not valid_texts:
+	if not cleaned_tokens:
 		return "", 0.0
 
-	return " ".join(valid_texts), float(np.mean(confidences))
+	avg_conf = float(np.mean(confidences))
+	return _clean_text(" ".join(cleaned_tokens)), avg_conf
 
 
 def _score_field_candidate(field_name: str, raw_text: str, value: Any, conf: float) -> float:
-	"""Score candidate value based on domain validity and model confidence."""
-	if value is None or (isinstance(value, str) and (value == "UNKNOWN" or not value)):
+	"""Score candidate value based on validity and RapidOCR model confidence."""
+	if value is None or (isinstance(value, str) and not value):
 		return -1.0
 
-	score = conf * 2.0
+	score = conf * 2.0  # Base score from neural model confidence
 
 	if field_name == "temperature" and isinstance(value, int):
-		if 60 <= value <= 199:
-			score += 5.0
-		else:
-			return -1.0
-	elif field_name == "mode" and isinstance(value, str) and value != "UNKNOWN":
-		if len(value) >= 3:
-			score += 4.0
+		if 90 <= value <= 160:
+			score += 3.0
 		else:
 			score += 1.0
+	elif isinstance(value, str):
+		score += min(len(value) * 0.2, 2.0)
 
 	return score
 
-
-# =============================================================================
-# VALUE PARSING & SANITIZATION
-# =============================================================================
 
 def _parse_field_value(field_name: str, raw_text: str) -> Any:
 	if field_name == "mode":
@@ -663,58 +614,38 @@ def _parse_field_value(field_name: str, raw_text: str) -> Any:
 		return _parse_temperature(raw_text)
 	if field_name == "time_field":
 		return _parse_time(raw_text)
-	return raw_text.strip()
+	return _clean_text(raw_text)
 
 
 def _parse_mode(raw_text: str) -> str:
-	"""Parse mode string cleanly, filtering out prefix labels and stray punctuation."""
-	if not raw_text:
-		return "UNKNOWN"
-
-	cleaned = raw_text.strip().upper()
-	# Strip prefix labels like "MODE", "MD", "MOD"
-	cleaned = re.sub(r"^(MODE|MD|MOD)\s*[:;\-\.]*\s*", "", cleaned, flags=re.IGNORECASE).strip()
-	# Keep only letters and spaces
-	cleaned = re.sub(r"[^A-Z\s]", "", cleaned).strip()
-	cleaned = re.sub(r"\s+", " ", cleaned)
-
-	if not cleaned or len(cleaned) < 2:
-		return "UNKNOWN"
-
-	return cleaned
+	cleaned = _clean_text(raw_text).upper().strip()
+	parts = cleaned.split(" ", 1)
+	if len(parts) > 1:
+		return parts[1]
+	return ""
 
 
 def _parse_temperature(raw_text: str) -> Optional[int]:
-	"""Extract integer temperature value from raw OCR string using substitution mappings."""
-	if not raw_text:
-		return None
-
-	substitutions = {
-		"O": "0", "o": "0", "Q": "0", "D": "0",
-		"I": "1", "l": "1", "|": "1", "!": "1",
-		"Z": "2", "z": "2",
-		"S": "5", "s": "5",
-		"B": "8", "g": "9",
-	}
-	cleaned = raw_text
-	for char, digit in substitutions.items():
-		cleaned = cleaned.replace(char, digit)
-
-	digits = re.sub(r"[^\d]", "", cleaned)
+	"""Extract integer temperature value from raw OCR string."""
+	digits = re.sub(r"[^\d]", "", raw_text)
 	if not digits:
 		return None
-
 	val = int(digits)
 	return val if 50 <= val <= 199 else None
 
 
 def _parse_time(raw_text: str) -> str:
-	text = raw_text.strip().upper()
+	text = raw_text.upper().strip()
 	if "A" in text:
 		text = text.split("A")[0] + "AM"
 	elif "P" in text:
 		text = text.split("P")[0] + "PM"
-	return text.strip()
+	return _clean_text(text)
+
+
+def _clean_text(raw_text: str) -> str:
+	"""Collapse whitespace into clean single-spaced text."""
+	return re.sub(r"\s+", " ", raw_text).strip()
 
 
 def _field_empty_value(field_name: str) -> Any:
@@ -749,6 +680,7 @@ def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, st
 	templates_dict = _load_icon_templates().get(field_name, {})
 
 	if not templates_dict or roi_gray is None or roi_gray.size == 0:
+		print(f"[{field_name.upper()}] ERROR: Empty ROI or missing templates.")
 		return "UNKNOWN", "UNKNOWN"
 
 	if len(roi_gray.shape) == 3:
@@ -797,7 +729,7 @@ def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, st
 
 
 def _load_icon_templates() -> dict[str, dict[str, np.ndarray]]:
-	"""Lazy load icon templates from ./templates directory."""
+	"""Lazy load icon templates from ./templates directory into grayscale memory cache."""
 	global _ICON_TEMPLATES
 	if _ICON_TEMPLATES:
 		return _ICON_TEMPLATES
@@ -822,6 +754,7 @@ def _load_icon_templates() -> dict[str, dict[str, np.ndarray]]:
 		_ICON_TEMPLATES[field_key] = {}
 		for state_key, file_path in templates.items():
 			if not file_path.exists():
+				print(f"[WARNING] Missing template file: {file_path}")
 				continue
 
 			img = cv2.imread(str(file_path), cv2.IMREAD_GRAYSCALE)
@@ -935,7 +868,7 @@ def _draw_polygon_outline(image: np.ndarray, points: np.ndarray, label: str) -> 
 	)
 
 
-def _project_roi_box(box: ROIBox, inverse_transform: np.ndarray, warped_width: int, warped_height: int) -> np.ndarray:
+def _project_roi_box(box: "ROIBox", inverse_transform: np.ndarray, warped_width: int, warped_height: int) -> np.ndarray:
 	"""Project a normalized warped ROI back into source-frame coordinates."""
 	_require_cv2()
 	warped_points = np.array(
