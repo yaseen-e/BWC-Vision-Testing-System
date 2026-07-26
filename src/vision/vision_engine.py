@@ -223,8 +223,8 @@ def _denoise_roi_grayscale(roi: np.ndarray) -> np.ndarray:
 	bilateral pass then knocks down residual LCD dither while keeping
 	character strokes crisp.
 	"""
-	# despeckled = cv2.medianBlur(roi, 3)
-	despeckled = cv2.GaussianBlur(roi, (3, 3), 0)
+	despeckled = cv2.medianBlur(roi, 3)
+	despeckled = cv2.GaussianBlur(despeckled, (3, 3), 0)
 
 	return cv2.bilateralFilter(despeckled, d=5, sigmaColor=60, sigmaSpace=60)
 
