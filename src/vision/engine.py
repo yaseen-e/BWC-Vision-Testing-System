@@ -516,7 +516,7 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 def _parse_and_filter_rapidocr_boxes(
 	rapid_output: Optional[list[Any]]
 ) -> tuple[str, float]:
-	"""Filter RapidOCR output and sort boxes spatially top-to-bottom, left-to-right."""
+	"""Filter RapidOCR output and sort boxes spatially line-by-line, left-to-right."""
 	if not rapid_output:
 		return "", 0.0
 
@@ -533,22 +533,46 @@ def _parse_and_filter_rapidocr_boxes(
 		box_points = np.array(box, dtype=np.float32)
 		min_x, max_x = np.min(box_points[:, 0]), np.max(box_points[:, 0])
 		min_y, max_y = np.min(box_points[:, 1]), np.max(box_points[:, 1])
+		height = max_y - min_y
+		center_y = (min_y + max_y) / 2.0
 
 		items_to_keep.append({
 			"text": text,
 			"conf": conf,
 			"min_x": min_x,
-			"min_y": min_y,
+			"center_y": center_y,
+			"height": height,
 		})
 
 	if not items_to_keep:
 		return "", 0.0
 
-	# Sort spatially by y (top to bottom), then x (left to right)
-	items_to_keep.sort(key=lambda k: (k["min_y"], k["min_x"]))
+	# Sort vertically by center y to initialize line order
+	items_to_keep.sort(key=lambda k: k["center_y"])
 
-	valid_texts = [k["text"] for k in items_to_keep]
-	confidences = [k["conf"] for k in items_to_keep]
+	# Group boxes into horizontal lines based on vertical overlap tolerance
+	rows: list[list[dict[str, Any]]] = []
+	for item in items_to_keep:
+		placed = False
+		for row in rows:
+			avg_cy = sum(r["center_y"] for r in row) / len(row)
+			avg_h = sum(r["height"] for r in row) / len(row)
+			# If box center falls within 50% of row height, consider it the same line
+			if abs(item["center_y"] - avg_cy) < max(8.0, avg_h * 0.5):
+				row.append(item)
+				placed = True
+				break
+		if not placed:
+			rows.append([item])
+
+	# Sort each line left-to-right by min_x
+	sorted_items: list[dict[str, Any]] = []
+	for row in rows:
+		row.sort(key=lambda k: k["min_x"])
+		sorted_items.extend(row)
+
+	valid_texts = [k["text"] for k in sorted_items]
+	confidences = [k["conf"] for k in sorted_items]
 
 	return " ".join(valid_texts), float(np.mean(confidences))
 
@@ -594,14 +618,29 @@ def _parse_field_value(field_name: str, raw_text: str) -> Any:
 
 
 def _parse_mode(raw_text: str) -> str:
-	"""Parse mode string cleanly, filtering out prefix labels."""
+	"""Parse mode string cleanly, removing 'MODE:' regardless of position."""
 	if not raw_text:
 		return "UNKNOWN"
 
 	cleaned = raw_text.strip().upper()
-	cleaned = re.sub(r"^(MODE|MD|MOD)\s*[:;\-\.]*\s*", "", cleaned, flags=re.IGNORECASE).strip()
+
+	# Remove MODE / MD / MOD word and labels anywhere in the text
+	cleaned = re.sub(r"\b(MODE|MD|MOD)\b\s*[:;\-\.]*", "", cleaned, flags=re.IGNORECASE).strip()
 	cleaned = re.sub(r"[^A-Z\s]", "", cleaned).strip()
 	cleaned = re.sub(r"\s+", " ", cleaned)
+
+	# Match word set against known water heater modes to handle remaining word permutations
+	known_modes = [
+		"HYBRID PLUS",
+		"HYBRID",
+		"ELECTRIC",
+		"HEAT PUMP",
+		"VACATION",
+	]
+	detected_words = set(cleaned.split())
+	for known in known_modes:
+		if set(known.split()) == detected_words:
+			return known
 
 	if not cleaned or len(cleaned) < 2:
 		return "UNKNOWN"
