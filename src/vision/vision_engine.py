@@ -536,9 +536,9 @@ def _parse_time(raw_text: str) -> str:
 	# trailing 'M' (a real, recurring OCR failure mode for this font).
 	text = raw_text.upper().strip()
 
-	if text.endswith("A") or text.endswith("AN") or text.endswith("AH"):
+	if "A" in text:
 		text = text.split("A")[0] + "AM"
-	elif text.endswith("P") or text.endswith("PN") or text.endswith("PH"):
+	elif "P" in text:
 		text = text.split("P")[0] + "PM"
 
 	return _clean_text(text)
@@ -892,9 +892,12 @@ def read_display(
 
 
 def capture_frame() -> Optional[np.ndarray]:
-	"""Capture one camera frame."""
+	"""Capture one camera frame and convert from Picamera2 RGB to OpenCV BGR."""
 	camera = _get_camera()
-	return camera.capture_array()
+	frame = camera.capture_array()
+	if frame is not None:
+		return cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+	return None
 
 
 def capture_and_read_display(
