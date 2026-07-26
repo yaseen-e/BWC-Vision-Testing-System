@@ -727,19 +727,14 @@ def _parse_tesseract_data(
 	variant_shape: Optional[tuple[int, int]] = None,
 	field_name: str = "",
 ) -> str:
-	"""
-	Extract tokens from Tesseract data across ALL fields using relative scale filtering
-	against variant ROI height and aspect ratio.
-	"""
+	"""Extract tokens using relative scale filtering without aggressive confidence drops."""
 	texts = tesseract_output.get("text", []) or []
-	confs = tesseract_output.get("conf", []) or []
 	heights = tesseract_output.get("height", []) or []
 	widths = tesseract_output.get("width", []) or []
 
 	cleaned_tokens: list[str] = []
-	var_h, var_w = variant_shape if variant_shape else (0, 0)
+	var_h = variant_shape[0] if variant_shape else 0
 
-	# Fetch scale rules specific to this field type
 	min_rel_h, max_rel_h, max_aspect = _get_field_scale_bounds(field_name)
 
 	for i, token in enumerate(texts):
@@ -749,16 +744,8 @@ def _parse_tesseract_data(
 		if not stripped:
 			continue
 
-		# Confidence gating for non-digit text fields
-		if i < len(confs) and field_name != "temperature":
-			try:
-				conf = float(confs[i])
-				if conf >= 0 and conf < 25.0:
-					continue
-			except (ValueError, TypeError):
-				pass
-
 		# --- UNIVERSAL RELATIVE SCALE FILTER ---
+		# Only drop tokens that are physically impossible (speckle noise or UI lines)
 		if var_h > 0 and i < len(heights) and i < len(widths):
 			try:
 				box_h = float(heights[i])
@@ -766,11 +753,11 @@ def _parse_tesseract_data(
 				rel_height = box_h / float(var_h)
 				aspect_ratio = box_w / max(1.0, box_h)
 
-				# Discard tokens too small (speckle/noise) or too large (box outline artifacts)
+				# Filter out tiny noise (< min_rel_h) or crop border boxes (> max_rel_h)
 				if rel_height < min_rel_h or rel_height > max_rel_h:
 					continue
 
-				# Discard wide horizontal line fragments (e.g. UI divider lines)
+				# Filter out horizontal line rules
 				if aspect_ratio > max_aspect and rel_height < 0.25:
 					continue
 			except (ValueError, TypeError):
@@ -778,11 +765,7 @@ def _parse_tesseract_data(
 
 		cleaned_tokens.append(stripped)
 
-	if not cleaned_tokens:
-		return ""
-
-	raw_text = " ".join(cleaned_tokens)
-	return _clean_text(raw_text)
+	return _clean_text(" ".join(cleaned_tokens))
 
 
 def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
