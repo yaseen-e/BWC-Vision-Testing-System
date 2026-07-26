@@ -826,10 +826,9 @@ def read_display(
 	_require_pytesseract()
 	mask = _build_display_mask(frame)
 	display_contour = _find_display_contour(frame, mask)
-	fields_result: dict[str, dict[str, Any]] = {}
 
 	if display_contour is None:
-		# Graceful exit without running heavy fallback OCR on full unwarped frames
+		# Graceful exit without running heavy OCR on full unwarped frames
 		return OCRReadout(
 			display_found=False,
 			current_menu_key=current_menu_key,
@@ -837,14 +836,6 @@ def read_display(
 				field.name: {"raw": "", "value": _field_empty_value(field.name)}
 				for field in menu_fields
 			},
-		)
-
-	# If we reach here, display_contour is found but fields_result might still be empty
-	if not fields_result:
-		return OCRReadout(
-			display_found=False,
-			current_menu_key=current_menu_key,
-			fields=fields_result,
 		)
 
 	# Extend the warp only when this ContextNode includes the status bar fields.
@@ -855,6 +846,7 @@ def read_display(
 	)
 	binary = _prepare_ocr_binary(warped)
 
+	fields_result: dict[str, dict[str, Any]] = {}
 	for field in menu_fields:
 		raw, val = _ocr_field(field, _extract_warped_variants(binary, field))
 		fields_result[field.name] = {"raw": raw, "value": val}
