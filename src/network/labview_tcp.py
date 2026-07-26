@@ -8,15 +8,15 @@ from xmlrpc import server
 _SIMULATED_COMMANDS = collections.deque(
     [
         # homescreen x 3 times
-        "BACK", "RUN_OCR", "BACK", "RUN_OCR", "BACK", "RUN_OCR", "SHUTDOWN",
+        #"BACK", "RUN_OCR", "BACK", "RUN_OCR", "BACK", "RUN_OCR", "SHUTDOWN",
         # active_faults_list
-        "RIGHT", "SELECT", "RUN_OCR", "BACK", "LEFT",
+        #"RIGHT", "SELECT", "RUN_OCR", "BACK", "LEFT",
         
         # system_status_top
-        "MENU", "DOWN", "SELECT", "RUN_OCR",
+        #"MENU", "DOWN", "SELECT", "RUN_OCR",
 
         # system_status_bottom
-        "DOWN", "RUN_OCR", "UP", "BACK", "UP", "SELECT",
+        #"DOWN", "RUN_OCR", "UP", "BACK", "UP", "SELECT",
 
         # location
         "MENU", "RIGHT", "DOWN", "SELECT", "DOWN", "DOWN", "SELECT", "DOWN", "DOWN", "SELECT",
