@@ -58,8 +58,13 @@ def _get_paddle_ocr() -> Any:
 	import logging
 	logging.getLogger("ppocr").setLevel(logging.ERROR)
 
-	# Initialize PaddleOCR engine without deprecated parameters
-	_PADDLE_OCR = PaddleOCR(lang="en")
+	# Initialize lightweight text OCR (disabling heavy full-document models)
+	_PADDLE_OCR = PaddleOCR(
+		use_doc_orientation_classify=False,
+		use_doc_unwarping=False,
+		use_textline_orientation=False,
+		lang="en",
+	)
 	return _PADDLE_OCR
 
 
