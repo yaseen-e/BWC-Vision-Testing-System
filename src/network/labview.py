@@ -1,18 +1,53 @@
 """
 Bradford White Corporation (BWC) Water Heater Vision Testing System
 Team 14 - Senior Project
-./src/network/labview_tcp.py - LabVIEW TCP Server & Simulation Engine
-Manages TCP socket connection with LabVIEW and playback of simulated testing sequences.
+./src/network/labview.py - LabVIEW Protocol & Network Interface
+Unified LabVIEW network driver handling command parsing, socket communications,
+and simulated command sequence replays.
 """
 from __future__ import annotations
 
 import collections
+from enum import Enum
 import socket
 from typing import Optional
 
 
 # =============================================================================
-# SIMULATION DATA QUEUE
+# COMMAND SCHEMA & PARSER
+# =============================================================================
+
+class LabViewCommand(Enum):
+	"""Commands received over TCP from LabVIEW or simulation queue."""
+
+	RUN_OCR = "RUN_OCR"
+	SHUTDOWN = "SHUTDOWN"
+	UP = "UP"
+	LEFT = "LEFT"
+	SELECT = "SELECT"
+	RIGHT = "RIGHT"
+	BACK = "BACK"
+	DOWN = "DOWN"
+	MENU = "MENU"
+
+
+LABVIEW_COMMANDS: tuple[str, ...] = tuple(command.value for command in LabViewCommand)
+
+
+def parse_labview_command(command: str) -> LabViewCommand | None:
+	"""Normalize a raw LabVIEW TCP command string into a known command token."""
+	if not command:
+		return None
+
+	normalized = command.strip().upper()
+	try:
+		return LabViewCommand(normalized)
+	except ValueError:
+		return None
+
+
+# =============================================================================
+# SIMULATION & RESPONSE DATA
 # =============================================================================
 
 _SIMULATED_COMMANDS: collections.deque[str] = collections.deque(
@@ -97,7 +132,7 @@ def start_tcp_server(host: str = "0.0.0.0", port: int = 5000) -> bool:
 
 
 def _accept_connection_if_needed() -> bool:
-	"""Accept the first LabVIEW client connection without blocking the loop."""
+	"""Accept the first LabVIEW client connection without blocking the main loop."""
 	global _CONN
 	if _CONN is not None or _SERVER_SOCKET is None:
 		return _CONN is not None
@@ -164,3 +199,4 @@ def send_report(ocr_result: str, simulated: bool = False) -> None:
 		print("[NETWORK] Sent OCR report to LabVIEW.")
 	except Exception as exc:
 		print(f"[WARNING] Failed to send OCR report: {exc}")
+		return

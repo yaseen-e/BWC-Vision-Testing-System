@@ -10,8 +10,8 @@ import csv
 from pathlib import Path
 from typing import TextIO
 
-from src import data_manager
-from src.vision.display_layouts import HOME_MENU, collect_field_names
+from src.storage import captures
+from src.vision.layouts import HOME_MENU, collect_field_names
 
 # =============================================================================
 # PATHS & FIELD SCHEMAS
@@ -34,7 +34,7 @@ def get_report_field_names() -> tuple[str, ...]:
 def open_test_report() -> tuple[TextIO, csv.DictWriter, Path]:
 	"""Create a timestamped CSV report for this test run and write header row."""
 	TEST_REPORT_DIR.mkdir(parents=True, exist_ok=True)
-	report_id = data_manager.build_capture_id("test_report")
+	report_id = captures.build_capture_id("test_report")
 	report_path = TEST_REPORT_DIR / f"{report_id}.csv"
 
 	report_file = report_path.open("w", newline="", encoding="utf-8")

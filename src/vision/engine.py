@@ -16,7 +16,7 @@ import numpy as np
 import cv2
 from rapidocr_onnxruntime import RapidOCR
 
-from .display_layouts import OCRField, ROIBox, STATUS_BAR
+from .layouts import OCRField, ROIBox, STATUS_BAR
 
 # Camera and OCR Engine Singletons
 _CAMERA: Any = None

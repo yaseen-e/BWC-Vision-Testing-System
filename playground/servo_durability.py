@@ -1,4 +1,4 @@
-from src.motion.servo_driver import initialize, home_all, press_button, shutdown, Button
+from src.motion.servos import initialize, home_all, press_button, shutdown, Button
 import time
 
 

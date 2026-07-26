@@ -2,8 +2,8 @@ from pathlib import Path
 
 import cv2
 
-from src.vision.display_layouts import ContextNode, apply_navigation_command
-from src.vision.vision_engine import _build_display_mask, _find_display_contour
+from src.vision.layouts import ContextNode, apply_navigation_command
+from src.vision.engine import _build_display_mask, _find_display_contour
 
 
 def test_display_detector_recovers_real_samples():

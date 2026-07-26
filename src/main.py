@@ -6,19 +6,25 @@ Coordinates startup, command handling, actuation, OCR reads, reporting, and shut
 """
 from __future__ import annotations
 
+import os
+os.environ["ORT_LOGGING_LEVEL"] = "3"  # Suppress ONNX Runtime warnings before engine imports
+
+import csv
+from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
 import select
 import sys
 import time
 import traceback
+from typing import Any
 
-from src import data_manager
-from src.motion import servo_driver
-from src.network import labview_tcp, report_writer
-from src.network.labview_protocol import LabViewCommand, parse_labview_command
-from src.vision import vision_engine
-from src.vision.display_layouts import (
+from src.motion import servos
+from src.network import labview
+from src.network.labview import LabViewCommand, parse_labview_command
+from src.storage import captures, reports
+from src.vision import engine
+from src.vision.layouts import (
 	HOME_MENU,
 	ContextNode,
 	apply_navigation_command,
@@ -34,7 +40,7 @@ CLEANUP_RETENTION_DAYS = 14
 
 
 # =============================================================================
-# SYSTEM STATE DEFINITION
+# SYSTEM STATE & CONTEXT MODELS
 # =============================================================================
 
 class SystemState(Enum):
@@ -48,27 +54,336 @@ class SystemState(Enum):
 
 
 LABVIEW_BUTTON_COMMANDS = {
-	LabViewCommand.UP: servo_driver.Button.UP,
-	LabViewCommand.LEFT: servo_driver.Button.LEFT,
-	LabViewCommand.SELECT: servo_driver.Button.SELECT,
-	LabViewCommand.RIGHT: servo_driver.Button.RIGHT,
-	LabViewCommand.BACK: servo_driver.Button.BACK,
-	LabViewCommand.DOWN: servo_driver.Button.DOWN,
-	LabViewCommand.MENU: servo_driver.Button.MENU,
+	LabViewCommand.UP: servos.Button.UP,
+	LabViewCommand.LEFT: servos.Button.LEFT,
+	LabViewCommand.SELECT: servos.Button.SELECT,
+	LabViewCommand.RIGHT: servos.Button.RIGHT,
+	LabViewCommand.BACK: servos.Button.BACK,
+	LabViewCommand.DOWN: servos.Button.DOWN,
+	LabViewCommand.MENU: servos.Button.MENU,
 }
 
 
+@dataclass
+class SystemContext:
+	"""Encapsulates runtime state and navigation tracking across the test loop."""
+
+	use_simulated: bool
+	current_state: SystemState = SystemState.STARTUP
+	last_command: str = ""
+	pending_command: LabViewCommand | None = None
+	ocr_result: str = ""
+	step_counter: int = 0
+	current_menu: ContextNode = HOME_MENU
+	transition_buffer: tuple[str, ...] = ()
+	sequence_broken: bool = False
+	press_ready: list[int] = field(default_factory=lambda: [1])
+
+
 # =============================================================================
-# HELPER FUNCTIONS
+# MAIN ENTRY POINT
 # =============================================================================
 
-def get_button_for_command(command: LabViewCommand) -> servo_driver.Button | None:
-	"""Map LabVIEW command enum to servo driver button."""
+def main() -> None:
+	"""Main system execution entry point."""
+	use_simulated = _prompt_for_command_mode()
+	ctx = SystemContext(use_simulated=use_simulated)
+	report_file, report_writer, report_path = reports.open_test_report()
+
+	print("--- Starting BWC Water Heater Vision Testing System ---")
+	print(f"[INFO] Test report CSV: {report_path}")
+	print(f"[INFO] Initial menu context: {ctx.current_menu.label}")
+
+	try:
+		while ctx.current_state != SystemState.SHUTDOWN:
+			if _space_pressed():
+				print("[INFO] Space pressed. Entering SHUTDOWN state.")
+				ctx.current_state = SystemState.SHUTDOWN
+				break
+
+			_execute_state_step(ctx, report_writer)
+
+	except Exception:
+		print("\n[EMERGENCY] Unhandled exception caught!")
+		traceback.print_exc()
+	finally:
+		_safe_system_cleanup(report_file)
+		print("[INFO] System resources freed and parked safely. Exiting.")
+
+
+# =============================================================================
+# HIGH-LEVEL STATE DISPATCHER
+# =============================================================================
+
+def _execute_state_step(ctx: SystemContext, report_writer: csv.DictWriter) -> None:
+	"""Dispatch execution to the appropriate step handler based on current state."""
+	match ctx.current_state:
+		case SystemState.STARTUP:
+			_handle_startup(ctx)
+		case SystemState.WAIT_FOR_COMMAND:
+			_handle_wait_for_command(ctx)
+		case SystemState.PRESS_BUTTON:
+			_handle_press_button(ctx)
+		case SystemState.READ_DISPLAY:
+			_handle_read_display(ctx, report_writer)
+		case SystemState.REPORT_TO_LABVIEW:
+			_handle_report_to_labview(ctx)
+		case SystemState.ERROR | SystemState.SHUTDOWN:
+			pass
+
+
+# =============================================================================
+# INDIVIDUAL STATE HANDLERS
+# =============================================================================
+
+def _handle_startup(ctx: SystemContext) -> None:
+	"""Initialize hardware drivers, camera vision engine, and network server."""
+	print("[INFO] Cleaning up old captures.")
+	_run_capture_cleanup()
+
+	print("[INFO] Initializing servos.")
+	servos.initialize()
+	servos.home_all()
+
+	print("[INFO] Initializing vision engine.")
+	if engine.is_camera_available():
+		print("[INFO] Camera detected.")
+	else:
+		print("[WARNING] Camera NOT found.")
+
+	if ctx.use_simulated:
+		print("[NETWORK] Simulated command mode active; skipping TCP server startup.")
+	else:
+		if labview.start_tcp_server():
+			print("[NETWORK] TCP server started successfully.")
+		else:
+			print("[WARNING] TCP server startup failed; continuing to run.")
+
+	ctx.current_state = SystemState.WAIT_FOR_COMMAND
+
+
+def _handle_wait_for_command(ctx: SystemContext) -> None:
+	"""Fetch and parse the next inbound command from TCP or simulation queue."""
+	ctx.last_command = labview.get_next_command(simulated=ctx.use_simulated)
+
+	if not ctx.last_command:
+		mode_str = "simulated " if ctx.use_simulated else "LabVIEW "
+		print(f"[NETWORK] Waiting for next {mode_str}command...")
+		time.sleep(1)
+		return
+
+	print(f"[NETWORK] Received command: {ctx.last_command}")
+	ctx.pending_command = parse_labview_command(ctx.last_command)
+
+	if ctx.pending_command is None:
+		print(f"[WARNING] Unknown command from LabVIEW: {ctx.last_command}")
+		ctx.last_command = ""
+		return
+
+	if get_button_for_command(ctx.pending_command) is not None:
+		ctx.current_state = SystemState.PRESS_BUTTON
+	elif ctx.pending_command is LabViewCommand.RUN_OCR:
+		ctx.transition_buffer = ()
+		ctx.sequence_broken = False
+		ctx.current_state = SystemState.READ_DISPLAY
+	elif ctx.pending_command is LabViewCommand.SHUTDOWN:
+		ctx.current_state = SystemState.SHUTDOWN
+
+
+def _handle_press_button(ctx: SystemContext) -> None:
+	"""Actuate the mapped button servo and update expected UI menu context."""
+	print(f"[ACTION] Executing command: {ctx.last_command}")
+	button = get_button_for_command(ctx.pending_command)
+
+	if button is None:
+		print(f"[WARNING] Unable to map command to button: {ctx.last_command}")
+		ctx.current_state = SystemState.WAIT_FOR_COMMAND
+		return
+
+	_actuate_button(button, ctx.use_simulated, ctx.press_ready)
+	_update_menu_navigation(ctx)
+	ctx.current_state = SystemState.WAIT_FOR_COMMAND
+
+
+def _handle_read_display(ctx: SystemContext, report_writer: csv.DictWriter) -> None:
+	"""Capture frame, execute OCR read, format response, and record CSV report row."""
+	print("[ACTION] Reading UI display...")
+	capture_id = captures.build_capture_id(ctx.last_command)
+	readout = _capture_and_process_frame(ctx.current_menu, capture_id)
+
+	ctx.ocr_result = _format_ocr_result(readout, ctx.current_menu)
+	ctx.step_counter += 1
+
+	_write_step_to_report(report_writer, ctx.step_counter, ctx.current_menu, readout)
+	ctx.current_state = SystemState.REPORT_TO_LABVIEW
+
+
+def _handle_report_to_labview(ctx: SystemContext) -> None:
+	"""Transmit formatted OCR results back to LabVIEW or simulation log."""
+	print(f"[NETWORK] Reporting data to LabVIEW: {ctx.ocr_result}")
+	labview.send_report(ctx.ocr_result, simulated=ctx.use_simulated)
+	ctx.current_state = SystemState.WAIT_FOR_COMMAND
+
+
+# =============================================================================
+# DOMAIN HELPER UTILITIES
+# =============================================================================
+
+def get_button_for_command(command: LabViewCommand | None) -> servos.Button | None:
+	"""Map LabVIEW command enum to physical servo driver button."""
+	if command is None:
+		return None
 	return LABVIEW_BUTTON_COMMANDS.get(command)
 
 
+def _actuate_button(
+	button: servos.Button, use_simulated: bool, press_ready: list[int]
+) -> None:
+	"""Execute physical servo press or wait for user manual enter key."""
+	print(f"[MANUAL] Please press the {button.name} button on the water heater.")
+	if use_simulated:
+		wait_for_enter()
+	else:
+		servos.press_button(button, press_ready)
+
+	while press_ready[0] != 1:
+		time.sleep(0.01)
+
+
+def _update_menu_navigation(ctx: SystemContext) -> None:
+	"""Update navigation state tracking based on button press."""
+	if ctx.sequence_broken:
+		print("[NAV] Sequence locked after mismatch; waiting for RUN_OCR reset.")
+		return
+
+	previous_menu_key = ctx.current_menu.key
+	cmd_val = ctx.pending_command.value if ctx.pending_command else ""
+
+	(
+		ctx.current_menu,
+		ctx.transition_buffer,
+		ctx.sequence_broken,
+	) = apply_navigation_command(
+		HOME_MENU,
+		ctx.current_menu,
+		ctx.transition_buffer,
+		cmd_val,
+	)
+
+	if ctx.sequence_broken:
+		print(
+			f"[NAV] Sequence mismatch on {ctx.transition_buffer}; "
+			"route tracking locked until RUN_OCR."
+		)
+	elif ctx.current_menu.key != previous_menu_key:
+		print(f"[NAV] Current menu updated: {ctx.current_menu.label}")
+	elif ctx.transition_buffer:
+		print(f"[NAV] Partial sequence: {ctx.transition_buffer}")
+
+
+def _capture_and_process_frame(
+	current_menu: ContextNode, capture_id: str
+) -> engine.OCRReadout:
+	"""Capture frame from camera and execute OCR engine evaluation."""
+	frame = engine.capture_frame()
+	if frame is None:
+		print("[WARNING] No camera frame available; skipping image save.")
+		return _build_empty_readout(current_menu)
+
+	saved_path = captures.save_capture_frame(CAPTURE_DIR, frame, capture_id)
+	if saved_path:
+		print(f"[INFO] Saved capture frame: {saved_path}")
+
+	roi_overlay_path = engine.save_roi_ocr_overlay(
+		CAPTURE_DIR,
+		frame,
+		capture_id,
+		current_menu.fields,
+		current_menu_key=current_menu.key,
+	)
+	if roi_overlay_path:
+		print(f"[INFO] Saved ROI calibration image: {roi_overlay_path}")
+
+	return engine.read_display(frame, current_menu.key, current_menu.fields)
+
+
+def _build_empty_readout(current_menu: ContextNode) -> engine.OCRReadout:
+	"""Construct empty readout payload when camera frame is unavailable."""
+	empty_fields = {}
+	for field_item in current_menu.fields:
+		default_val = (
+			"UNKNOWN"
+			if field_item.name == "mode"
+			else None
+			if field_item.name == "temperature"
+			else ""
+		)
+		empty_fields[field_item.name] = {"raw": "", "value": default_val}
+
+	return engine.OCRReadout(
+		display_found=False,
+		current_menu_key=current_menu.key,
+		fields=empty_fields,
+	)
+
+
+def _format_ocr_result(
+	readout: engine.OCRReadout, current_menu: ContextNode
+) -> str:
+	"""Format OCR readout into semicolon-delimited string payload for LabVIEW."""
+	field_pairs: list[str] = []
+	for field_item in current_menu.fields:
+		raw_val = readout.fields.get(field_item.name, {}).get("value", "")
+		val_str = "" if raw_val is None else str(raw_val)
+		field_pairs.append(f"{field_item.name.upper()}={val_str}")
+
+	fields_str = ";".join(field_pairs)
+	base_str = f"DISPLAY_FOUND={readout.display_found};MENU={current_menu.label}"
+	return f"{base_str};{fields_str}" if fields_str else base_str
+
+
+def _write_step_to_report(
+	writer: csv.DictWriter,
+	step: int,
+	menu: ContextNode,
+	readout: engine.OCRReadout,
+) -> None:
+	"""Format step metadata and write row entry to CSV test report."""
+	row_data = {"step": step, "menu": menu.label}
+	for name in reports.get_report_field_names():
+		row_data[name] = ""
+
+	for field_item in menu.fields:
+		field_name = field_item.name
+		val = readout.fields.get(field_name, {}).get("value")
+
+		if field_name == "temperature":
+			row_data[field_name] = _parse_report_temperature(val)
+		elif field_name == "mode":
+			row_data[field_name] = "UNKNOWN" if val is None else val
+		else:
+			row_data[field_name] = "" if val is None else val
+
+	writer.writerow(row_data)
+
+
+def _parse_report_temperature(val: Any) -> int | str:
+	"""Safely parse temperature raw string into integer for report writer."""
+	if val is None or val == "":
+		return ""
+	try:
+		return int(val)
+	except (TypeError, ValueError):
+		print(f"[WARNING] Invalid temperature value from OCR: {val}")
+		return ""
+
+
+# =============================================================================
+# CLI & HARDWARE CLEANUP UTILITIES
+# =============================================================================
+
 def _prompt_for_command_mode() -> bool:
-	"""Ask whether to use simulated commands or a real LabVIEW connection."""
+	"""Ask user whether to run simulated commands or await TCP connection."""
 	while True:
 		try:
 			answer = input("[PROMPT] Use simulated commands? [y/N]: ").strip().lower()
@@ -88,10 +403,10 @@ def _prompt_for_command_mode() -> bool:
 
 
 def _run_capture_cleanup() -> None:
-	"""Delete stale image capture files beyond the retention window."""
+	"""Delete capture image assets older than retention threshold."""
 	CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
 	try:
-		data_manager.cleanup_captures(
+		captures.cleanup_captures(
 			captures_dir=CAPTURE_DIR,
 			retention_days=CLEANUP_RETENTION_DAYS,
 			apply_changes=True,
@@ -102,24 +417,8 @@ def _run_capture_cleanup() -> None:
 		print(f"[WARNING] Capture cleanup error: {exc}")
 
 
-def _safe_servo_home_all() -> None:
-	"""Attempt to park servos without allowing hardware errors to crash shutdown."""
-	try:
-		servo_driver.home_all()
-	except Exception as exc:
-		print(f"[WARNING] Servo home_all skipped: {exc}")
-
-
-def _safe_servo_shutdown() -> None:
-	"""Attempt servo shutdown even when hardware is missing or unavailable."""
-	try:
-		servo_driver.shutdown()
-	except Exception as exc:
-		print(f"[WARNING] Servo shutdown skipped: {exc}")
-
-
-def _safe_system_cleanup(report_file=None) -> None:
-	"""Safely flush reports, park servos, and close vision pipeline."""
+def _safe_system_cleanup(report_file: Any = None) -> None:
+	"""Safely flush report files, park hardware servos, and shutdown camera."""
 	if report_file and not report_file.closed:
 		try:
 			report_file.flush()
@@ -127,17 +426,24 @@ def _safe_system_cleanup(report_file=None) -> None:
 		except Exception as exc:
 			print(f"[WARNING] Report file cleanup error: {exc}")
 
-	_safe_servo_home_all()
-	_safe_servo_shutdown()
+	try:
+		servos.home_all()
+	except Exception as exc:
+		print(f"[WARNING] Servo home_all skipped: {exc}")
 
 	try:
-		vision_engine.shutdown()
+		servos.shutdown()
+	except Exception as exc:
+		print(f"[WARNING] Servo shutdown skipped: {exc}")
+
+	try:
+		engine.shutdown()
 	except Exception as exc:
 		print(f"[WARNING] Vision engine shutdown skipped: {exc}")
 
 
 def wait_for_enter() -> None:
-	"""Block until the user presses ENTER."""
+	"""Block until user hits ENTER key in terminal interactive mode."""
 	if not sys.stdin.isatty():
 		return
 	print("Press ENTER to continue...", end="", flush=True)
@@ -149,7 +455,7 @@ def wait_for_enter() -> None:
 
 
 def _space_pressed() -> bool:
-	"""Return True when a space key is waiting on stdin."""
+	"""Non-blocking check for spacebar key waiting on stdin."""
 	if not sys.stdin.isatty():
 		return False
 
@@ -158,239 +464,6 @@ def _space_pressed() -> bool:
 		return False
 
 	return sys.stdin.read(1) == " "
-
-
-# =============================================================================
-# MAIN EVENT LOOP
-# =============================================================================
-
-def main() -> None:
-	current_state = SystemState.STARTUP
-	last_command = ""
-	pending_command = None
-	ocr_result = ""
-	error_message = ""
-	step_counter = 0
-	current_menu: ContextNode = HOME_MENU
-	transition_buffer: tuple[str, ...] = ()
-	sequence_broken = False
-	press_ready = [1]
-	use_simulated_commands = _prompt_for_command_mode()
-
-	report_file, report_csv_writer, report_path = report_writer.open_test_report()
-
-	print("--- Starting BWC Water Heater Vision Testing System ---")
-	print(f"[INFO] Test report CSV: {report_path}")
-	print(f"[INFO] Initial menu context: {current_menu.label}")
-
-	try:
-		while True:
-			if current_state != SystemState.SHUTDOWN and _space_pressed():
-				print("[INFO] Space pressed. Entering SHUTDOWN state.")
-				current_state = SystemState.SHUTDOWN
-
-			match current_state:
-				case SystemState.STARTUP:
-					print("[INFO] Cleaning up old captures.")
-					_run_capture_cleanup()
-					print("[INFO] Initializing servos.")
-					servo_driver.initialize()
-					servo_driver.home_all()
-					print("[INFO] Initializing vision engine.")
-					if vision_engine.is_camera_available():
-						print("[INFO] Camera detected.")
-					else:
-						print("[WARNING] Camera NOT found.")
-
-					if use_simulated_commands:
-						print("[NETWORK] Simulated command mode active; skipping TCP server startup.")
-					else:
-						if labview_tcp.start_tcp_server():
-							print("[NETWORK] TCP server started successfully.")
-						else:
-							print("[WARNING] TCP server startup failed; continuing to run.")
-
-					current_state = SystemState.WAIT_FOR_COMMAND
-
-				case SystemState.WAIT_FOR_COMMAND:
-					last_command = labview_tcp.get_next_command(simulated=use_simulated_commands)
-					if last_command:
-						print(f"[NETWORK] Received command from LabVIEW: {last_command}")
-						pending_command = parse_labview_command(last_command)
-						if pending_command is not None:
-							if get_button_for_command(pending_command) is not None:
-								current_state = SystemState.PRESS_BUTTON
-							elif pending_command is LabViewCommand.RUN_OCR:
-								transition_buffer = ()
-								sequence_broken = False
-								current_state = SystemState.READ_DISPLAY
-							elif pending_command is LabViewCommand.SHUTDOWN:
-								current_state = SystemState.SHUTDOWN
-						else:
-							print(f"[WARNING] Unknown command from LabVIEW: {last_command}")
-							last_command = ""
-							pending_command = None
-					else:
-						if use_simulated_commands:
-							print("[SIMULATION] Waiting for next simulated command...")
-						else:
-							print("[NETWORK] Waiting for LabVIEW command...")
-						time.sleep(1)
-
-				case SystemState.PRESS_BUTTON:
-					print(f"[ACTION] Executing command: {last_command}")
-					button = (
-						get_button_for_command(pending_command)
-						if pending_command is not None
-						else None
-					)
-					if button is None:
-						print(f"[WARNING] Unable to map command to button: {last_command}")
-					else:
-						print(f"[MANUAL] Please press the {button.name} button on the water heater.")
-						if use_simulated_commands:
-							wait_for_enter()
-						else:
-							servo_driver.press_button(button, press_ready)
-
-						while press_ready[0] != 1:
-							time.sleep(0.01)
-
-						if sequence_broken:
-							print(
-								"[NAV] Sequence locked after mismatch; waiting for RUN_OCR reset."
-							)
-						else:
-							previous_menu_key = current_menu.key
-							(
-								current_menu,
-								transition_buffer,
-								sequence_broken,
-							) = apply_navigation_command(
-								HOME_MENU,
-								current_menu,
-								transition_buffer,
-								pending_command.value,
-							)
-							if sequence_broken:
-								print(
-									f"[NAV] Sequence mismatch on {transition_buffer}; "
-									"route tracking locked until RUN_OCR."
-								)
-							elif current_menu.key != previous_menu_key:
-								print(f"[NAV] Current menu updated: {current_menu.label}")
-							elif transition_buffer:
-								print(f"[NAV] Partial sequence: {transition_buffer}")
-
-					current_state = SystemState.WAIT_FOR_COMMAND
-
-				case SystemState.READ_DISPLAY:
-					print("[ACTION] Reading UI display...")
-					capture_id = data_manager.build_capture_id(last_command)
-					frame = vision_engine.capture_frame()
-
-					if frame is None:
-						print("[WARNING] No camera frame available; skipping image save.")
-						empty_fields = {
-							field.name: {
-								"raw": "",
-								"value": (
-									"UNKNOWN"
-									if field.name == "mode"
-									else None
-									if field.name == "temperature"
-									else ""
-								),
-							}
-							for field in current_menu.fields
-						}
-						readout = vision_engine.OCRReadout(
-							display_found=False,
-							current_menu_key=current_menu.key,
-							fields=empty_fields,
-						)
-					else:
-						saved_path = data_manager.save_capture_frame(
-							CAPTURE_DIR, frame, capture_id
-						)
-						if saved_path is None:
-							print("[WARNING] Capture frame could not be saved.")
-						else:
-							print(f"[INFO] Saved capture frame: {saved_path}")
-
-						roi_overlay_path = vision_engine.save_roi_ocr_overlay(
-							CAPTURE_DIR,
-							frame,
-							capture_id,
-							current_menu.fields,
-							current_menu_key=current_menu.key,
-						)
-						if roi_overlay_path is None:
-							print("[WARNING] ROI calibration image could not be saved.")
-						else:
-							print(f"[INFO] Saved ROI calibration image: {roi_overlay_path}")
-
-						readout = vision_engine.read_display(
-							frame, current_menu.key, current_menu.fields
-						)
-
-					field_pairs: list[str] = []
-					for field in current_menu.fields:
-						field_data = readout.fields.get(field.name, {})
-						raw_value = field_data.get("value", "")
-						field_value = "" if raw_value is None else str(raw_value)
-						field_pairs.append(f"{field.name.upper()}={field_value}")
-
-					fields_str = ";".join(field_pairs)
-					ocr_result = f"DISPLAY_FOUND={readout.display_found};MENU={current_menu.label}"
-					if fields_str:
-						ocr_result = f"{ocr_result};{fields_str}"
-					step_counter += 1
-
-					row_data = {"step": step_counter, "menu": current_menu.label}
-					for field_name in report_writer.get_report_field_names():
-						row_data[field_name] = ""
-
-					for field in current_menu.fields:
-						field_name = field.name
-						val = readout.fields.get(field_name, {}).get("value")
-						if field_name == "temperature":
-							if val is None or val == "":
-								row_data[field_name] = ""
-							else:
-								try:
-									row_data[field_name] = int(val)
-								except (TypeError, ValueError):
-									print(f"[WARNING] Invalid temperature value from OCR: {val}")
-									row_data[field_name] = ""
-						elif field_name == "mode":
-							row_data[field_name] = "UNKNOWN" if val is None else val
-						else:
-							row_data[field_name] = "" if val is None else val
-
-					report_csv_writer.writerow(row_data)
-					current_state = SystemState.REPORT_TO_LABVIEW
-
-				case SystemState.REPORT_TO_LABVIEW:
-					print(f"[NETWORK] Reporting data to LabVIEW: {ocr_result}")
-					labview_tcp.send_report(ocr_result, simulated=use_simulated_commands)
-					current_state = SystemState.WAIT_FOR_COMMAND
-
-				case SystemState.ERROR:
-					print(f"[FATAL] System Faulted: {error_message}")
-					break
-
-				case SystemState.SHUTDOWN:
-					print("[INFO] LabVIEW requested shutdown. Parking servos, exiting.")
-					_safe_system_cleanup(report_file)
-					break
-
-	except Exception as exc:
-		error_message = str(exc)
-		print("\n[EMERGENCY] Unhandled exception caught!")
-		traceback.print_exc()
-		_safe_system_cleanup(report_file)
-		print("[EMERGENCY] System parked safely. Exiting.")
 
 
 if __name__ == "__main__":
