@@ -266,14 +266,7 @@ def _is_roi_blank(bin_img: np.ndarray, min_text_ratio: float = 0.008) -> bool:
 
 
 def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np.ndarray]:
-	"""Extract denoised-then-upscaled, speckle-filtered variants for OCR.
-
-	Order of operations matters: the ROI is denoised at its native, cropped
-	resolution first (while speckle is still pixel-sized), then upscaled
-	for Tesseract, then thresholded and cleaned. Doing it in the opposite
-	order -- upscale first, denoise second -- lets noise get magnified into
-	character-sized blobs before any filtering ever sees it.
-	"""
+	"""Extract denoised-then-upscaled, speckle-filtered variants for OCR."""
 	_require_cv2()
 
 	if field is not None and hasattr(field, "ideal"):
@@ -284,13 +277,8 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 	if roi is None or roi.size == 0:
 		return []
 
-	# 1. Denoise at native resolution, while speckle is still single-pixel
-	# sized, before upscaling gets a chance to magnify it.
 	denoised_roi = _denoise_roi_grayscale(roi)
 
-	# 2. Upscale to a comfortable working size for the Tesseract LSTM engine.
-	# INTER_LINEAR avoids the ringing artifacts INTER_CUBIC can introduce
-	# around noisy edges, which would otherwise create new speckle.
 	h, w = denoised_roi.shape[:2]
 	target_height = 180
 	if h < target_height:
@@ -306,8 +294,7 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 		# Erase blobs too short to be real glyph strokes (sensor speckle).
 		bin_img = _filter_connected_components(bin_img)
 
-		# Skip variants that hold no real text after cleaning, rather than
-		# handing Tesseract a blank/noise-only crop to hallucinate on.
+		# Skip variants that hold no real text after cleaning.
 		if _is_roi_blank(bin_img):
 			return None
 
@@ -320,7 +307,7 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 	if finalized is not None:
 		variants.append(finalized)
 
-	# --- Variant 2: CLAHE + Otsu (helps low-contrast / glare frames) ---
+	# --- Variant 2: CLAHE + Otsu ---
 	clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
 	enhanced = clahe.apply(denoised_roi)
 	_, v2 = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
@@ -328,7 +315,7 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 	if finalized is not None:
 		variants.append(finalized)
 
-	# --- Variant 3: Adaptive Gaussian Thresholding (uneven backlight) ---
+	# --- Variant 3: Adaptive Gaussian Thresholding ---
 	curr_h, curr_w = denoised_roi.shape[:2]
 	max_block = max(3, (min(curr_h, curr_w) // 2) * 2 - 1)
 	block_size = min(41, max_block)
@@ -504,25 +491,6 @@ def _parse_temperature(raw_text: str) -> Optional[int]:
 	return value
 
 
-def _parse_info_line(raw_text: str) -> str:
-	# The field's tessedit_char_whitelist has already restricted raw_text to
-	# legal characters; just collapse whitespace.
-	text = _clean_text(raw_text)
-
-	if not text:
-		return ""
-
-	alpha_count = sum(1 for char in text if char.isalpha())
-	alnum_count = sum(1 for char in text if char.isalnum())
-	if alpha_count < 3 or alnum_count <= 0:
-		return ""
-
-	if (alpha_count / max(1, len(text))) < 0.35:
-		return ""
-
-	return text
-
-
 def _field_empty_value(field_name: str) -> Any:
 	if field_name == "mode":
 		return "UNKNOWN"
@@ -612,8 +580,39 @@ def _is_plausible_word(word: str) -> bool:
 	return True
 
 
+import difflib
+
+# Common English vocabulary pool (or pass standard dictionary words)
+COMMON_WORDS = {
+	"call", "for", "heat", "setpoint", "satisfied", "electric", "heat", "pump",
+	"hybrid", "vacation", "disabled", "enabled", "running", "status", "water",
+	"heater", "system", "normal", "error", "warning", "mode", "standby"
+}
+
+def _autocorrect_word(word: str) -> str:
+	"""Auto-correct 1-character OCR substitutions against general English words."""
+	clean_alpha = re.sub(r"[^A-Za-z]", "", word)
+	if not clean_alpha or len(clean_alpha) < 3:
+		return word
+
+	# Cutoff 0.70 allows 1-char edits on 4-letter words (0.75 similarity ratio)
+	matches = difflib.get_close_matches(clean_alpha.lower(), COMMON_WORDS, n=1, cutoff=0.70)
+	if matches:
+		corrected = matches[0]
+		# Preserve original capitalization structure
+		if clean_alpha.istitle():
+			corrected = corrected.title()
+		elif clean_alpha.isupper():
+			corrected = corrected.upper()
+
+		# Replace only the alpha part, keeping attached punctuation
+		return word.replace(clean_alpha, corrected)
+
+	return word
+
+
 def _parse_info_line(raw_text: str) -> str:
-	"""Parse info lines by evaluating word structure plausibility and character counts."""
+	"""Parse info line and self-heal 1-character OCR character bleeds."""
 	text = _clean_text(raw_text).strip(" .:-_")
 	if not text:
 		return ""
@@ -622,18 +621,16 @@ def _parse_info_line(raw_text: str) -> str:
 	if not words:
 		return ""
 
-	plausible_words = [w for w in words if _is_plausible_word(w)]
+	# Auto-correct OCR character bleeds word-by-word
+	corrected_words = [_autocorrect_word(w) for w in words]
+	
+	plausible_words = [w for w in corrected_words if _is_plausible_word(w)]
 
-	# Require at least 60% of words on the line to pass structural sanity checks
-	if len(plausible_words) / float(len(words)) < 0.60:
+	# At least 50% of tokens must be valid words
+	if len(plausible_words) / float(len(words)) < 0.50:
 		return ""
 
-	# Must contain at least 3 total alphanumeric characters
-	alnum_count = sum(1 for char in text if char.isalnum())
-	if alnum_count < 3:
-		return ""
-
-	return text
+	return " ".join(corrected_words)
 
 
 def _score_temperature(raw_text: str, value: Any) -> float:
@@ -697,19 +694,45 @@ def _score_field_candidate(field_name: str, raw_text: str, value: Any) -> float:
 	return 0.0
 
 
+def _get_field_scale_bounds(field_name: str) -> tuple[float, float, float]:
+	"""
+	Return expected (min_relative_height, max_relative_height, max_aspect_ratio)
+	relative to the cropped ROI box height.
+	"""
+	if field_name == "temperature":
+		# Prominent digits fill most of the ROI vertically
+		return (0.30, 0.98, 8.0)
+
+	if field_name == "mode":
+		# Mode header text (e.g. "MODE: ELECTRIC")
+		return (0.20, 0.90, 10.0)
+
+	if field_name.startswith("dashboard_info_line_"):
+		# Multi-line prose text bounded by horizontal rules
+		return (0.32, 0.82, 10.0)
+
+	if field_name in ("time_field", "date_field"):
+		# Status bar numbers and text
+		return (0.20, 0.90, 10.0)
+
+	# General sensible default for any future text fields
+	return (0.15, 0.95, 12.0)
+
+
 def _parse_tesseract_data(
 	tesseract_output: dict[str, Any],
 	variant_shape: Optional[tuple[int, int]] = None,
 	field_name: str = "",
 ) -> str:
-	"""Extract tokens, filtering out noise relative to ROI box boundaries and confidence."""
+	"""Extract tokens using relative scale filtering without aggressive confidence drops."""
 	texts = tesseract_output.get("text", []) or []
-	confs = tesseract_output.get("conf", []) or []
 	heights = tesseract_output.get("height", []) or []
 	widths = tesseract_output.get("width", []) or []
 
 	cleaned_tokens: list[str] = []
-	var_h, var_w = variant_shape if variant_shape else (0, 0)
+	var_h = variant_shape[0] if variant_shape else 0
+
+	min_rel_h, max_rel_h, max_aspect = _get_field_scale_bounds(field_name)
 
 	for i, token in enumerate(texts):
 		if token is None:
@@ -718,41 +741,28 @@ def _parse_tesseract_data(
 		if not stripped:
 			continue
 
-		# Confidence gating for info lines
-		if field_name.startswith("dashboard_info_line_") and i < len(confs):
+		# --- UNIVERSAL RELATIVE SCALE FILTER ---
+		# Only drop tokens that are physically impossible (speckle noise or UI lines)
+		if var_h > 0 and i < len(heights) and i < len(widths):
 			try:
-				conf = float(confs[i])
-				if conf >= 0 and conf < 30.0:
+				box_h = float(heights[i])
+				box_w = float(widths[i])
+				rel_height = box_h / float(var_h)
+				aspect_ratio = box_w / max(1.0, box_h)
+
+				# Filter out tiny noise (< min_rel_h) or crop border boxes (> max_rel_h)
+				if rel_height < min_rel_h or rel_height > max_rel_h:
+					continue
+
+				# Filter out horizontal line rules
+				if aspect_ratio > max_aspect and rel_height < 0.25:
 					continue
 			except (ValueError, TypeError):
 				pass
 
-		# Relative Scale Filtering based on ROI crop dimensions
-		if var_h > 0 and field_name.startswith("dashboard_info_line_"):
-			if i < len(heights) and i < len(widths):
-				try:
-					box_h = float(heights[i])
-					box_w = float(widths[i])
-					rel_height = box_h / float(var_h)
-					aspect_ratio = box_w / max(1.0, box_h)
-
-					# Discard tokens shorter than 18% or taller than 82% of crop height
-					if rel_height < 0.18 or rel_height > 0.82:
-						continue
-
-					# Filter out wide, thin artifacts (e.g. divider line fragments)
-					if aspect_ratio > 10.0 and rel_height < 0.25:
-						continue
-				except (ValueError, TypeError):
-					pass
-
 		cleaned_tokens.append(stripped)
 
-	if not cleaned_tokens:
-		return ""
-
-	raw_text = " ".join(cleaned_tokens)
-	return _clean_text(raw_text)
+	return _clean_text(" ".join(cleaned_tokens))
 
 
 def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
