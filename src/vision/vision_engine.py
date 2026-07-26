@@ -11,6 +11,13 @@ import re
 from pathlib import Path
 from typing import Any, Optional
 import time
+import os
+
+# Prevent Paddle C++ thread race conditions and memory allocator crashes on ARM64
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["FLAGS_allocator_strategy"] = "naive"
 
 import numpy as np
 import cv2
@@ -47,25 +54,26 @@ def _require_paddleocr() -> None:
 
 
 def _get_paddle_ocr() -> Any:
-	"""Lazy load and return the shared PaddleOCR engine singleton."""
-	global _PADDLE_OCR
-	if _PADDLE_OCR is not None:
-		return _PADDLE_OCR
+    global _PADDLE_OCR
+    if _PADDLE_OCR is not None:
+        return _PADDLE_OCR
 
-	_require_paddleocr()
+    _require_paddleocr()
 
-	# Suppress PaddleOCR internal logger output
-	import logging
-	logging.getLogger("ppocr").setLevel(logging.ERROR)
+    import logging
+    logging.getLogger("ppocr").setLevel(logging.ERROR)
 
-	# Initialize lightweight text OCR (disabling heavy full-document models)
-	_PADDLE_OCR = PaddleOCR(
-		use_doc_orientation_classify=False,
-		use_doc_unwarping=False,
-		use_textline_orientation=False,
-		lang="en",
-	)
-	return _PADDLE_OCR
+    _PADDLE_OCR = PaddleOCR(
+        use_doc_orientation_classify=False,
+        use_doc_unwarping=False,
+        use_textline_orientation=False,
+        use_onnx=True,           # Bypass Paddle C++ backend
+        enable_mkldnn=False,    # Disable x86/Intel optimization routines on ARM
+        cpu_threads=1,          # Prevent thread race crashes on Raspberry Pi
+        use_gpu=False,
+        lang="en",
+    )
+    return _PADDLE_OCR
 
 
 def _order_points(points: np.ndarray) -> np.ndarray:
