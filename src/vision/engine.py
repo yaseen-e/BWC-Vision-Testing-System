@@ -414,7 +414,7 @@ def _order_points(points: np.ndarray) -> np.ndarray:
 
 
 # =============================================================================
-# IMAGE PREPARATION & VARIANT GENERATION
+# FAST IMAGE PREPARATION
 # =============================================================================
 
 def _prepare_ocr_grayscale(warped: np.ndarray) -> np.ndarray:
@@ -426,9 +426,8 @@ def _prepare_ocr_grayscale(warped: np.ndarray) -> np.ndarray:
 
 
 def _denoise_roi_grayscale(roi: np.ndarray) -> np.ndarray:
-	"""Scrub sensor/LCD grid noise at native ROI resolution."""
-	despeckled = cv2.medianBlur(roi, 3)
-	return cv2.bilateralFilter(despeckled, d=5, sigmaColor=60, sigmaSpace=60)
+	"""Fast Gaussian blur noise reduction (replaces slow bilateral filtering)."""
+	return cv2.GaussianBlur(roi, (3, 3), 0)
 
 
 def _crop_roi(prepared: np.ndarray, field: Any) -> np.ndarray:
@@ -452,7 +451,7 @@ def _crop_roi(prepared: np.ndarray, field: Any) -> np.ndarray:
 
 
 def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np.ndarray]:
-	"""Extract denoised, contrast-enhanced variants optimized for RapidOCR without edge artifacts."""
+	"""Extract single optimized image variant formatted for RapidOCR standard input."""
 	_require_cv2()
 	roi = _crop_roi(prepared, field)
 
@@ -460,57 +459,44 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 		return []
 
 	field_name = getattr(field, "name", "")
-	denoised = _denoise_roi_grayscale(roi)
 
 	# --- GIANT LCD DIGIT HANDLING (TEMPERATURE) ---
 	if field_name == "temperature":
-		return _generate_digit_variants(denoised)
+		return _generate_digit_variants(roi)
 
 	# --- STANDARD TEXT LINES (MODE, TIME, DATE, DASHBOARD INFO) ---
+	denoised = _denoise_roi_grayscale(roi)
 	h, w = denoised.shape[:2]
-	target_h = 160
-	if h < target_h:
-		scale = target_h / float(h)
-		new_w = max(1, int(w * scale))
-		denoised = cv2.resize(denoised, (new_w, target_h), interpolation=cv2.INTER_CUBIC)
 
-	# CLAHE contrast enhancement
+	# Target 48px height (optimal standard height for DBNet/CRNN inference models)
+	target_h = 48
+	if h > 0 and h != target_h:
+		scale = target_h / float(h)
+		new_w = max(10, int(w * scale))
+		denoised = cv2.resize(
+			denoised, (new_w, target_h),
+			interpolation=cv2.INTER_LINEAR if h > target_h else cv2.INTER_CUBIC
+		)
+
+	# Contrast enhancement
 	clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
 	enhanced = clahe.apply(denoised)
 
-	# Determine if background is dark (emissive screen with white text)
+	# Normalize polarity so text is dark on light background
 	is_bright_on_dark = float(np.mean(enhanced)) < 127
 	if is_bright_on_dark:
-		# Invert so text becomes standard dark text on light background
 		primary = cv2.bitwise_not(enhanced)
 	else:
 		primary = enhanced
 
-	variants: list[np.ndarray] = []
-
-	# Variant 1: Primary contrast with BORDER_REPLICATE (prevents high-contrast rectangle edge steps)
-	v1 = cv2.copyMakeBorder(primary, 25, 25, 25, 25, cv2.BORDER_REPLICATE)
-	variants.append(v1)
-
-	# Variant 2: Primary contrast with clean constant white border padding
-	v2 = cv2.copyMakeBorder(primary, 25, 25, 25, 25, cv2.BORDER_CONSTANT, value=255)
-	variants.append(v2)
-
-	# Variant 3: Clean Otsu Binary Thresholded (Inverted to black text on white background)
-	_, bin_img = cv2.threshold(primary, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-	v3 = cv2.copyMakeBorder(bin_img, 25, 25, 25, 25, cv2.BORDER_REPLICATE)
-	variants.append(v3)
-
-	return variants
+	# Single padded variant with BORDER_REPLICATE to avoid sharp bounding box edge steps
+	v1 = cv2.copyMakeBorder(primary, 15, 15, 15, 15, cv2.BORDER_REPLICATE)
+	return [v1]
 
 
 def _generate_digit_variants(roi_gray: np.ndarray) -> list[np.ndarray]:
-	"""
-	Locate digit contours, crop tightly, and scale down to standard OCR height (48px).
-	Guarantees DBNet detection on giant LCD temperature numbers.
-	"""
+	"""Locate digit contours and scale to standard height (48px) in a single fast pass."""
 	_require_cv2()
-	variants: list[np.ndarray] = []
 
 	_, thresh = cv2.threshold(roi_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 	contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -534,24 +520,21 @@ def _generate_digit_variants(roi_gray: np.ndarray) -> list[np.ndarray]:
 		digit_crop = roi_gray
 
 	ch, cw = digit_crop.shape[:2]
-	if ch > 0 and cw > 0:
-		target_h = 48
-		scale = target_h / float(ch)
-		target_w = max(10, int(cw * scale))
-		scaled_digits = cv2.resize(digit_crop, (target_w, target_h), interpolation=cv2.INTER_AREA)
+	if ch == 0 or cw == 0:
+		return []
 
-		inverted = cv2.bitwise_not(scaled_digits)
-		v1 = cv2.copyMakeBorder(inverted, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=255)
-		variants.append(v1)
+	target_h = 48
+	scale = target_h / float(ch)
+	target_w = max(10, int(cw * scale))
+	scaled_digits = cv2.resize(digit_crop, (target_w, target_h), interpolation=cv2.INTER_AREA)
 
-		_, bin_inv = cv2.threshold(scaled_digits, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-		v2 = cv2.copyMakeBorder(bin_inv, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=255)
-		variants.append(v2)
+	# Ensure black digits on white background
+	is_bright_on_dark = float(np.mean(scaled_digits)) < 127
+	if is_bright_on_dark:
+		scaled_digits = cv2.bitwise_not(scaled_digits)
 
-		v3 = cv2.copyMakeBorder(scaled_digits, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=0)
-		variants.append(v3)
-
-	return variants
+	v1 = cv2.copyMakeBorder(scaled_digits, 15, 15, 15, 15, cv2.BORDER_CONSTANT, value=255)
+	return [v1]
 
 
 # =============================================================================
@@ -583,6 +566,10 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 			best_value = value
 			best_score = score
 
+		# Short-circuit early if high-confidence result is already found
+		if best_score > 5.0:
+			break
+
 	return best_raw, best_value
 
 
@@ -607,7 +594,6 @@ def _parse_and_filter_rapidocr_boxes(
 			continue
 
 		box_points = np.array(box, dtype=np.float32)
-		# Correct coordinate indexing (0 for x, 1 for y)
 		min_x, max_x = np.min(box_points[:, 0]), np.max(box_points[:, 0])
 		min_y, max_y = np.min(box_points[:, 1]), np.max(box_points[:, 1])
 
@@ -651,7 +637,6 @@ def _score_field_candidate(field_name: str, raw_text: str, value: Any, conf: flo
 		else:
 			score += 1.0
 	elif field_name.startswith("dashboard_info_line"):
-		# Penalize candidates that start with stray punctuation
 		if raw_text and raw_text[0] in ".,;:-_~'\"":
 			score -= 0.5
 		if isinstance(value, str) and len(value) >= 3:
@@ -730,10 +715,8 @@ def _parse_dashboard_info(raw_text: str) -> str:
 	if not raw_text:
 		return ""
 
-	# Strip leading stray punctuation and symbols (e.g. leading periods, commas, dots)
 	cleaned = re.sub(r"^[^\w\s]+", "", raw_text.strip()).strip()
 
-	# Fix common LCD character stroke misreads for standard water heater terms
 	word_corrections = {
 		r"\bFon\b": "Fan",
 		r"\bCali\b": "Call",
@@ -775,12 +758,7 @@ ICON_STATE_MAPPINGS = {
 
 
 def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, str]:
-	"""
-	Classify any icon generically by standardizing polarity, cropping tightly to
-	foreground contours, square-normalizing to 64x64, and calculating a composite
-	score combining Hu Moments (shape dissimilarity), template cross-correlation,
-	and bitwise structural XOR.
-	"""
+	"""Classify icon via shape/template matching."""
 	_require_cv2()
 	templates_dict = _load_icon_templates().get(field_name, {})
 
@@ -793,7 +771,6 @@ def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, st
 	blurred = cv2.GaussianBlur(roi_gray, (3, 3), 0)
 	_, roi_thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-	# Ensure foreground is white (255) on black (0) background regardless of ROI polarity
 	perimeter = np.concatenate([
 		roi_thresh[0, :], roi_thresh[-1, :],
 		roi_thresh[:, 0], roi_thresh[:, -1]
@@ -835,19 +812,14 @@ def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, st
 			scores[state_key] = float("inf")
 			continue
 
-		# Metric 1: Shape Dissimilarity (Hu Moments) - scale & stroke-thickness invariant
 		shape_diff = cv2.matchShapes(roi_norm, template_norm, cv2.CONTOURS_MATCH_I1, 0.0)
-
-		# Metric 2: Normalized Cross-Correlation
 		corr_matrix = cv2.matchTemplate(roi_norm, template_norm, cv2.TM_CCOEFF_NORMED)
 		max_corr = float(np.max(corr_matrix)) if corr_matrix is not None else 0.0
 		corr_dist = 1.0 - max(0.0, max_corr)
 
-		# Metric 3: Bitwise XOR Structural Error
 		xor_diff = cv2.bitwise_xor(roi_norm, template_norm)
 		xor_dist = np.sum(xor_diff == 255) / (64.0 * 64.0)
 
-		# Composite Score (Lower is better match)
 		composite = (0.45 * shape_diff) + (0.35 * corr_dist) + (0.20 * xor_dist)
 		scores[state_key] = float(composite)
 
@@ -857,7 +829,7 @@ def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, st
 
 
 def _load_icon_templates() -> dict[str, dict[str, np.ndarray]]:
-	"""Lazy load icon templates from ./templates directory into normalized memory cache."""
+	"""Lazy load icon templates into memory cache."""
 	global _ICON_TEMPLATES
 	if _ICON_TEMPLATES:
 		return _ICON_TEMPLATES
