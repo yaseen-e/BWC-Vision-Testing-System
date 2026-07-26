@@ -426,7 +426,7 @@ def _prepare_ocr_grayscale(warped: np.ndarray) -> np.ndarray:
 
 
 def _denoise_roi_grayscale(roi: np.ndarray) -> np.ndarray:
-	"""Scrub sensor noise at native ROI resolution."""
+	"""Scrub sensor/LCD grid noise at native ROI resolution."""
 	despeckled = cv2.medianBlur(roi, 3)
 	return cv2.bilateralFilter(despeckled, d=5, sigmaColor=60, sigmaSpace=60)
 
@@ -452,7 +452,7 @@ def _crop_roi(prepared: np.ndarray, field: Any) -> np.ndarray:
 
 
 def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np.ndarray]:
-	"""Extract denoised, contrast-enhanced variants optimized for RapidOCR."""
+	"""Extract denoised, contrast-enhanced variants optimized for RapidOCR without edge artifacts."""
 	_require_cv2()
 	roi = _crop_roi(prepared, field)
 
@@ -466,7 +466,7 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 	if field_name == "temperature":
 		return _generate_digit_variants(denoised)
 
-	# --- STANDARD TEXT LINES (MODE, TIME, DATE) ---
+	# --- STANDARD TEXT LINES (MODE, TIME, DATE, DASHBOARD INFO) ---
 	h, w = denoised.shape[:2]
 	target_h = 160
 	if h < target_h:
@@ -478,19 +478,27 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 	clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
 	enhanced = clahe.apply(denoised)
 
+	# Determine if background is dark (emissive screen with white text)
+	is_bright_on_dark = float(np.mean(enhanced)) < 127
+	if is_bright_on_dark:
+		# Invert so text becomes standard dark text on light background
+		primary = cv2.bitwise_not(enhanced)
+	else:
+		primary = enhanced
+
 	variants: list[np.ndarray] = []
 
-	# Variant 1: Enhanced grayscale with clean white border padding
-	v1 = cv2.copyMakeBorder(enhanced, 25, 25, 25, 25, cv2.BORDER_CONSTANT, value=255)
+	# Variant 1: Primary contrast with BORDER_REPLICATE (prevents high-contrast rectangle edge steps)
+	v1 = cv2.copyMakeBorder(primary, 25, 25, 25, 25, cv2.BORDER_REPLICATE)
 	variants.append(v1)
 
-	# Variant 2: Inverted grayscale with clean white border padding
-	v2 = cv2.copyMakeBorder(cv2.bitwise_not(enhanced), 25, 25, 25, 25, cv2.BORDER_CONSTANT, value=255)
+	# Variant 2: Primary contrast with clean constant white border padding
+	v2 = cv2.copyMakeBorder(primary, 25, 25, 25, 25, cv2.BORDER_CONSTANT, value=255)
 	variants.append(v2)
 
-	# Variant 3: Otsu Binary Thresholded
-	_, bin_img = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-	v3 = cv2.copyMakeBorder(bin_img, 25, 25, 25, 25, cv2.BORDER_CONSTANT, value=255)
+	# Variant 3: Clean Otsu Binary Thresholded (Inverted to black text on white background)
+	_, bin_img = cv2.threshold(primary, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+	v3 = cv2.copyMakeBorder(bin_img, 25, 25, 25, 25, cv2.BORDER_REPLICATE)
 	variants.append(v3)
 
 	return variants
@@ -599,6 +607,7 @@ def _parse_and_filter_rapidocr_boxes(
 			continue
 
 		box_points = np.array(box, dtype=np.float32)
+		# Correct coordinate indexing (0 for x, 1 for y)
 		min_x, max_x = np.min(box_points[:, 0]), np.max(box_points[:, 0])
 		min_y, max_y = np.min(box_points[:, 1]), np.max(box_points[:, 1])
 
@@ -612,8 +621,11 @@ def _parse_and_filter_rapidocr_boxes(
 		if len(text) == 1 and not text.isalnum():
 			continue
 
-		valid_texts.append(text)
-		confidences.append(conf)
+		# Clean leading stray punctuation from individual box predictions
+		cleaned_box_text = re.sub(r"^[^\w\s]+", "", text).strip()
+		if cleaned_box_text:
+			valid_texts.append(cleaned_box_text)
+			confidences.append(conf)
 
 	if not valid_texts:
 		return "", 0.0
@@ -638,6 +650,12 @@ def _score_field_candidate(field_name: str, raw_text: str, value: Any, conf: flo
 			score += 4.0
 		else:
 			score += 1.0
+	elif field_name.startswith("dashboard_info_line"):
+		# Penalize candidates that start with stray punctuation
+		if raw_text and raw_text[0] in ".,;:-_~'\"":
+			score -= 0.5
+		if isinstance(value, str) and len(value) >= 3:
+			score += 2.0
 
 	return score
 
@@ -653,6 +671,8 @@ def _parse_field_value(field_name: str, raw_text: str) -> Any:
 		return _parse_temperature(raw_text)
 	if field_name == "time_field":
 		return _parse_time(raw_text)
+	if field_name.startswith("dashboard_info_line"):
+		return _parse_dashboard_info(raw_text)
 	return raw_text.strip()
 
 
@@ -703,6 +723,29 @@ def _parse_time(raw_text: str) -> str:
 	elif "P" in text:
 		text = text.split("P")[0] + "PM"
 	return text.strip()
+
+
+def _parse_dashboard_info(raw_text: str) -> str:
+	"""Clean dashboard line strings by removing phantom border noise and correcting LCD misreads."""
+	if not raw_text:
+		return ""
+
+	# Strip leading stray punctuation and symbols (e.g. leading periods, commas, dots)
+	cleaned = re.sub(r"^[^\w\s]+", "", raw_text.strip()).strip()
+
+	# Fix common LCD character stroke misreads for standard water heater terms
+	word_corrections = {
+		r"\bFon\b": "Fan",
+		r"\bCali\b": "Call",
+		r"\bHeot\b": "Heat",
+		r"\bHybr1d\b": "Hybrid",
+		r"\bEiectric\b": "Electric",
+	}
+	for pattern, replacement in word_corrections.items():
+		cleaned = re.sub(pattern, replacement, cleaned, flags=re.IGNORECASE)
+
+	cleaned = re.sub(r"\s+", " ", cleaned)
+	return cleaned
 
 
 def _field_empty_value(field_name: str) -> Any:
