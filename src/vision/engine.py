@@ -444,33 +444,38 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 	if h == 0 or w == 0:
 		return []
 
-	# Normalize full intensity range [0, 255]
-	norm = cv2.normalize(roi, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
+	# Smooth out LCD background dither/grain noise
+	denoised = cv2.GaussianBlur(roi, (3, 3), 0)
 
-	# Rescale image to optimal OCR height (64px for text, 96px for temperature digits)
+	# Rescale image to optimal OCR height
 	target_h = 96 if (field and field.name == "temperature") else 64
 	scale = target_h / float(h)
 	new_w = max(20, int(w * scale))
-	resized = cv2.resize(norm, (new_w, target_h), interpolation=cv2.INTER_CUBIC)
+	resized = cv2.resize(denoised, (new_w, target_h), interpolation=cv2.INTER_CUBIC)
 
-	# Add 20px padding to prevent DBNet bounding box edge clipping
-	padded = cv2.copyMakeBorder(resized, 20, 20, 20, 20, cv2.BORDER_REPLICATE)
+	# Percentile-based contrast scaling (prevents background noise spikes from blowing up)
+	p2, p98 = np.percentile(resized, (2, 98))
+	if p98 > p2:
+		norm = np.clip((resized - p2) * (255.0 / (p98 - p2)), 0, 255).astype(np.uint8)
+	else:
+		norm = resized
 
-	# Check border intensity to auto-detect dark background
+	# Auto-detect dark background and invert to black text on white background
 	border_pixels = np.concatenate([
-		padded[:10, :].flatten(), padded[-10:, :].flatten(),
-		padded[:, :10].flatten(), padded[:, -10:].flatten()
+		norm[:5, :].flatten(), norm[-5:, :].flatten(),
+		norm[:, :5].flatten(), norm[:, -5:].flatten()
 	])
 	is_dark_bg = float(np.mean(border_pixels)) < 127
 
 	if is_dark_bg:
-		primary = 255 - padded
-		secondary = padded
+		primary = 255 - norm
 	else:
-		primary = padded
-		secondary = 255 - padded
+		primary = norm
 
-	return [primary, secondary]
+	# Pad with solid white background instead of border replication
+	padded = cv2.copyMakeBorder(primary, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=(255, 255, 255))
+
+	return [padded, 255 - padded]
 
 
 # =============================================================================
@@ -639,11 +644,14 @@ def _parse_time(raw_text: str) -> str:
 
 
 def _parse_dashboard_info(raw_text: str) -> str:
-	"""Clean dashboard line strings by removing phantom border noise."""
+	"""Clean dashboard line strings by removing phantom border noise and orphan characters."""
 	if not raw_text:
 		return ""
 
 	cleaned = re.sub(r"^[^\w\s\.\,\!\?]+", "", raw_text.strip()).strip()
+
+	# Strip orphan single-character noise (e.g., "Setpoint s satisfied." -> "Setpoint satisfied.")
+	cleaned = re.sub(r"\b[a-zA-Z]\b\s*", "", cleaned)
 
 	word_corrections = {
 		r"\bFon\b": "Fan",
@@ -655,7 +663,7 @@ def _parse_dashboard_info(raw_text: str) -> str:
 	for pattern, replacement in word_corrections.items():
 		cleaned = re.sub(pattern, replacement, cleaned, flags=re.IGNORECASE)
 
-	cleaned = re.sub(r"\s+", " ", cleaned)
+	cleaned = re.sub(r"\s+", " ", cleaned).strip()
 	return cleaned
 
 
