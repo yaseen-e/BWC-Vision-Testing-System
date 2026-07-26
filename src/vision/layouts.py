@@ -204,12 +204,6 @@ TEMPERATURE_FIELD = OCRField(
 	fallback=ROIBox(top=0.12, bottom=0.52, left=0.24, right=0.68),
 )
 
-TEMPERATURE_FIELD = OCRField(
-	name="temperature",
-	ideal=ROIBox(top=0.14, bottom=0.44, left=0.24, right=0.70),
-	fallback=ROIBox(top=0.12, bottom=0.52, left=0.20, right=0.72),
-)
-
 DASHBOARD_INFO_LINE_1 = OCRField(
 	name="dashboard_info_line_1",
 	ideal=ROIBox(top=0.45, bottom=0.56, left=0.10, right=0.90),

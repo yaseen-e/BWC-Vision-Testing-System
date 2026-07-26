@@ -450,22 +450,15 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 
 	variants: list[np.ndarray] = []
 
-	# --- Variant 1: Inverted Grayscale (Black text on white background) ---
-	# Prevents DBNet from discarding dark display blocks inside white padded borders
-	inverted = cv2.bitwise_not(denoised_roi)
-	v1 = cv2.copyMakeBorder(inverted, 25, 25, 25, 25, cv2.BORDER_CONSTANT, value=255)
+	# --- Variant 1: Denoised Grayscale (Padding added) ---
+	v1 = cv2.copyMakeBorder(denoised_roi, 25, 25, 25, 25, cv2.BORDER_CONSTANT, value=255)
 	variants.append(v1)
 
-	# --- Variant 2: Inverted Otsu Threshold (Clean high-contrast binary digits) ---
-	_, binary_inv = cv2.threshold(denoised_roi, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-	v2 = cv2.copyMakeBorder(binary_inv, 25, 25, 25, 25, cv2.BORDER_CONSTANT, value=255)
-	variants.append(v2)
-
-	# --- Variant 3: CLAHE Contrast Enhanced ---
+	# --- Variant 2: CLAHE Contrast Enhanced ---
 	clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
 	enhanced = clahe.apply(denoised_roi)
-	v3 = cv2.copyMakeBorder(cv2.bitwise_not(enhanced), 25, 25, 25, 25, cv2.BORDER_CONSTANT, value=255)
-	variants.append(v3)
+	v2 = cv2.copyMakeBorder(enhanced, 25, 25, 25, 25, cv2.BORDER_CONSTANT, value=255)
+	variants.append(v2)
 
 	return variants
 
