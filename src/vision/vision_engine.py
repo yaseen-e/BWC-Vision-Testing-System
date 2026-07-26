@@ -724,10 +724,11 @@ def _parse_tesseract_data(
 	variant_shape: Optional[tuple[int, int]] = None,
 	field_name: str = "",
 ) -> str:
-	"""Extract tokens using relative scale filtering without aggressive confidence drops."""
+	"""Extract tokens using confidence thresholds and relative scale filtering."""
 	texts = tesseract_output.get("text", []) or []
 	heights = tesseract_output.get("height", []) or []
 	widths = tesseract_output.get("width", []) or []
+	confs = tesseract_output.get("conf", []) or []
 
 	cleaned_tokens: list[str] = []
 	var_h = variant_shape[0] if variant_shape else 0
@@ -741,8 +742,19 @@ def _parse_tesseract_data(
 		if not stripped:
 			continue
 
+		# --- CONFIDENCE FILTER ---
+		# Drop low-confidence noise hallucinations (conf < 45%).
+		# Tesseract sets conf = -1 for layout blocks, so we check 0 <= confidence < 45.
+		if i < len(confs):
+			try:
+				confidence = float(confs[i])
+				if 0.0 <= confidence < 45.0:
+					continue
+			except (ValueError, TypeError):
+				pass
+
 		# --- UNIVERSAL RELATIVE SCALE FILTER ---
-		# Only drop tokens that are physically impossible (speckle noise or UI lines)
+		# Drop tokens that are physically impossible (speckle noise or UI lines)
 		if var_h > 0 and i < len(heights) and i < len(widths):
 			try:
 				box_h = float(heights[i])
