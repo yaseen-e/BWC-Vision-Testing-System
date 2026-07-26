@@ -697,12 +697,40 @@ def _score_field_candidate(field_name: str, raw_text: str, value: Any) -> float:
 	return 0.0
 
 
+def _get_field_scale_bounds(field_name: str) -> tuple[float, float, float]:
+	"""
+	Return expected (min_relative_height, max_relative_height, max_aspect_ratio)
+	relative to the cropped ROI box height.
+	"""
+	if field_name == "temperature":
+		# Prominent digits fill most of the ROI vertically
+		return (0.30, 0.98, 8.0)
+
+	if field_name == "mode":
+		# Mode header text (e.g. "MODE: ELECTRIC")
+		return (0.20, 0.90, 10.0)
+
+	if field_name.startswith("dashboard_info_line_"):
+		# Multi-line prose text bounded by horizontal rules
+		return (0.18, 0.82, 10.0)
+
+	if field_name in ("time_field", "date_field"):
+		# Status bar numbers and text
+		return (0.20, 0.90, 10.0)
+
+	# General sensible default for any future text fields
+	return (0.15, 0.95, 12.0)
+
+
 def _parse_tesseract_data(
 	tesseract_output: dict[str, Any],
 	variant_shape: Optional[tuple[int, int]] = None,
 	field_name: str = "",
 ) -> str:
-	"""Extract tokens, filtering out noise relative to ROI box boundaries and confidence."""
+	"""
+	Extract tokens from Tesseract data across ALL fields using relative scale filtering
+	against variant ROI height and aspect ratio.
+	"""
 	texts = tesseract_output.get("text", []) or []
 	confs = tesseract_output.get("conf", []) or []
 	heights = tesseract_output.get("height", []) or []
@@ -711,6 +739,9 @@ def _parse_tesseract_data(
 	cleaned_tokens: list[str] = []
 	var_h, var_w = variant_shape if variant_shape else (0, 0)
 
+	# Fetch scale rules specific to this field type
+	min_rel_h, max_rel_h, max_aspect = _get_field_scale_bounds(field_name)
+
 	for i, token in enumerate(texts):
 		if token is None:
 			continue
@@ -718,33 +749,32 @@ def _parse_tesseract_data(
 		if not stripped:
 			continue
 
-		# Confidence gating for info lines
-		if field_name.startswith("dashboard_info_line_") and i < len(confs):
+		# Confidence gating for non-digit text fields
+		if i < len(confs) and field_name != "temperature":
 			try:
 				conf = float(confs[i])
-				if conf >= 0 and conf < 30.0:
+				if conf >= 0 and conf < 25.0:
 					continue
 			except (ValueError, TypeError):
 				pass
 
-		# Relative Scale Filtering based on ROI crop dimensions
-		if var_h > 0 and field_name.startswith("dashboard_info_line_"):
-			if i < len(heights) and i < len(widths):
-				try:
-					box_h = float(heights[i])
-					box_w = float(widths[i])
-					rel_height = box_h / float(var_h)
-					aspect_ratio = box_w / max(1.0, box_h)
+		# --- UNIVERSAL RELATIVE SCALE FILTER ---
+		if var_h > 0 and i < len(heights) and i < len(widths):
+			try:
+				box_h = float(heights[i])
+				box_w = float(widths[i])
+				rel_height = box_h / float(var_h)
+				aspect_ratio = box_w / max(1.0, box_h)
 
-					# Discard tokens shorter than 18% or taller than 82% of crop height
-					if rel_height < 0.18 or rel_height > 0.82:
-						continue
+				# Discard tokens too small (speckle/noise) or too large (box outline artifacts)
+				if rel_height < min_rel_h or rel_height > max_rel_h:
+					continue
 
-					# Filter out wide, thin artifacts (e.g. divider line fragments)
-					if aspect_ratio > 10.0 and rel_height < 0.25:
-						continue
-				except (ValueError, TypeError):
-					pass
+				# Discard wide horizontal line fragments (e.g. UI divider lines)
+				if aspect_ratio > max_aspect and rel_height < 0.25:
+					continue
+			except (ValueError, TypeError):
+				pass
 
 		cleaned_tokens.append(stripped)
 
