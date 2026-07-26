@@ -67,10 +67,7 @@ def _get_paddle_ocr() -> Any:
         use_doc_orientation_classify=False,
         use_doc_unwarping=False,
         use_textline_orientation=False,
-        use_onnx=True,           # Bypass Paddle C++ backend
-        enable_mkldnn=False,    # Disable x86/Intel optimization routines on ARM
-        cpu_threads=1,          # Prevent thread race crashes on Raspberry Pi
-        use_gpu=False,
+        enable_mkldnn=False,  # Bypasses oneDNN/PIR CPU routines
         lang="en",
     )
     return _PADDLE_OCR
