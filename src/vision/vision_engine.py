@@ -266,14 +266,7 @@ def _is_roi_blank(bin_img: np.ndarray, min_text_ratio: float = 0.008) -> bool:
 
 
 def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np.ndarray]:
-	"""Extract denoised-then-upscaled, speckle-filtered variants for OCR.
-
-	Order of operations matters: the ROI is denoised at its native, cropped
-	resolution first (while speckle is still pixel-sized), then upscaled
-	for Tesseract, then thresholded and cleaned. Doing it in the opposite
-	order -- upscale first, denoise second -- lets noise get magnified into
-	character-sized blobs before any filtering ever sees it.
-	"""
+	"""Extract denoised-then-upscaled, speckle-filtered variants for OCR."""
 	_require_cv2()
 
 	if field is not None and hasattr(field, "ideal"):
@@ -284,13 +277,8 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 	if roi is None or roi.size == 0:
 		return []
 
-	# 1. Denoise at native resolution, while speckle is still single-pixel
-	# sized, before upscaling gets a chance to magnify it.
 	denoised_roi = _denoise_roi_grayscale(roi)
 
-	# 2. Upscale to a comfortable working size for the Tesseract LSTM engine.
-	# INTER_LINEAR avoids the ringing artifacts INTER_CUBIC can introduce
-	# around noisy edges, which would otherwise create new speckle.
 	h, w = denoised_roi.shape[:2]
 	target_height = 180
 	if h < target_height:
@@ -302,14 +290,6 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 
 	def _finalize(bin_img: np.ndarray) -> Optional[np.ndarray]:
 		bin_img = _ensure_black_text_white_bg(bin_img)
-
-		# --- STEM & LOOP SEPARATION ---
-		# Convert to foreground mask (text = 255) to sever thin horizontal 
-		# pixel bridges between stems (e.g., 'll' -> 'd' or 'e' -> 'o').
-		fg_mask = cv2.bitwise_not(bin_img)
-		sep_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 1))
-		fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, sep_kernel)
-		bin_img = cv2.bitwise_not(fg_mask)
 
 		# Erase blobs too short to be real glyph strokes (sensor speckle).
 		bin_img = _filter_connected_components(bin_img)
@@ -327,7 +307,7 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 	if finalized is not None:
 		variants.append(finalized)
 
-	# --- Variant 2: CLAHE + Otsu (helps low-contrast / glare frames) ---
+	# --- Variant 2: CLAHE + Otsu ---
 	clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
 	enhanced = clahe.apply(denoised_roi)
 	_, v2 = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
@@ -335,7 +315,7 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 	if finalized is not None:
 		variants.append(finalized)
 
-	# --- Variant 3: Adaptive Gaussian Thresholding (uneven backlight) ---
+	# --- Variant 3: Adaptive Gaussian Thresholding ---
 	curr_h, curr_w = denoised_roi.shape[:2]
 	max_block = max(3, (min(curr_h, curr_w) // 2) * 2 - 1)
 	block_size = min(41, max_block)
@@ -615,8 +595,8 @@ def _autocorrect_word(word: str) -> str:
 	if not clean_alpha or len(clean_alpha) < 3:
 		return word
 
-	# Find close matches with high similarity (> 80%)
-	matches = difflib.get_close_matches(clean_alpha.lower(), COMMON_WORDS, n=1, cutoff=0.78)
+	# Cutoff 0.70 allows 1-char edits on 4-letter words (0.75 similarity ratio)
+	matches = difflib.get_close_matches(clean_alpha.lower(), COMMON_WORDS, n=1, cutoff=0.70)
 	if matches:
 		corrected = matches[0]
 		# Preserve original capitalization structure
@@ -624,7 +604,7 @@ def _autocorrect_word(word: str) -> str:
 			corrected = corrected.title()
 		elif clean_alpha.isupper():
 			corrected = corrected.upper()
-		
+
 		# Replace only the alpha part, keeping attached punctuation
 		return word.replace(clean_alpha, corrected)
 
@@ -729,7 +709,7 @@ def _get_field_scale_bounds(field_name: str) -> tuple[float, float, float]:
 
 	if field_name.startswith("dashboard_info_line_"):
 		# Multi-line prose text bounded by horizontal rules
-		return (0.40, 0.82, 10.0)
+		return (0.18, 0.82, 10.0)
 
 	if field_name in ("time_field", "date_field"):
 		# Status bar numbers and text
