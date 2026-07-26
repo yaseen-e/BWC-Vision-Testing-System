@@ -279,6 +279,12 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 
 	denoised_roi = _denoise_roi_grayscale(roi)
 
+	# --- PRE-THRESHOLD CONTRAST GUARD ---
+	# Blank lines have near-zero intensity variance (std < 8.0).
+	# Exit early to prevent thresholding from turning background noise into phantom letters.
+	if np.std(denoised_roi) < 8.0:
+		return []
+
 	h, w = denoised_roi.shape[:2]
 	target_height = 180
 	if h < target_height:
@@ -525,21 +531,6 @@ def _parse_field_value(field_name: str, raw_text: str) -> Any:
 	return _clean_text(raw_text)
 
 
-def _score_temperature(raw_text: str, value: Any) -> float:
-	if not isinstance(value, int):
-		return -1.0
-
-	score = 0.0
-	# Standard bounds for a water heater
-	if 90 <= value <= 160:
-		score += 2.0
-	if 60 <= value <= 199:
-		score += 1.5
-	if len(str(value)) == 3:
-		score += 1.0
-	return score
-
-
 def _is_plausible_word(word: str) -> bool:
 	"""Check if a token has plausible word structure (vowel ratio, pronounceability, digits)."""
 	clean_num = re.sub(r"[^0-9]", "", word)
@@ -566,7 +557,11 @@ def _is_plausible_word(word: str) -> bool:
 			"ME", "WE", "UP", "OR", "IF", "DO", "SO", "AM", "PM", "ID", "OK"
 		}
 
-	# 3+ letter words must contain at least 1 vowel and not be >85% vowels
+	# 3-letter words MUST exist in COMMON_WORDS (blocks phantom words like "Cae", "Zog")
+	if length == 3 and clean_alpha.lower() not in COMMON_WORDS:
+		return False
+
+	# 4+ letter words must contain at least 1 vowel and not be >85% vowels
 	vowel_ratio = vowels / float(length)
 	if vowels == 0:
 		return False  # Blocks vowelless gibberish ("CFR", "TRG")
@@ -586,7 +581,8 @@ import difflib
 COMMON_WORDS = {
 	"call", "for", "heat", "setpoint", "satisfied", "electric", "heat", "pump",
 	"hybrid", "vacation", "disabled", "enabled", "running", "status", "water",
-	"heater", "system", "normal", "error", "warning", "mode", "standby"
+	"heater", "system", "normal", "error", "warning", "mode", "standby", "on", "off",
+	"plus", "compressor", "element"
 }
 
 def _autocorrect_word(word: str) -> str:
@@ -656,10 +652,14 @@ def _score_info_line(raw_text: str, parsed_value: Any) -> float:
 	if not words:
 		return -1.0
 
-	plausible_words = [w for w in words if _is_plausible_word(w)]
-	if not plausible_words:
+	# Require at least one multi-letter plausible word (prevents standalone phantom "a")
+	meaningful_words = [
+		w for w in words if _is_plausible_word(w) and len(re.sub(r"[^A-Za-z0-9]", "", w)) >= 2
+	]
+	if not meaningful_words:
 		return -1.0
 
+	plausible_words = [w for w in words if _is_plausible_word(w)]
 	plausible_ratio = len(plausible_words) / float(len(words))
 	if plausible_ratio < 0.60:
 		return -1.0
@@ -709,7 +709,7 @@ def _get_field_scale_bounds(field_name: str) -> tuple[float, float, float]:
 
 	if field_name.startswith("dashboard_info_line_"):
 		# Multi-line prose text bounded by horizontal rules
-		return (0.32, 0.82, 10.0)
+		return (0.18, 0.82, 10.0)
 
 	if field_name in ("time_field", "date_field"):
 		# Status bar numbers and text
