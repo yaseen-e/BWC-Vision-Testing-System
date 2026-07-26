@@ -356,7 +356,7 @@ def _process_display_contour_and_warp(
 	v_left = bottom_left - top_left
 	v_right = bottom_right - top_right
 
-	ext_factor = 9.0 / 91.0
+	ext_factor = 10.0 / 90.0
 	extended_bottom_left = bottom_left + v_left * ext_factor
 	extended_bottom_right = bottom_right + v_right * ext_factor
 	extended_contour = np.array([top_left, top_right, extended_bottom_right, extended_bottom_left], dtype="float32")
