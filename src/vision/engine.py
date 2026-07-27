@@ -660,7 +660,7 @@ def _parse_and_filter_rapidocr_boxes(
 			if i > 0:
 				prev_item = row[i - 1]
 				gap = item["min_x"] - prev_item["max_x"]
-				if gap > 0.8 and not line_text.endswith(" ") and not token.startswith(" "):
+				if gap > 0.6 and not line_text.endswith(" ") and not token.startswith(" "):
 					line_text += " "
 
 			line_text += token
