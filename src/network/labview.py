@@ -52,9 +52,14 @@ def parse_labview_command(command: str) -> LabViewCommand | None:
 
 _SIMULATED_COMMANDS: collections.deque[str] = collections.deque(
 	[
-		# Homescreen Verification
-		"BACK", "RUN_OCR", "BACK", "RUN_OCR", "BACK", "RUN_OCR", "SHUTDOWN",
-		# Location Selection Test Sequence
+		# C1-C7: HS
+		"BACK", "RUN_OCR", "BACK", "RUN_OCR", "BACK", "RUN_OCR", "BACK", "RUN_OCR", "BACK", "RUN_OCR", "BACK", "RUN_OCR", "BACK", "RUN_OCR",
+		# C8: SST
+		"MENU", "DOWN", "SELECT", "RUN_OCR",
+		# C9: SSB
+		"DOWN", "RUN_OCR",
+		"UP", "BACK", "BACK",
+		# C10-C13: LOC
 		"MENU", "RIGHT", "DOWN", "SELECT", "DOWN", "DOWN", "SELECT", "DOWN", "DOWN", "SELECT",
 		# USA
 		"SELECT", "SELECT", "RUN_OCR",
@@ -65,21 +70,15 @@ _SIMULATED_COMMANDS: collections.deque[str] = collections.deque(
 		# OTHER
 		"LEFT", "SELECT", "DOWN", "DOWN", "DOWN", "SELECT", "RUN_OCR", "SHUTDOWN",
 		"BACK", "BACK", "BACK", "BACK",
-		# User Schedules Test Sequence
-		"MENU", "RIGHT", "RIGHT", "SELECT", "SELECT", "SELECT", "RUN_OCR",
-		"DOWN", "SELECT", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "SELECT", "SELECT", "RUN_OCR",
+		# C14, C15: SL
+		"MENU", "RIGHT", "RIGHT", "SELECT", "SELECT", "SELECT", "RUN_OCR", "DOWN", "RUN_OCR",
+		# C15: SDL
+		"SELECT", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "SELECT", "SELECT", "RUN_OCR",
 		"SELECT", "BACK", "BACK", "BACK", "BACK",
-		# Mode Transition Test Sequence
-		# HEAT_PUMP
-		"BACK", "MENU", "SELECT", "LEFT", "LEFT", "SELECT", "DOWN", "DOWN", "SELECT", "RIGHT", "RIGHT", "RUN_OCR",
-		# HYBRID_STANDARD
-		"BACK", "MENU", "SELECT", "LEFT", "LEFT", "SELECT", "SELECT", "RIGHT", "RIGHT", "RUN_OCR",
-		# HYBRID_PLUS
-		"BACK", "MENU", "SELECT", "LEFT", "LEFT", "SELECT", "DOWN", "SELECT", "RIGHT", "RIGHT", "RUN_OCR",
-		# ELECTRIC
-		"BACK", "MENU", "SELECT", "LEFT", "LEFT", "SELECT", "DOWN", "DOWN", "DOWN", "SELECT", "RIGHT", "RIGHT", "RUN_OCR",
-		# VACATION
-		"BACK", "MENU", "SELECT", "LEFT", "LEFT", "SELECT", "DOWN", "DOWN", "DOWN", "DOWN", "SELECT", "RIGHT", "RIGHT", "RUN_OCR",
+		# C17, C18: AFL
+		"RIGHT", "SELECT", "RUN_OCR", "DOWN", "RUN_OCR",
+		# C19: HS
+		"BACK", "LEFT", "RUN_OCR",
 		"SHUTDOWN",
 	]
 )
