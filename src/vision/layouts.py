@@ -205,7 +205,7 @@ MODE_FIELD = OCRField(
 
 TEMPERATURE_FIELD = OCRField(
 	name="temperature",
-	ideal=ROIBox(top=0.16, bottom=0.42, left=0.28, right=0.64),
+	ideal=ROIBox(top=0.16, bottom=0.42, left=0.28, right=0.73),
 	fallback=ROIBox(top=0.12, bottom=0.52, left=0.24, right=0.68),
 	whitelisted_chars="0123456789",
 )
