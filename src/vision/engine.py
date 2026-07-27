@@ -587,7 +587,7 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 def _parse_and_filter_rapidocr_boxes(
 	rapid_output: Optional[list[Any]]
 ) -> tuple[str, float]:
-	"""Filter boxes and reconstruct spatial word spacing cleanly."""
+	"""Filter boxes and group by line, relying purely on OCR model predictions."""
 	if not rapid_output:
 		return "", 0.0
 
@@ -599,36 +599,29 @@ def _parse_and_filter_rapidocr_boxes(
 
 		box, text, conf = item[0], str(item[1]).strip(), float(item[2])
 
-		# Lower confidence threshold (0.40) to preserve low-contrast digits
 		if not text or conf < 0.40:
 			continue
 		if len(text) == 1 and conf < 0.45:
 			continue
 
 		box_points = np.array(box, dtype=np.float32)
-		min_x, max_x = float(np.min(box_points[:, 0])), float(np.max(box_points[:, 0]))
+		min_x = float(np.min(box_points[:, 0]))
 		min_y, max_y = float(np.min(box_points[:, 1])), float(np.max(box_points[:, 1]))
-		width = max_x - min_x
 		height = max_y - min_y
 		center_y = (min_y + max_y) / 2.0
-
-		if width < 3.0 or height < 3.0:
-			continue
 
 		items_to_keep.append({
 			"text": text,
 			"conf": conf,
 			"min_x": min_x,
-			"max_x": max_x,
 			"center_y": center_y,
 			"height": height,
-			"width": width,
 		})
 
 	if not items_to_keep:
 		return "", 0.0
 
-	# Vertical sorting for line grouping
+	# Group items into visual rows by Y-center
 	items_to_keep.sort(key=lambda k: k["center_y"])
 
 	rows: list[list[dict[str, Any]]] = []
@@ -649,21 +642,11 @@ def _parse_and_filter_rapidocr_boxes(
 
 	for row in rows:
 		row.sort(key=lambda k: k["min_x"])
-		line_text = ""
-		for i, item in enumerate(row):
-			token = item["text"]
-			all_confidences.append(item["conf"])
+		row_text = " ".join(item["text"] for item in row)
+		all_confidences.extend(item["conf"] for item in row)
 
-			if i > 0:
-				prev_item = row[i - 1]
-				gap = item["min_x"] - prev_item["max_x"]
-				if gap > 0.6 and not line_text.endswith(" ") and not token.startswith(" "):
-					line_text += " "
-
-			line_text += token
-
-		if line_text.strip():
-			line_strings.append(line_text.strip())
+		if row_text.strip():
+			line_strings.append(row_text.strip())
 
 	full_text = " ".join(line_strings)
 	full_text = re.sub(r"\s+", " ", full_text).strip()
