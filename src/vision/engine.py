@@ -23,32 +23,6 @@ from .layouts import OCRField, ROIBox, STATUS_BAR
 _CAMERA: Any = None
 _RAPID_OCR: Any = None
 
-# OCR Confusion map for nearest whitelisted character resolution
-_OCR_CHAR_SIMILARITY_MAP: dict[str, list[str]] = {
-	",": [".", ";", "'"],
-	";": [":", ".", ","],
-	":": [";", "."],
-	"`": ["'", "."],
-	"'": [".", "`"],
-	"-": ["_", "~"],
-	"_": ["-"],
-	"|": ["I", "l", "1", "!"],
-	"!": ["1", "I", "|", "."],
-	"l": ["I", "1", "|"],
-	"I": ["1", "l", "|"],
-	"1": ["I", "l", "|"],
-	"0": ["O", "Q", "D"],
-	"O": ["0", "Q", "D"],
-	"5": ["S", "s"],
-	"S": ["5", "s"],
-	"2": ["Z", "z"],
-	"Z": ["2", "z"],
-	"8": ["B", "b"],
-	"B": ["8"],
-	"9": ["g", "q"],
-	"g": ["9", "q"],
-}
-
 
 # =============================================================================
 # DATA TYPES
@@ -81,13 +55,24 @@ def capture_and_read_display(
 
 
 def read_display(
-	frame: np.ndarray,
+	frame: Optional[np.ndarray],
 	current_menu_key: str,
 	menu_fields: tuple[OCRField, ...],
 ) -> OCRReadout:
 	"""Read fields from the display in one frame based on current context using RapidOCR."""
 	_require_cv2()
 	_require_rapidocr()
+
+	if frame is None or frame.size == 0:
+		return OCRReadout(
+			display_found=False,
+			current_menu_key=current_menu_key,
+			fields={
+				field.name: {"raw": "", "value": _field_empty_value(field.name)}
+				for field in menu_fields
+			},
+		)
+
 	mask = _build_display_mask(frame)
 	display_contour = _find_display_contour(frame, mask)
 
@@ -142,6 +127,9 @@ def get_warped_display(
 ) -> Optional[np.ndarray]:
 	"""Extract a front-facing view of the display from a camera frame, or None if not found."""
 	_ = current_menu_key
+	if frame is None or frame.size == 0:
+		return None
+
 	mask = _build_display_mask(frame)
 	display_contour = _find_display_contour(frame, mask)
 
@@ -154,14 +142,14 @@ def get_warped_display(
 
 def save_roi_ocr_overlay(
 	capture_dir: Path,
-	frame: np.ndarray,
+	frame: Optional[np.ndarray],
 	capture_id: Optional[str],
 	menu_fields: tuple[OCRField, ...],
 	current_menu_key: Optional[str] = None,
 ) -> Optional[Path]:
 	"""Persist a calibration image that shows every OCR ROI on the current frame."""
 	_require_cv2()
-	if frame is None:
+	if frame is None or frame.size == 0:
 		return None
 
 	capture_dir.mkdir(parents=True, exist_ok=True)
@@ -184,6 +172,7 @@ def save_roi_ocr_overlay(
 		height_a = np.linalg.norm(source_points[1] - source_points[2])
 		height_b = np.linalg.norm(source_points[0] - source_points[3])
 		warped_height = max(int(height_a), int(height_b))
+
 		dst = np.array(
 			[
 				[0, 0],
@@ -193,7 +182,6 @@ def save_roi_ocr_overlay(
 			],
 			dtype="float32",
 		)
-		transform = cv2.getPerspectiveTransform(source_points, dst)
 		inverse_transform = cv2.getPerspectiveTransform(dst, source_points)
 		overlay = frame.copy()
 		_draw_polygon_outline(overlay, source_points, "DETECTED SCREEN BORDER")
@@ -452,7 +440,7 @@ def _prepare_ocr_grayscale(warped: np.ndarray) -> np.ndarray:
 
 
 def _crop_roi(prepared: np.ndarray, field: Any) -> np.ndarray:
-	"""Crop field ROI without negative inset trimming."""
+	"""Crop field ROI from image array."""
 	if field is not None and hasattr(field, "ideal"):
 		return field.ideal.crop(prepared)
 	return prepared
@@ -488,11 +476,7 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 
 	# Robust background detection: text/lines occupy <30% of ROI, so median is ALWAYS background
 	is_dark_bg = float(np.median(norm)) < 127
-
-	if is_dark_bg:
-		primary = 255 - norm
-	else:
-		primary = norm
+	primary = 255 - norm if is_dark_bg else norm
 
 	# Pad with solid white background to give DBNet clean receptive margins
 	padded = cv2.copyMakeBorder(primary, 30, 30, 30, 30, cv2.BORDER_CONSTANT, value=(255, 255, 255))
@@ -501,60 +485,12 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 	_, thresh = cv2.threshold(primary, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 	padded_thresh = cv2.copyMakeBorder(thresh, 30, 30, 30, 30, cv2.BORDER_CONSTANT, value=(255, 255, 255))
 
-	# CLAHE (Local Contrast Enhancement) to ensure faint secondary words like "On." across uneven lighting are captured
+	# Local Contrast Enhancement (CLAHE) for faint secondary text across uneven lighting
 	clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
 	clahe_img = clahe.apply(primary)
 	padded_clahe = cv2.copyMakeBorder(clahe_img, 30, 30, 30, 30, cv2.BORDER_CONSTANT, value=(255, 255, 255))
 
-	return [padded, padded_thresh, padded_clahe, 255 - padded]
-
-
-# =============================================================================
-# WHITELIST CHARACTER MAPPER
-# =============================================================================
-
-def _closest_whitelisted_char(char: str, whitelist: str) -> str:
-	"""Find visually or structurally closest character in whitelist for an un-whitelisted char."""
-	if char in whitelist:
-		return char
-
-	# 1. Check direct OCR confusion map priorities
-	if char in _OCR_CHAR_SIMILARITY_MAP:
-		for candidate in _OCR_CHAR_SIMILARITY_MAP[char]:
-			if candidate in whitelist:
-				return candidate
-
-	# 2. Case conversion fallback
-	if char.isupper() and char.lower() in whitelist:
-		return char.lower()
-	if char.islower() and char.upper() in whitelist:
-		return char.upper()
-
-	# 3. Category-based nearest distance search in whitelist
-	allowed = list(whitelist)
-	if char.isdigit():
-		digits = [c for c in allowed if c.isdigit()]
-		if digits:
-			return min(digits, key=lambda c: abs(ord(c) - ord(char)))
-	elif char.isalpha():
-		letters = [c for c in allowed if c.isalpha()]
-		if letters:
-			return min(letters, key=lambda c: abs(ord(c) - ord(char)))
-	elif not char.isalnum() and not char.isspace():
-		puncts = [c for c in allowed if not c.isalnum() and not c.isspace()]
-		if puncts:
-			return min(puncts, key=lambda c: abs(ord(c) - ord(char)))
-
-	# 4. Global minimum ASCII distance fallback across all whitelisted characters
-	return min(allowed, key=lambda c: abs(ord(c) - ord(char)))
-
-
-def _map_to_whitelisted_chars(text: str, whitelist: str) -> str:
-	"""Parse each character in text to the closest whitelisted character match."""
-	if not text or not whitelist:
-		return text
-
-	return "".join(_closest_whitelisted_char(char, whitelist) for char in text)
+	return [padded, padded_thresh, padded_clahe]
 
 
 # =============================================================================
@@ -578,8 +514,11 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 		if not raw:
 			continue
 
+		# Clean character filtering if a strict whitelist is provided
 		if field.whitelisted_chars:
-			raw = _map_to_whitelisted_chars(raw, field.whitelisted_chars)
+			allowed = set(field.whitelisted_chars)
+			raw = "".join(char for char in raw if char in allowed or char.isspace())
+			raw = re.sub(r"\s+", " ", raw).strip()
 
 		value = _parse_field_value(field_name, raw)
 		score = _score_field_candidate(field_name, raw, value, conf)
@@ -598,41 +537,49 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 def _parse_and_filter_rapidocr_boxes(
 	rapid_output: Optional[list[Any]]
 ) -> tuple[str, float]:
-	"""Filter RapidOCR output and sort boxes spatially line-by-line, left-to-right."""
+	"""Filter RapidOCR output, group by lines, and reconstruct bounding boxes with horizontal space detection."""
 	if not rapid_output:
 		return "", 0.0
 
 	items_to_keep: list[dict[str, Any]] = []
+	min_confidence = 0.40  # Reject weak OCR phantom artifacts
 
 	for item in rapid_output:
 		if not item or len(item) < 3:
 			continue
 
 		box, text, conf = item[0], str(item[1]).strip(), float(item[2])
-		if not text or conf < 0.15:
+		if not text or conf < min_confidence:
 			continue
 
 		box_points = np.array(box, dtype=np.float32)
-		min_x, max_x = np.min(box_points[:, 0]), np.max(box_points[:, 0])
-		min_y, max_y = np.min(box_points[:, 1]), np.max(box_points[:, 1])
+		min_x, max_x = float(np.min(box_points[:, 0])), float(np.max(box_points[:, 0]))
+		min_y, max_y = float(np.min(box_points[:, 1])), float(np.max(box_points[:, 1]))
+		width = max_x - min_x
 		height = max_y - min_y
 		center_y = (min_y + max_y) / 2.0
+
+		# Reject tiny non-text artifacts
+		if width < 5.0 or height < 5.0:
+			continue
 
 		items_to_keep.append({
 			"text": text,
 			"conf": conf,
 			"min_x": min_x,
+			"max_x": max_x,
 			"center_y": center_y,
 			"height": height,
+			"width": width,
 		})
 
 	if not items_to_keep:
 		return "", 0.0
 
-	# Sort vertically by center y to initialize line order
+	# Sort vertically to initialize row grouping
 	items_to_keep.sort(key=lambda k: k["center_y"])
 
-	# Group boxes into horizontal lines based on vertical overlap tolerance
+	# Group boxes into horizontal text lines based on center-y proximity
 	rows: list[list[dict[str, Any]]] = []
 	for item in items_to_keep:
 		placed = False
@@ -646,16 +593,36 @@ def _parse_and_filter_rapidocr_boxes(
 		if not placed:
 			rows.append([item])
 
-	# Sort each line left-to-right by min_x
-	sorted_items: list[dict[str, Any]] = []
+	# Reconstruct text line by line using horizontal distance to preserve valid spaces
+	line_strings: list[str] = []
+	all_confidences: list[float] = []
+
 	for row in rows:
 		row.sort(key=lambda k: k["min_x"])
-		sorted_items.extend(row)
+		line_text = ""
+		for i, item in enumerate(row):
+			token = item["text"]
+			all_confidences.append(item["conf"])
 
-	valid_texts = [k["text"] for k in sorted_items]
-	confidences = [k["conf"] for k in sorted_items]
+			if i > 0:
+				prev_item = row[i - 1]
+				gap = item["min_x"] - prev_item["max_x"]
+				avg_char_w = prev_item["width"] / max(1, len(prev_item["text"]))
 
-	return " ".join(valid_texts), float(np.mean(confidences))
+				# Insert space if horizontal gap indicates separate words and space isn't already present
+				if gap > (0.25 * avg_char_w) and not line_text.endswith(" ") and not token.startswith(" "):
+					line_text += " "
+
+			line_text += token
+
+		if line_text.strip():
+			line_strings.append(line_text.strip())
+
+	full_text = " ".join(line_strings)
+	full_text = re.sub(r"\s+", " ", full_text).strip()
+	mean_conf = float(np.mean(all_confidences)) if all_confidences else 0.0
+
+	return full_text, mean_conf
 
 
 def _score_field_candidate(field_name: str, raw_text: str, value: Any, conf: float) -> float:
@@ -676,12 +643,10 @@ def _score_field_candidate(field_name: str, raw_text: str, value: Any, conf: flo
 		else:
 			score += 1.0
 	elif field_name.startswith("dashboard_info_line"):
-		if isinstance(value, str) and len(value) >= 3:
+		if isinstance(value, str) and len(value) >= 2:
 			score += 2.0
-			if len(value) >= 6:
+			if len(value) >= 5:
 				score += 2.0
-			if value.endswith((".", "!", "?")):
-				score += 2.5
 	elif field_name == "time_field":
 		if isinstance(value, str) and re.search(r"\d{1,2}:\d{2}", value):
 			score += 4.0
@@ -711,21 +676,21 @@ def _parse_field_value(field_name: str, raw_text: str) -> Any:
 
 
 def _parse_mode(raw_text: str) -> str:
-    """Parse mode string by dropping the leading label (e.g., 'MODE:' or 'MODE') and returning the rest in order."""
-    if not raw_text:
-        return "UNKNOWN"
+	"""Parse mode string by dropping the leading label (e.g., 'MODE:' or 'MODE') and returning the rest in order."""
+	if not raw_text:
+		return "UNKNOWN"
 
-    text = raw_text.strip()
+	text = raw_text.strip()
 
-    # If a colon exists, extract everything after the first colon
-    if ":" in text:
-        result = text.split(":", 1)[1].strip().upper()
-    else:
-        # Otherwise, split by space and drop the first token
-        tokens = text.split()
-        result = " ".join(tokens[1:]).strip().upper() if len(tokens) > 1 else ""
+	# If a colon exists, extract everything after the first colon
+	if ":" in text:
+		result = text.split(":", 1)[1].strip().upper()
+	else:
+		# Otherwise, split by space and drop the first token
+		tokens = text.split()
+		result = " ".join(tokens[1:]).strip().upper() if len(tokens) > 1 else ""
 
-    return result if result else "UNKNOWN"
+	return result if result else "UNKNOWN"
 
 
 def _parse_temperature(raw_text: str) -> Optional[int]:
@@ -733,18 +698,7 @@ def _parse_temperature(raw_text: str) -> Optional[int]:
 	if not raw_text:
 		return None
 
-	substitutions = {
-		"O": "0", "o": "0", "Q": "0", "D": "0",
-		"I": "1", "l": "1", "|": "1", "!": "1",
-		"Z": "2", "z": "2",
-		"S": "5", "s": "5",
-		"B": "8", "g": "9",
-	}
-	cleaned = raw_text
-	for char, digit in substitutions.items():
-		cleaned = cleaned.replace(char, digit)
-
-	matches = re.findall(r"\d+", cleaned)
+	matches = re.findall(r"\d+", raw_text)
 	for match in matches:
 		val = int(match)
 		if 50 <= val <= 199:
@@ -760,11 +714,8 @@ def _parse_time(raw_text: str) -> str:
 
 	text = raw_text.strip().upper()
 
-	# Convert periods, semicolons, or spaces between digits into colons (e.g. "7.19" -> "7:19")
-	text = re.sub(r"(\d)[;\.\-\s]+(\d{2})", r"\1:\2", text)
-
-	# Fix missing colons in 3- or 4-digit outputs (e.g. "719 AM" -> "7:19 AM")
-	text = re.sub(r"\b(\d{1,2})(\d{2})\b", r"\1:\2", text)
+	# Standardize separator dots/dashes between hour and minute digits
+	text = re.sub(r"(\d{1,2})[;\.\-\s]+(\d{2})", r"\1:\2", text)
 
 	# Search for hour:minute pattern
 	time_match = re.search(r"(\d{1,2}):(\d{2})", text)
@@ -779,31 +730,12 @@ def _parse_time(raw_text: str) -> str:
 
 
 def _parse_dashboard_info(raw_text: str) -> str:
-	"""Clean dashboard line strings by removing phantom border noise and orphan characters."""
+	"""Clean dashboard line strings by stripping border noise and normalizing internal spaces."""
 	if not raw_text:
 		return ""
 
-	cleaned = re.sub(r"^[^\w\s\.\,\!\?]+", "", raw_text.strip()).strip()
-
-	# Rejoins split single letters from OCR (e.g., "O n" -> "On", "F an" -> "Fan")
-	cleaned = re.sub(r"\b([A-Za-z])\s+([A-Za-z])\b", r"\1\2", cleaned)
-
-	# Fix common digit-letter mixups in status words (e.g., "0n" -> "On")
-	cleaned = re.sub(r"\b0n\b", "On", cleaned, flags=re.IGNORECASE)
-
-	# Strip orphan non-word single character noise, preserving valid standalone 'a' / 'I'
-	cleaned = re.sub(r"\b[b-hj-zA-HJ-Z]\b\s*", "", cleaned)
-
-	word_corrections = {
-		r"\bFon\b": "Fan",
-		r"\bCali\b": "Call",
-		r"\bHeot\b": "Heat",
-		r"\bHybr1d\b": "Hybrid",
-		r"\bEiectric\b": "Electric",
-	}
-	for pattern, replacement in word_corrections.items():
-		cleaned = re.sub(pattern, replacement, cleaned, flags=re.IGNORECASE)
-
+	cleaned = raw_text.strip()
+	cleaned = re.sub(r"^[^\w\s\.\,\!\?]+", "", cleaned)
 	cleaned = re.sub(r"\s+", " ", cleaned).strip()
 	return cleaned
 
