@@ -447,7 +447,7 @@ def _crop_roi(prepared: np.ndarray, field: Any) -> np.ndarray:
 
 
 def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np.ndarray]:
-	"""Extract clean, high-resolution grayscale variants formatted for RapidOCR."""
+	"""Extract clean grayscale variants scaled to PP-OCR's native 48px tensor height."""
 	_require_cv2()
 	roi = _crop_roi(prepared, field)
 
@@ -458,43 +458,38 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 	if h == 0 or w == 0:
 		return []
 
-	# Smooth out LCD background dither/grain noise
-	denoised = cv2.GaussianBlur(roi, (3, 3), 0)
-
-	# Rescale image to optimal OCR height
-	target_h = 96 if (field and field.name == "temperature") else 64
+	# PP-OCR v3/v4 native model height is 48px
+	target_h = 48
 	scale = target_h / float(h)
-	new_w = max(20, int(w * scale))
-	resized = cv2.resize(denoised, (new_w, target_h), interpolation=cv2.INTER_CUBIC)
+	new_w = max(16, int(w * scale))
+	
+	interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_CUBIC
+	resized = cv2.resize(roi, (new_w, target_h), interpolation=interp)
 
-	# Percentile-based contrast scaling
+	# Percentile contrast normalization (preserves anti-aliased character boundaries)
 	p2, p98 = np.percentile(resized, (2, 98))
 	if p98 > p2:
 		norm = np.clip((resized - p2) * (255.0 / (p98 - p2)), 0, 255).astype(np.uint8)
 	else:
 		norm = resized
 
-	# Robust background detection: text/lines occupy <30% of ROI, so median is ALWAYS background
+	# Background inversion: Ensure dark text on light background
 	is_dark_bg = float(np.median(norm)) < 127
 	primary = 255 - norm if is_dark_bg else norm
 
-	# Pad with solid white background to give DBNet clean receptive margins
-	padded = cv2.copyMakeBorder(primary, 30, 30, 30, 30, cv2.BORDER_CONSTANT, value=(255, 255, 255))
+	# Pad with solid white margins for DBNet receptive field
+	padded_primary = cv2.copyMakeBorder(primary, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=(255, 255, 255))
 
-	# High-contrast binary variant specifically tuned for giant digits and status bar icons/text
-	_, thresh = cv2.threshold(primary, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-	padded_thresh = cv2.copyMakeBorder(thresh, 30, 30, 30, 30, cv2.BORDER_CONSTANT, value=(255, 255, 255))
-
-	# Local Contrast Enhancement (CLAHE) for faint secondary text across uneven lighting
-	clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+	# CLAHE Variant for uneven LCD illumination
+	clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
 	clahe_img = clahe.apply(primary)
-	padded_clahe = cv2.copyMakeBorder(clahe_img, 30, 30, 30, 30, cv2.BORDER_CONSTANT, value=(255, 255, 255))
+	padded_clahe = cv2.copyMakeBorder(clahe_img, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=(255, 255, 255))
 
-	return [padded, padded_thresh, padded_clahe]
+	return [padded_primary, padded_clahe]
 
 
 # =============================================================================
-# OCR PROCESSING & GEOMETRIC BOUNDING-BOX FILTERING
+# OCR PROCESSING & SPATIAL LINE RECONSTRUCTION
 # =============================================================================
 
 def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
@@ -514,10 +509,20 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 		if not raw:
 			continue
 
-		# Clean character filtering if a strict whitelist is provided
+		# Flexible, case-preserving whitelist character filtering
 		if field.whitelisted_chars:
 			allowed = set(field.whitelisted_chars)
-			raw = "".join(char for char in raw if char in allowed or char.isspace())
+			cleaned_chars = []
+			for char in raw:
+				if char.isspace():
+					cleaned_chars.append(" ")
+				elif char in allowed:
+					cleaned_chars.append(char)
+				elif char.upper() in allowed:
+					cleaned_chars.append(char.upper())
+				elif char.lower() in allowed:
+					cleaned_chars.append(char.lower())
+			raw = "".join(cleaned_chars)
 			raw = re.sub(r"\s+", " ", raw).strip()
 
 		value = _parse_field_value(field_name, raw)
@@ -537,12 +542,12 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 def _parse_and_filter_rapidocr_boxes(
 	rapid_output: Optional[list[Any]]
 ) -> tuple[str, float]:
-	"""Filter RapidOCR output, group by lines, and reconstruct bounding boxes with horizontal space detection."""
+	"""Filter boxes and reconstruct spatial word spacing using overlap ratio checks."""
 	if not rapid_output:
 		return "", 0.0
 
 	items_to_keep: list[dict[str, Any]] = []
-	min_confidence = 0.40  # Reject weak OCR phantom artifacts
+	min_confidence = 0.25  # Preserve valid low-contrast LCD word tokens
 
 	for item in rapid_output:
 		if not item or len(item) < 3:
@@ -559,8 +564,7 @@ def _parse_and_filter_rapidocr_boxes(
 		height = max_y - min_y
 		center_y = (min_y + max_y) / 2.0
 
-		# Reject tiny non-text artifacts
-		if width < 5.0 or height < 5.0:
+		if width < 4.0 or height < 4.0:
 			continue
 
 		items_to_keep.append({
@@ -576,24 +580,23 @@ def _parse_and_filter_rapidocr_boxes(
 	if not items_to_keep:
 		return "", 0.0
 
-	# Sort vertically to initialize row grouping
+	# Vertical sorting for line grouping
 	items_to_keep.sort(key=lambda k: k["center_y"])
 
-	# Group boxes into horizontal text lines based on center-y proximity
+	# Group boxes into horizontal lines based on vertical center alignment
 	rows: list[list[dict[str, Any]]] = []
 	for item in items_to_keep:
 		placed = False
 		for row in rows:
 			avg_cy = sum(r["center_y"] for r in row) / len(row)
 			avg_h = sum(r["height"] for r in row) / len(row)
-			if abs(item["center_y"] - avg_cy) < max(8.0, avg_h * 0.5):
+			if abs(item["center_y"] - avg_cy) < max(6.0, avg_h * 0.5):
 				row.append(item)
 				placed = True
 				break
 		if not placed:
 			rows.append([item])
 
-	# Reconstruct text line by line using horizontal distance to preserve valid spaces
 	line_strings: list[str] = []
 	all_confidences: list[float] = []
 
@@ -606,12 +609,14 @@ def _parse_and_filter_rapidocr_boxes(
 
 			if i > 0:
 				prev_item = row[i - 1]
-				gap = item["min_x"] - prev_item["max_x"]
-				avg_char_w = prev_item["width"] / max(1, len(prev_item["text"]))
+				# Calculate horizontal overlap relative to token width
+				overlap = prev_item["max_x"] - item["min_x"]
+				box_w = max(1.0, item["width"])
 
-				# Insert space if horizontal gap indicates separate words and space isn't already present
-				if gap > (0.25 * avg_char_w) and not line_text.endswith(" ") and not token.startswith(" "):
-					line_text += " "
+				# If boxes don't heavily overlap (>50%), treat as separate words and insert space
+				if overlap < (0.5 * box_w):
+					if not line_text.endswith(" ") and not token.startswith(" "):
+						line_text += " "
 
 			line_text += token
 
@@ -676,21 +681,17 @@ def _parse_field_value(field_name: str, raw_text: str) -> Any:
 
 
 def _parse_mode(raw_text: str) -> str:
-	"""Parse mode string by dropping the leading label (e.g., 'MODE:' or 'MODE') and returning the rest in order."""
+	"""Extract mode by stripping leading 'MODE:' label prefix cleanly."""
 	if not raw_text:
 		return "UNKNOWN"
 
 	text = raw_text.strip()
+	cleaned = re.sub(r"^(MODE|M0DE)\s*[:\-]?\s*", "", text, flags=re.IGNORECASE).strip()
 
-	# If a colon exists, extract everything after the first colon
-	if ":" in text:
-		result = text.split(":", 1)[1].strip().upper()
-	else:
-		# Otherwise, split by space and drop the first token
-		tokens = text.split()
-		result = " ".join(tokens[1:]).strip().upper() if len(tokens) > 1 else ""
+	if not cleaned:
+		return "UNKNOWN"
 
-	return result if result else "UNKNOWN"
+	return cleaned.upper()
 
 
 def _parse_temperature(raw_text: str) -> Optional[int]:
@@ -713,11 +714,8 @@ def _parse_time(raw_text: str) -> str:
 		return ""
 
 	text = raw_text.strip().upper()
-
-	# Standardize separator dots/dashes between hour and minute digits
 	text = re.sub(r"(\d{1,2})[;\.\-\s]+(\d{2})", r"\1:\2", text)
 
-	# Search for hour:minute pattern
 	time_match = re.search(r"(\d{1,2}):(\d{2})", text)
 	if time_match:
 		hour = int(time_match.group(1))
@@ -730,7 +728,7 @@ def _parse_time(raw_text: str) -> str:
 
 
 def _parse_dashboard_info(raw_text: str) -> str:
-	"""Clean dashboard line strings by stripping border noise and normalizing internal spaces."""
+	"""Clean dashboard info line strings by removing border artifacts."""
 	if not raw_text:
 		return ""
 
@@ -854,7 +852,7 @@ def _load_icon_templates() -> dict[str, dict[str, np.ndarray]]:
 		},
 		"schedule_icon": {
 			"schedule_running": ["schedule_running.png", "schedule_running.jpg", "schedule_running.jpeg"],
-			"schedule_not_running": ["schedule_not_running.png", "schedule_not_running.jpg", "schedule_not_running.jpeg"],
+			"schedule_not_running": ["schedule_not_running.png", "schedule_not_running.jpeg", "schedule_not_running.jpeg"],
 		},
 	}
 
