@@ -723,7 +723,7 @@ def _parse_mode(raw_text: str) -> str:
         return "UNKNOWN"
 
     # Discard the first token, rejoin remaining tokens in original order, and normalize
-    result = " ".join(tokens[1:]).strip().upper()
+    result = " ".join(tokens[0:]).strip().upper()
 
     return result if result else "UNKNOWN"
 
