@@ -276,15 +276,12 @@ def _get_camera() -> Any:
 
 
 def _get_rapid_ocr() -> Any:
-	"""Initialize RapidOCR singleton with optimized parameters to prevent text clipping and digit loss."""
+	"""Initialize RapidOCR singleton letting DBNet handle word segmentation natively."""
 	global _RAPID_OCR
 	if _RAPID_OCR is not None:
 		return _RAPID_OCR
 
 	_require_rapidocr()
-	# Tuned detection parameters:
-	# unclip_ratio=1.8 expands text bounding boxes to prevent clipping edge letters ('S' in Satisfied, 'H' in HEAT)
-	# box_thresh=0.45 & text_score=0.50 allow lower-contrast LCD numbers and small text lines to be recognized.
 	try:
 		_RAPID_OCR = RapidOCR(
 			params={
@@ -298,8 +295,8 @@ def _get_rapid_ocr() -> Any:
 	except Exception:
 		try:
 			_RAPID_OCR = RapidOCR(
-				det_unclip_ratio=1.8,
-				det_use_dilation=True,
+				det_unclip_ratio=1.5,
+				det_use_dilation=False,
 				det_box_thresh=0.45,
 				det_thresh=0.25,
 				text_score=0.50,
