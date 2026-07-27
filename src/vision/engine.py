@@ -711,19 +711,19 @@ def _parse_field_value(field_name: str, raw_text: str) -> Any:
 
 
 def _parse_mode(raw_text: str) -> str:
-    """Parse mode string by dropping the first token (i.e., 'MODE:') and returning the rest in order."""
+    """Parse mode string by dropping the leading label (e.g., 'MODE:' or 'MODE') and returning the rest in order."""
     if not raw_text:
         return "UNKNOWN"
 
-    # Split by whitespace into tokens
-    tokens = raw_text.strip().split()
+    text = raw_text.strip()
 
-    # Need at least two tokens (e.g., "MODE:" and "HYBRID") to drop the first and keep a mode
-    if len(tokens) <= 1:
-        return "UNKNOWN"
-
-    # Discard the first token, rejoin remaining tokens in original order, and normalize
-    result = " ".join(tokens[0:]).strip().upper()
+    # If a colon exists, extract everything after the first colon
+    if ":" in text:
+        result = text.split(":", 1)[1].strip().upper()
+    else:
+        # Otherwise, split by space and drop the first token
+        tokens = text.split()
+        result = " ".join(tokens[1:]).strip().upper() if len(tokens) > 1 else ""
 
     return result if result else "UNKNOWN"
 
