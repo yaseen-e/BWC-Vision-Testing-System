@@ -276,13 +276,35 @@ def _get_camera() -> Any:
 
 
 def _get_rapid_ocr() -> Any:
-	"""Initialize RapidOCR singleton."""
+	"""Initialize RapidOCR singleton with LCD-tuned detection and confidence parameters."""
 	global _RAPID_OCR
 	if _RAPID_OCR is not None:
 		return _RAPID_OCR
 
 	_require_rapidocr()
-	_RAPID_OCR = RapidOCR()
+	# Tune DBNet and detection parameters to prevent merging words (e.g., HEAT PUMP)
+	# and eliminate phantom characters from backlight noise.
+	try:
+		_RAPID_OCR = RapidOCR(
+			params={
+				"Det.unclip_ratio": 1.2,
+				"Det.use_dilation": False,
+				"Det.box_thresh": 0.6,
+				"Det.thresh": 0.3,
+				"Global.text_score": 0.72,
+			}
+		)
+	except Exception:
+		try:
+			_RAPID_OCR = RapidOCR(
+				det_unclip_ratio=1.2,
+				det_use_dilation=False,
+				det_box_thresh=0.6,
+				det_thresh=0.3,
+				text_score=0.72,
+			)
+		except Exception:
+			_RAPID_OCR = RapidOCR()
 	return _RAPID_OCR
 
 
@@ -446,8 +468,34 @@ def _crop_roi(prepared: np.ndarray, field: Any) -> np.ndarray:
 	return prepared
 
 
+def _normalize_backlit_crop(crop: np.ndarray) -> np.ndarray:
+	"""Normalize backlit LCD illumination using background division while preserving gradients."""
+	if len(crop.shape) == 3:
+		lab = cv2.cvtColor(crop, cv2.COLOR_BGR2LAB)
+		l_channel, _, _ = cv2.split(lab)
+	else:
+		l_channel = crop.copy()
+
+	h, w = l_channel.shape[:2]
+	ksize = max(31, (min(h, w) // 2) | 1)
+	bg = cv2.GaussianBlur(l_channel, (ksize, ksize), 0)
+
+	norm = cv2.divide(l_channel, np.maximum(bg, 1), scale=255)
+
+	p2, p98 = np.percentile(norm, (2, 98))
+	if p98 > p2:
+		norm = np.clip((norm - p2) * (255.0 / (p98 - p2)), 0, 255).astype(np.uint8)
+	else:
+		norm = norm.astype(np.uint8)
+
+	if float(np.median(norm)) < 127:
+		norm = 255 - norm
+
+	return norm
+
+
 def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np.ndarray]:
-	"""Extract clean grayscale variants scaled to PP-OCR's native 48px tensor height."""
+	"""Extract clean grayscale variants scaled and padded for PP-OCR's detector and recognizer."""
 	_require_cv2()
 	roi = _crop_roi(prepared, field)
 
@@ -458,34 +506,32 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 	if h == 0 or w == 0:
 		return []
 
-	# PP-OCR v3/v4 native model height is 48px
+	# PP-OCR v3/v4 native model height target is 48px
 	target_h = 48
 	scale = target_h / float(h)
 	new_w = max(16, int(w * scale))
-	
+
 	interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_CUBIC
 	resized = cv2.resize(roi, (new_w, target_h), interpolation=interp)
 
-	# Percentile contrast normalization (preserves anti-aliased character boundaries)
-	p2, p98 = np.percentile(resized, (2, 98))
-	if p98 > p2:
-		norm = np.clip((resized - p2) * (255.0 / (p98 - p2)), 0, 255).astype(np.uint8)
-	else:
-		norm = resized
+	norm_gray = _normalize_backlit_crop(resized)
 
-	# Background inversion: Ensure dark text on light background
-	is_dark_bg = float(np.median(norm)) < 127
-	primary = 255 - norm if is_dark_bg else norm
+	pad = 15
+	pad_color = (255, 255, 255)
 
-	# Pad with solid white margins for DBNet receptive field
-	padded_primary = cv2.copyMakeBorder(primary, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=(255, 255, 255))
+	# Variant 1: Primary illumination-normalized image
+	v1 = cv2.copyMakeBorder(norm_gray, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=pad_color)
 
-	# CLAHE Variant for uneven LCD illumination
-	clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
-	clahe_img = clahe.apply(primary)
-	padded_clahe = cv2.copyMakeBorder(clahe_img, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=(255, 255, 255))
+	# Variant 2: CLAHE enhanced contrast variant
+	clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+	v2_img = clahe.apply(norm_gray)
+	v2 = cv2.copyMakeBorder(v2_img, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=pad_color)
 
-	return [padded_primary, padded_clahe]
+	# Variant 3: Bilateral filter to smooth subpixel glow/bleed while preserving crisp edges
+	v3_img = cv2.bilateralFilter(norm_gray, d=5, sigmaColor=50, sigmaSpace=50)
+	v3 = cv2.copyMakeBorder(v3_img, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=pad_color)
+
+	return [v1, v2, v3]
 
 
 # =============================================================================
@@ -547,14 +593,17 @@ def _parse_and_filter_rapidocr_boxes(
 		return "", 0.0
 
 	items_to_keep: list[dict[str, Any]] = []
-	min_confidence = 0.25  # Preserve valid low-contrast LCD word tokens
 
 	for item in rapid_output:
 		if not item or len(item) < 3:
 			continue
 
 		box, text, conf = item[0], str(item[1]).strip(), float(item[2])
-		if not text or conf < min_confidence:
+
+		# Reject low-confidence items and single-character phantom noise
+		if not text or conf < 0.60:
+			continue
+		if len(text) == 1 and conf < 0.72:
 			continue
 
 		box_points = np.array(box, dtype=np.float32)
@@ -613,8 +662,8 @@ def _parse_and_filter_rapidocr_boxes(
 				overlap = prev_item["max_x"] - item["min_x"]
 				box_w = max(1.0, item["width"])
 
-				# If boxes don't heavily overlap (>50%), treat as separate words and insert space
-				if overlap < (0.5 * box_w):
+				# If boxes don't heavily overlap (>30%), treat as separate words and insert space
+				if overlap < (0.3 * box_w):
 					if not line_text.endswith(" ") and not token.startswith(" "):
 						line_text += " "
 
