@@ -288,8 +288,8 @@ def _get_rapid_ocr() -> Any:
 	try:
 		_RAPID_OCR = RapidOCR(
 			params={
-				"Det.unclip_ratio": 1.8,
-				"Det.use_dilation": True,
+				"Det.unclip_ratio": 1.5,
+				"Det.use_dilation": False,
 				"Det.box_thresh": 0.45,
 				"Det.thresh": 0.25,
 				"Global.text_score": 0.50,
@@ -518,7 +518,8 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 
 	# Use BORDER_REPLICATE rather than hard white, preventing fake contrast borders at edges
 	pad = 12
-	v1 = cv2.copyMakeBorder(norm_gray, pad, pad, pad, pad, cv2.BORDER_REPLICATE)
+	bg_color = int(np.median(norm_gray))
+	v1 = cv2.copyMakeBorder(norm_gray, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=bg_color)
 
 	# Variant 2: Simple contrast stretch
 	p2, p98 = np.percentile(resized, (2, 98))
@@ -659,7 +660,7 @@ def _parse_and_filter_rapidocr_boxes(
 			if i > 0:
 				prev_item = row[i - 1]
 				gap = item["min_x"] - prev_item["max_x"]
-				if gap > 0.1 and not line_text.endswith(" ") and not token.startswith(" "):
+				if gap > 1.5 and not line_text.endswith(" ") and not token.startswith(" "):
 					line_text += " "
 
 			line_text += token
