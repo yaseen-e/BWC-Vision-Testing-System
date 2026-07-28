@@ -613,8 +613,6 @@ def _parse_and_filter_rapidocr_boxes(
 
 		if not text or conf < 0.40:
 			continue
-		if len(text) == 1 and conf < 0.45:
-			continue
 
 		box_points = np.array(box, dtype=np.float32)
 		min_x = float(np.min(box_points[:, 0]))
