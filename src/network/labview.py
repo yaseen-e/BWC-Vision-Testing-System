@@ -76,7 +76,7 @@ _SIMULATED_COMMANDS: collections.deque[str] = collections.deque(
 		# "SELECT", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "SELECT", "SELECT", "RUN_OCR",
 		# "SELECT", "BACK", "BACK", "BACK", "BACK",
 		# C17, C18: AFL
-		# "RIGHT", "SELECT", "RUN_OCR", "DOWN", "RUN_OCR",
+		"RIGHT", "SELECT", "RUN_OCR", "DOWN", "RUN_OCR",
 		# C19: HS
 		"BACK", "LEFT", "RUN_OCR",
 		"SHUTDOWN",
