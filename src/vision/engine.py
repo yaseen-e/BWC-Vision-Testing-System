@@ -1060,7 +1060,6 @@ def _draw_polygon_outline(image: np.ndarray, points: np.ndarray, label: str) -> 
 		image,
 		label,
 		anchor,
-		anchor,
 		cv2.FONT_HERSHEY_SIMPLEX,
 		0.45,
 		(255, 255, 255),
