@@ -305,39 +305,39 @@ def _get_rapid_ocr() -> Any:
 
 
 # =============================================================================
-# DISPLAY SEGMENTATION & GEOMETRY (BORDER DETECTION ENGINE)
+# DISPLAY SEGMENTATION & GEOMETRY
 # =============================================================================
 
 def _build_display_mask(frame: np.ndarray) -> np.ndarray:
-	"""Build a tight mask for the blue display window without border padding."""
+	"""Build a mask for the emissive display window."""
 	_require_cv2()
 	if frame is None or frame.size == 0:
 		raise ValueError("frame must be a non-empty image")
 
 	hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+	hue = hsv[:, :, 0]
+	saturation = hsv[:, :, 1]
+	value = hsv[:, :, 2]
 
-	# Blue HSV range targeting the screen background
-	lower_blue = np.array([85, 35, 35], dtype=np.uint8)
-	upper_blue = np.array([135, 255, 255], dtype=np.uint8)
-	blue_mask = cv2.inRange(hsv, lower_blue, upper_blue)
+	# Boost blue hue brightness before thresholding
+	blue_hue_mask = (hue >= 90) & (hue <= 150)
+	boosted_value = value.astype(np.float32)
+	boosted_value[blue_hue_mask] = np.clip(boosted_value[blue_hue_mask] * 1.6, 0, 255)
+	value = boosted_value.astype(np.uint8)
 
-	# Small (5,5) kernel cleans noise without expanding outer edges
-	kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-	mask = cv2.morphologyEx(blue_mask, cv2.MORPH_CLOSE, kernel)
-	mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+	_, saturated_mask = cv2.threshold(saturation, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+	_, bright_mask = cv2.threshold(value, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+	display_mask = cv2.bitwise_and(saturated_mask, bright_mask)
 
-	# Fill internal holes (text, cyan selection boxes)
-	contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-	filled_mask = np.zeros_like(mask)
-	for cnt in contours:
-		if cv2.contourArea(cnt) > 1000:
-			cv2.drawContours(filled_mask, [cnt], -1, 255, thickness=cv2.FILLED)
+	mask = cv2.morphologyEx(display_mask, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (15, 5)))
+	mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 15)))
+	mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)))
 
-	return filled_mask
+	return mask
 
 
 def _find_display_contour(frame: np.ndarray, mask: np.ndarray, min_area: int = 3000) -> Optional[np.ndarray]:
-	"""Find the tight 4-corner polygon of the main blue display region."""
+	"""Find the raw display rectangle."""
 	_require_cv2()
 	contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 	if not contours:
@@ -347,7 +347,12 @@ def _find_display_contour(frame: np.ndarray, mask: np.ndarray, min_area: int = 3
 	min_area = max(min_area, int(frame_area * 0.05))
 
 	best_contour: Optional[np.ndarray] = None
-	max_area = 0.0
+	best_score = float("-inf")
+
+	def _contour_box(candidate: np.ndarray) -> np.ndarray:
+		rotated = cv2.minAreaRect(candidate)
+		points = cv2.boxPoints(rotated)
+		return points.astype("float32")
 
 	for contour in contours:
 		area = cv2.contourArea(contour)
@@ -363,23 +368,10 @@ def _find_display_contour(frame: np.ndarray, mask: np.ndarray, min_area: int = 3
 		if solidity < 0.50:
 			continue
 
-		if area > max_area:
-			max_area = area
-			peri = cv2.arcLength(hull, True)
-			quad = None
-			
-			# Fit exact 4-point quadrilateral to the physical screen corners
-			for eps in np.linspace(0.01, 0.08, 15):
-				approx = cv2.approxPolyDP(hull, eps * peri, True)
-				if len(approx) == 4:
-					quad = approx.reshape(4, 2).astype("float32")
-					break
-
-			if quad is None:
-				rect = cv2.minAreaRect(hull)
-				quad = cv2.boxPoints(rect).astype("float32")
-
-			best_contour = quad
+		score = area * solidity
+		if score > best_score:
+			best_score = score
+			best_contour = _contour_box(contour)
 
 	return best_contour
 
@@ -394,64 +386,29 @@ def _should_use_extended_warp(menu_fields: Optional[tuple[OCRField, ...]]) -> bo
 	return status_bar_names.issubset(current_field_names)
 
 
-def _expand_quadrilateral(
-    pts: np.ndarray,
-    scale: float = 0.03,
-    frame_shape: Optional[tuple[int, ...]] = None,
-) -> np.ndarray:
-    """Expand quadrilateral corner points outward from their centroid."""
-    pts = np.asarray(pts, dtype=np.float32).reshape(-1, 2)
-    centroid = np.mean(pts, axis=0)
-    expanded = centroid + (1.0 + scale) * (pts - centroid)
-
-    if frame_shape is not None:
-        h, w = frame_shape[:2]
-        expanded[:, 0] = np.clip(expanded[:, 0], 0, w - 1)
-        expanded[:, 1] = np.clip(expanded[:, 1], 0, h - 1)
-
-    return expanded.astype(np.float32)
-
-
 def _process_display_contour_and_warp(
-    frame: np.ndarray,
-    orange_contour: np.ndarray,
-    menu_fields: Optional[tuple[OCRField, ...]] = None,
-    padding_pct: float = 0.03,
+	frame: np.ndarray,
+	orange_contour: np.ndarray,
+	menu_fields: Optional[tuple[OCRField, ...]] = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Warp display area into flat front-facing view with padded margins."""
-    _require_cv2()
+	"""Warp display area into flat front-facing view."""
+	_require_cv2()
+	if not _should_use_extended_warp(menu_fields):
+		return orange_contour, _warp_image(frame, orange_contour)
 
-    # Always order points into standard 4-corner layout (TL, TR, BR, BL)
-    ordered = _order_points(orange_contour)
+	ordered = _order_points(orange_contour)
+	top_left, top_right, bottom_right, bottom_left = ordered
 
-    if not _should_use_extended_warp(menu_fields):
-        # Standard display warp with outward expansion
-        padded_contour = _expand_quadrilateral(
-            ordered, scale=padding_pct, frame_shape=frame.shape
-        )
-        return padded_contour, _warp_image(frame, padded_contour)
+	v_left = bottom_left - top_left
+	v_right = bottom_right - top_right
 
-    # Extended warp logic for menu fields
-    top_left, top_right, bottom_right, bottom_left = ordered
+	ext_factor = 10.0 / 90.0
+	extended_bottom_left = bottom_left + v_left * ext_factor
+	extended_bottom_right = bottom_right + v_right * ext_factor
+	extended_contour = np.array([top_left, top_right, extended_bottom_right, extended_bottom_left], dtype="float32")
 
-    v_left = bottom_left - top_left
-    v_right = bottom_right - top_right
-
-    ext_factor = 10.0 / 90.0
-    extended_bottom_left = bottom_left + v_left * ext_factor
-    extended_bottom_right = bottom_right + v_right * ext_factor
-    extended_contour = np.array(
-        [top_left, top_right, extended_bottom_right, extended_bottom_left],
-        dtype="float32",
-    )
-
-    # Expand the extended quadrilateral outward to maintain margin padding
-    padded_extended_contour = _expand_quadrilateral(
-        extended_contour, scale=padding_pct, frame_shape=frame.shape
-    )
-
-    warped_extended = _warp_image(frame, padded_extended_contour)
-    return padded_extended_contour, warped_extended
+	warped_extended = _warp_image(frame, extended_contour)
+	return extended_contour, warped_extended
 
 
 def _warp_image(image: np.ndarray, points: np.ndarray) -> np.ndarray:
@@ -591,7 +548,7 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 
 
 # =============================================================================
-# OCR PROCESSING & SPATIAL LINE RECONSTRUCTION (CHARACTER DETECTION ENGINE)
+# OCR PROCESSING & SPATIAL LINE RECONSTRUCTION
 # =============================================================================
 
 def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:

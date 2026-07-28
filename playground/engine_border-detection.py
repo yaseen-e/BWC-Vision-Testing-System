@@ -16,6 +16,7 @@ import time
 import numpy as np
 import cv2
 from rapidocr_onnxruntime import RapidOCR
+from typing import Optional
 
 from .layouts import OCRField, ROIBox, STATUS_BAR
 
@@ -305,7 +306,7 @@ def _get_rapid_ocr() -> Any:
 
 
 # =============================================================================
-# DISPLAY SEGMENTATION & GEOMETRY (BORDER DETECTION ENGINE)
+# DISPLAY SEGMENTATION & GEOMETRY
 # =============================================================================
 
 def _build_display_mask(frame: np.ndarray) -> np.ndarray:
@@ -591,7 +592,7 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 
 
 # =============================================================================
-# OCR PROCESSING & SPATIAL LINE RECONSTRUCTION (CHARACTER DETECTION ENGINE)
+# OCR PROCESSING & SPATIAL LINE RECONSTRUCTION
 # =============================================================================
 
 def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
