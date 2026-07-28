@@ -55,26 +55,26 @@ _SIMULATED_COMMANDS: collections.deque[str] = collections.deque(
 		# C1-C7: HS
 		#"BACK", "RUN_OCR", "BACK", "RUN_OCR", "BACK", "RUN_OCR", "BACK", "RUN_OCR", "BACK", "RUN_OCR", "BACK", "RUN_OCR", "BACK", "RUN_OCR",
 		# C8: SST
-		# "MENU", "DOWN", "SELECT", "RUN_OCR",
+		"MENU", "DOWN", "SELECT", "RUN_OCR",
 		# C9: SSB
-		# "DOWN", "RUN_OCR",
-		# "UP", "BACK", "BACK",
+		"DOWN", "RUN_OCR",
+		"UP", "BACK", "BACK",
 		# C10-C13: LOC
-		# "MENU", "RIGHT", "DOWN", "SELECT", "DOWN", "DOWN", "SELECT", "DOWN", "DOWN", "SELECT",
+		"MENU", "RIGHT", "DOWN", "SELECT", "DOWN", "DOWN", "SELECT", "DOWN", "DOWN", "SELECT",
 		# USA
-		# "SELECT", "SELECT", "RUN_OCR",
+		"SELECT", "SELECT", "RUN_OCR",
 		# CANADA
-		# "LEFT", "SELECT", "DOWN", "SELECT", "RUN_OCR",
+		"LEFT", "SELECT", "DOWN", "SELECT", "RUN_OCR",
 		# MEXICO
 		# "LEFT", "SELECT", "DOWN", "DOWN", "SELECT", "RUN_OCR",
 		# OTHER
 		# "LEFT", "SELECT", "DOWN", "DOWN", "DOWN", "SELECT", "RUN_OCR",
 		# "BACK", "BACK", "BACK", "BACK",
 		# C14, C15: SL
-		# "MENU", "RIGHT", "RIGHT", "SELECT", "SELECT", "SELECT", # "RUN_OCR", "DOWN", "RUN_OCR",
+		"MENU", "RIGHT", "RIGHT", "SELECT", "SELECT", "SELECT", # "RUN_OCR", "DOWN", "RUN_OCR",
 		# C15: SDL
-		# "SELECT", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "SELECT", "SELECT", "RUN_OCR",
-		# "SELECT", "BACK", "BACK", "BACK", "BACK",
+		# "SELECT", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "SELECT", "SELECT", "RUN_OCR", "SELECT",
+		"BACK", "BACK", "BACK", "BACK",
 		# C17, C18: AFL
 		"RIGHT", "SELECT", "RUN_OCR", "DOWN", "RUN_OCR",
 		# C19: HS
