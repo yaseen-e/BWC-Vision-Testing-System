@@ -663,7 +663,7 @@ def _score_field_candidate(field_name: str, raw_text: str, value: Any, conf: flo
 	score = conf * 2.0
 
 	if field_name == "temperature" and isinstance(value, int):
-		if 60 <= value <= 199:
+		if 50 <= value <= 199:
 			score += 5.0
 		else:
 			return -1.0
