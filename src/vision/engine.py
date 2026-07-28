@@ -309,35 +309,30 @@ def _get_rapid_ocr() -> Any:
 # =============================================================================
 
 def _build_display_mask(frame: np.ndarray) -> np.ndarray:
-	"""Build a mask for the emissive display window."""
+	"""Build a clean mask for the illuminated LCD display using blurred luminance."""
 	_require_cv2()
 	if frame is None or frame.size == 0:
 		raise ValueError("frame must be a non-empty image")
 
-	hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-	hue = hsv[:, :, 0]
-	saturation = hsv[:, :, 1]
-	value = hsv[:, :, 2]
+	# Convert to grayscale to isolate screen luminance (ignoring color saturation completely)
+	gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-	# Boost blue hue brightness before thresholding
-	blue_hue_mask = (hue >= 90) & (hue <= 150)
-	boosted_value = value.astype(np.float32)
-	boosted_value[blue_hue_mask] = np.clip(boosted_value[blue_hue_mask] * 1.6, 0, 255)
-	value = boosted_value.astype(np.uint8)
+	# Heavy blur to fuse text, high-contrast cyan boxes, and background into one glowing region
+	blurred = cv2.GaussianBlur(gray, (19, 19), 0)
 
-	_, saturated_mask = cv2.threshold(saturation, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-	_, bright_mask = cv2.threshold(value, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-	display_mask = cv2.bitwise_or(saturated_mask, bright_mask)
+	# Otsu thresholding on luminance cleanly separates the emissive screen from the dark bezel
+	_, mask = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-	mask = cv2.morphologyEx(display_mask, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (15, 5)))
-	mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 15)))
+	# Morphological closing bridges remaining gaps between line items and UI headers
+	kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 25))
+	mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
 	mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)))
 
 	return mask
 
 
 def _find_display_contour(frame: np.ndarray, mask: np.ndarray, min_area: int = 3000) -> Optional[np.ndarray]:
-	"""Find the raw display rectangle."""
+	"""Find the primary rectangular display contour from the screen mask."""
 	_require_cv2()
 	contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 	if not contours:
@@ -349,14 +344,9 @@ def _find_display_contour(frame: np.ndarray, mask: np.ndarray, min_area: int = 3
 	best_contour: Optional[np.ndarray] = None
 	best_score = float("-inf")
 
-	def _contour_box(candidate: np.ndarray) -> np.ndarray:
-		rotated = cv2.minAreaRect(candidate)
-		points = cv2.boxPoints(rotated)
-		return points.astype("float32")
-
 	for contour in contours:
 		area = cv2.contourArea(contour)
-		if area < min_area or area > frame_area * 0.99:
+		if area < min_area or area > frame_area * 0.98:
 			continue
 
 		hull = cv2.convexHull(contour)
@@ -365,13 +355,15 @@ def _find_display_contour(frame: np.ndarray, mask: np.ndarray, min_area: int = 3
 			continue
 
 		solidity = area / hull_area
-		if solidity < 0.50:
+		if solidity < 0.60:
 			continue
 
+		# Score candidates based on area and rectangular solidity
 		score = area * solidity
 		if score > best_score:
 			best_score = score
-			best_contour = _contour_box(contour)
+			rotated = cv2.minAreaRect(contour)
+			best_contour = cv2.boxPoints(rotated).astype("float32")
 
 	return best_contour
 
