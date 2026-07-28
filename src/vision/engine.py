@@ -548,7 +548,7 @@ def _extract_digit_variants(roi_gray: np.ndarray) -> list[np.ndarray]:
 
 
 def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np.ndarray]:
-	"""Extract clean grayscale variants scaled and softly padded using border replication."""
+	"""Extract clean grayscale variants scaled and softly padded."""
 	_require_cv2()
 	roi = _crop_roi(prepared, field)
 
@@ -559,39 +559,25 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 	whitelisted = getattr(field, "whitelisted_chars", None)
 	if whitelisted and whitelisted.isdigit():
 		return _extract_digit_variants(roi)
-	
+
 	h, w = roi.shape[:2]
 	if h == 0 or w == 0:
 		return []
 
-	# Target standard OCR height (~48px)
+	# Standard text processing for non-digit fields...
 	target_h = 48
 	scale = target_h / float(h)
 	new_w = max(16, int(w * scale))
 
 	interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_CUBIC
 	resized = cv2.resize(roi, (new_w, target_h), interpolation=interp)
-
 	norm_gray = _normalize_backlit_crop(resized)
 
-	# Use BORDER_REPLICATE rather than hard white, preventing fake contrast borders at edges
 	pad = 12
 	bg_color = int(np.median(norm_gray))
 	v1 = cv2.copyMakeBorder(norm_gray, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=bg_color)
 
-	# Variant 2: Simple contrast stretch
-	p2, p98 = np.percentile(resized, (2, 98))
-	if p98 > p2:
-		v2_base = np.clip((resized.astype(np.float32) - p2) * (255.0 / (p98 - p2)), 0, 255).astype(np.uint8)
-	else:
-		v2_base = resized.copy()
-	v2 = cv2.copyMakeBorder(v2_base, pad, pad, pad, pad, cv2.BORDER_REPLICATE)
-
-	# Variant 3: Bilateral filter to smooth LCD backlight pixel noise
-	v3_base = cv2.bilateralFilter(resized, d=5, sigmaColor=50, sigmaSpace=50)
-	v3 = cv2.copyMakeBorder(v3_base, pad, pad, pad, pad, cv2.BORDER_REPLICATE)
-
-	return [v1, v2, v3]
+	return [v1]
 
 
 # =============================================================================
