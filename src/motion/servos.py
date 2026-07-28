@@ -28,7 +28,7 @@ MIN_PULSE = 500
 MAX_PULSE = 2500
 STROKE_LENGTH = 55.0
 
-CAL_FILE = Path(__file__).resolve().parents[2] / "playground" / "servo_calibration.json"
+CAL_FILE = Path(__file__).resolve().parents[1] / "utilities" / "servo_calibration.json"
 
 
 @dataclass
