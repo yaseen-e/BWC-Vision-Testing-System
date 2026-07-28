@@ -16,6 +16,7 @@ import time
 import numpy as np
 import cv2
 from rapidocr_onnxruntime import RapidOCR
+from typing import Optional
 
 from .layouts import OCRField, ROIBox, STATUS_BAR
 
@@ -394,29 +395,64 @@ def _should_use_extended_warp(menu_fields: Optional[tuple[OCRField, ...]]) -> bo
 	return status_bar_names.issubset(current_field_names)
 
 
+def _expand_quadrilateral(
+    pts: np.ndarray,
+    scale: float = 0.03,
+    frame_shape: Optional[tuple[int, ...]] = None,
+) -> np.ndarray:
+    """Expand quadrilateral corner points outward from their centroid."""
+    pts = np.asarray(pts, dtype=np.float32).reshape(-1, 2)
+    centroid = np.mean(pts, axis=0)
+    expanded = centroid + (1.0 + scale) * (pts - centroid)
+
+    if frame_shape is not None:
+        h, w = frame_shape[:2]
+        expanded[:, 0] = np.clip(expanded[:, 0], 0, w - 1)
+        expanded[:, 1] = np.clip(expanded[:, 1], 0, h - 1)
+
+    return expanded.astype(np.float32)
+
+
 def _process_display_contour_and_warp(
-	frame: np.ndarray,
-	orange_contour: np.ndarray,
-	menu_fields: Optional[tuple[OCRField, ...]] = None,
+    frame: np.ndarray,
+    orange_contour: np.ndarray,
+    menu_fields: Optional[tuple[OCRField, ...]] = None,
+    padding_pct: float = 0.03,
 ) -> tuple[np.ndarray, np.ndarray]:
-	"""Warp display area into flat front-facing view."""
-	_require_cv2()
-	if not _should_use_extended_warp(menu_fields):
-		return orange_contour, _warp_image(frame, orange_contour)
+    """Warp display area into flat front-facing view with padded margins."""
+    _require_cv2()
 
-	ordered = _order_points(orange_contour)
-	top_left, top_right, bottom_right, bottom_left = ordered
+    # Always order points into standard 4-corner layout (TL, TR, BR, BL)
+    ordered = _order_points(orange_contour)
 
-	v_left = bottom_left - top_left
-	v_right = bottom_right - top_right
+    if not _should_use_extended_warp(menu_fields):
+        # Standard display warp with outward expansion
+        padded_contour = _expand_quadrilateral(
+            ordered, scale=padding_pct, frame_shape=frame.shape
+        )
+        return padded_contour, _warp_image(frame, padded_contour)
 
-	ext_factor = 10.0 / 90.0
-	extended_bottom_left = bottom_left + v_left * ext_factor
-	extended_bottom_right = bottom_right + v_right * ext_factor
-	extended_contour = np.array([top_left, top_right, extended_bottom_right, extended_bottom_left], dtype="float32")
+    # Extended warp logic for menu fields
+    top_left, top_right, bottom_right, bottom_left = ordered
 
-	warped_extended = _warp_image(frame, extended_contour)
-	return extended_contour, warped_extended
+    v_left = bottom_left - top_left
+    v_right = bottom_right - top_right
+
+    ext_factor = 10.0 / 90.0
+    extended_bottom_left = bottom_left + v_left * ext_factor
+    extended_bottom_right = bottom_right + v_right * ext_factor
+    extended_contour = np.array(
+        [top_left, top_right, extended_bottom_right, extended_bottom_left],
+        dtype="float32",
+    )
+
+    # Expand the extended quadrilateral outward to maintain margin padding
+    padded_extended_contour = _expand_quadrilateral(
+        extended_contour, scale=padding_pct, frame_shape=frame.shape
+    )
+
+    warped_extended = _warp_image(frame, padded_extended_contour)
+    return padded_extended_contour, warped_extended
 
 
 def _warp_image(image: np.ndarray, points: np.ndarray) -> np.ndarray:
