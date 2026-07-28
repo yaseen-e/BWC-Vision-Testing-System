@@ -327,7 +327,7 @@ def _build_display_mask(frame: np.ndarray) -> np.ndarray:
 
 	_, saturated_mask = cv2.threshold(saturation, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 	_, bright_mask = cv2.threshold(value, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-	display_mask = cv2.bitwise_and(saturated_mask, bright_mask)
+	display_mask = cv2.bitwise_or(saturated_mask, bright_mask)
 
 	mask = cv2.morphologyEx(display_mask, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (15, 5)))
 	mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 15)))
