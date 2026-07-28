@@ -309,35 +309,34 @@ def _get_rapid_ocr() -> Any:
 # =============================================================================
 
 def _build_display_mask(frame: np.ndarray) -> np.ndarray:
-	"""Build a mask for the emissive display window."""
+	"""Build a mask for the emissive blue display window."""
 	_require_cv2()
 	if frame is None or frame.size == 0:
 		raise ValueError("frame must be a non-empty image")
 
 	hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-	hue = hsv[:, :, 0]
-	saturation = hsv[:, :, 1]
-	value = hsv[:, :, 2]
 
-	# Boost blue hue brightness before thresholding
-	blue_hue_mask = (hue >= 90) & (hue <= 150)
-	boosted_value = value.astype(np.float32)
-	boosted_value[blue_hue_mask] = np.clip(boosted_value[blue_hue_mask] * 1.6, 0, 255)
-	value = boosted_value.astype(np.uint8)
+	# Blue HSV range to capture both dim and bright blue screen backgrounds
+	lower_blue = np.array([75, 20, 15], dtype=np.uint8)
+	upper_blue = np.array([145, 255, 255], dtype=np.uint8)
+	blue_mask = cv2.inRange(hsv, lower_blue, upper_blue)
 
-	_, saturated_mask = cv2.threshold(saturation, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-	_, bright_mask = cv2.threshold(value, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-	display_mask = cv2.bitwise_and(saturated_mask, bright_mask)
+	# Morphological closing to bridge gaps between white text and cyan borders
+	kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 25))
+	mask = cv2.morphologyEx(blue_mask, cv2.MORPH_CLOSE, kernel)
 
-	mask = cv2.morphologyEx(display_mask, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (15, 5)))
-	mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 15)))
-	mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)))
+	# Fill internal holes (text, cyan highlight boxes) to form a solid outer display region
+	contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+	filled_mask = np.zeros_like(mask)
+	for cnt in contours:
+		if cv2.contourArea(cnt) > 1000:
+			cv2.drawContours(filled_mask, [cnt], -1, 255, thickness=cv2.FILLED)
 
-	return mask
+	return filled_mask
 
 
 def _find_display_contour(frame: np.ndarray, mask: np.ndarray, min_area: int = 3000) -> Optional[np.ndarray]:
-	"""Find the raw display rectangle."""
+	"""Find the outermost display rectangle."""
 	_require_cv2()
 	contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 	if not contours:
@@ -347,7 +346,7 @@ def _find_display_contour(frame: np.ndarray, mask: np.ndarray, min_area: int = 3
 	min_area = max(min_area, int(frame_area * 0.05))
 
 	best_contour: Optional[np.ndarray] = None
-	best_score = float("-inf")
+	max_area = 0.0
 
 	def _contour_box(candidate: np.ndarray) -> np.ndarray:
 		rotated = cv2.minAreaRect(candidate)
@@ -368,9 +367,9 @@ def _find_display_contour(frame: np.ndarray, mask: np.ndarray, min_area: int = 3
 		if solidity < 0.50:
 			continue
 
-		score = area * solidity
-		if score > best_score:
-			best_score = score
+		# Select the largest (outermost) valid blue display region
+		if area > max_area:
+			max_area = area
 			best_contour = _contour_box(contour)
 
 	return best_contour
