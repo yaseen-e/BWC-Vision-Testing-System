@@ -309,23 +309,24 @@ def _get_rapid_ocr() -> Any:
 # =============================================================================
 
 def _build_display_mask(frame: np.ndarray) -> np.ndarray:
-	"""Build a mask for the emissive blue display window."""
+	"""Build a tight mask for the blue display window without border padding."""
 	_require_cv2()
 	if frame is None or frame.size == 0:
 		raise ValueError("frame must be a non-empty image")
 
 	hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-	# Blue HSV range to capture both dim and bright blue screen backgrounds
-	lower_blue = np.array([75, 20, 15], dtype=np.uint8)
-	upper_blue = np.array([145, 255, 255], dtype=np.uint8)
+	# Blue HSV range targeting the screen background
+	lower_blue = np.array([85, 35, 35], dtype=np.uint8)
+	upper_blue = np.array([135, 255, 255], dtype=np.uint8)
 	blue_mask = cv2.inRange(hsv, lower_blue, upper_blue)
 
-	# Morphological closing to bridge gaps between white text and cyan borders
-	kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 25))
+	# Small (5,5) kernel cleans noise without expanding outer edges
+	kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
 	mask = cv2.morphologyEx(blue_mask, cv2.MORPH_CLOSE, kernel)
+	mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
 
-	# Fill internal holes (text, cyan highlight boxes) to form a solid outer display region
+	# Fill internal holes (text, cyan selection boxes)
 	contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 	filled_mask = np.zeros_like(mask)
 	for cnt in contours:
@@ -336,7 +337,7 @@ def _build_display_mask(frame: np.ndarray) -> np.ndarray:
 
 
 def _find_display_contour(frame: np.ndarray, mask: np.ndarray, min_area: int = 3000) -> Optional[np.ndarray]:
-	"""Find the outermost display rectangle."""
+	"""Find the tight 4-corner polygon of the main blue display region."""
 	_require_cv2()
 	contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 	if not contours:
@@ -347,11 +348,6 @@ def _find_display_contour(frame: np.ndarray, mask: np.ndarray, min_area: int = 3
 
 	best_contour: Optional[np.ndarray] = None
 	max_area = 0.0
-
-	def _contour_box(candidate: np.ndarray) -> np.ndarray:
-		rotated = cv2.minAreaRect(candidate)
-		points = cv2.boxPoints(rotated)
-		return points.astype("float32")
 
 	for contour in contours:
 		area = cv2.contourArea(contour)
@@ -367,10 +363,23 @@ def _find_display_contour(frame: np.ndarray, mask: np.ndarray, min_area: int = 3
 		if solidity < 0.50:
 			continue
 
-		# Select the largest (outermost) valid blue display region
 		if area > max_area:
 			max_area = area
-			best_contour = _contour_box(contour)
+			peri = cv2.arcLength(hull, True)
+			quad = None
+			
+			# Fit exact 4-point quadrilateral to the physical screen corners
+			for eps in np.linspace(0.01, 0.08, 15):
+				approx = cv2.approxPolyDP(hull, eps * peri, True)
+				if len(approx) == 4:
+					quad = approx.reshape(4, 2).astype("float32")
+					break
+
+			if quad is None:
+				rect = cv2.minAreaRect(hull)
+				quad = cv2.boxPoints(rect).astype("float32")
+
+			best_contour = quad
 
 	return best_contour
 
