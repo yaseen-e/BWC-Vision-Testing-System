@@ -276,7 +276,7 @@ def _get_camera() -> Any:
 
 
 def _get_rapid_ocr() -> Any:
-	"""Initialize RapidOCR singleton letting DBNet handle word segmentation natively."""
+	"""Initialize RapidOCR singleton with low score threshold to retain single-character digits."""
 	global _RAPID_OCR
 	if _RAPID_OCR is not None:
 		return _RAPID_OCR
@@ -289,7 +289,7 @@ def _get_rapid_ocr() -> Any:
 				"Det.use_dilation": False,
 				"Det.box_thresh": 0.45,
 				"Det.thresh": 0.25,
-				"Global.text_score": 0.50,
+				"Global.text_score": 0.25,
 			}
 		)
 	except Exception:
@@ -299,7 +299,7 @@ def _get_rapid_ocr() -> Any:
 				det_use_dilation=False,
 				det_box_thresh=0.45,
 				det_thresh=0.25,
-				text_score=0.50,
+				text_score=0.25,
 			)
 		except Exception:
 			_RAPID_OCR = RapidOCR()
@@ -321,17 +321,11 @@ def _build_display_mask(frame: np.ndarray) -> np.ndarray:
 	saturation = hsv[:, :, 1]
 	value = hsv[:, :, 2]
 
-	# -------------------------------------------------------------------------
-	# BOOST BLUE HUE BRIGHTNESS BEFORE THRESHOLDING
-	# -------------------------------------------------------------------------
-	# Identify blue pixels (OpenCV Hue range for blue: ~90 to 130)
+	# Boost blue hue brightness before thresholding
 	blue_hue_mask = (hue >= 90) & (hue <= 130)
-
-	# Multiply value (brightness) for blue pixels to raise overall screen luminance
 	boosted_value = value.astype(np.float32)
 	boosted_value[blue_hue_mask] = np.clip(boosted_value[blue_hue_mask] * 1.6, 0, 255)
 	value = boosted_value.astype(np.uint8)
-	# -------------------------------------------------------------------------
 
 	_, saturated_mask = cv2.threshold(saturation, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 	_, bright_mask = cv2.threshold(value, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
@@ -342,6 +336,7 @@ def _build_display_mask(frame: np.ndarray) -> np.ndarray:
 	mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)))
 
 	return mask
+
 
 def _find_display_contour(frame: np.ndarray, mask: np.ndarray, min_area: int = 3000) -> Optional[np.ndarray]:
 	"""Find the raw display rectangle."""
@@ -504,13 +499,13 @@ def _normalize_backlit_crop(crop: np.ndarray) -> np.ndarray:
 
 
 def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np.ndarray]:
-	"""Extract clean grayscale variants scaled and softly padded using border replication."""
+	"""Extract clean grayscale variants scaled and padded using constant background colors (NO BORDER_REPLICATE)."""
 	_require_cv2()
 	roi = _crop_roi(prepared, field)
 
 	if roi is None or roi.size == 0:
 		return []
-	
+
 	h, w = roi.shape[:2]
 	if h == 0 or w == 0:
 		return []
@@ -525,22 +520,25 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 
 	norm_gray = _normalize_backlit_crop(resized)
 
-	# Use BORDER_REPLICATE rather than hard white, preventing fake contrast borders at edges
 	pad = 12
-	bg_color = int(np.median(norm_gray))
-	v1 = cv2.copyMakeBorder(norm_gray, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=bg_color)
 
-	# Variant 2: Simple contrast stretch
+	# Variant 1: Normalized grayscale padded with crop background median
+	v1_bg = int(np.median(norm_gray))
+	v1 = cv2.copyMakeBorder(norm_gray, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=v1_bg)
+
+	# Variant 2: Contrast stretched padded with crop background median (NO BORDER_REPLICATE)
 	p2, p98 = np.percentile(resized, (2, 98))
 	if p98 > p2:
 		v2_base = np.clip((resized.astype(np.float32) - p2) * (255.0 / (p98 - p2)), 0, 255).astype(np.uint8)
 	else:
 		v2_base = resized.copy()
-	v2 = cv2.copyMakeBorder(v2_base, pad, pad, pad, pad, cv2.BORDER_REPLICATE)
+	v2_bg = int(np.median(v2_base))
+	v2 = cv2.copyMakeBorder(v2_base, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=v2_bg)
 
-	# Variant 3: Bilateral filter to smooth LCD backlight pixel noise
+	# Variant 3: Bilateral filter padded with crop background median (NO BORDER_REPLICATE)
 	v3_base = cv2.bilateralFilter(resized, d=5, sigmaColor=50, sigmaSpace=50)
-	v3 = cv2.copyMakeBorder(v3_base, pad, pad, pad, pad, cv2.BORDER_REPLICATE)
+	v3_bg = int(np.median(v3_base))
+	v3 = cv2.copyMakeBorder(v3_base, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=v3_bg)
 
 	return [v1, v2, v3]
 
@@ -550,7 +548,7 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 # =============================================================================
 
 def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
-	"""Extract text using RapidOCR with geometry & confidence filtering."""
+	"""Extract text using RapidOCR across all variants with candidate evaluation."""
 	field_name = field.name
 	_require_rapidocr()
 	ocr_engine = _get_rapid_ocr()
@@ -590,16 +588,13 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 			best_value = value
 			best_score = score
 
-		if best_score > 6.0:
-			break
-
 	return best_raw, best_value
 
 
 def _parse_and_filter_rapidocr_boxes(
 	rapid_output: Optional[list[Any]]
 ) -> tuple[str, float]:
-	"""Filter boxes and group by line, relying purely on OCR model predictions."""
+	"""Filter boxes and reconstruct lines using physical gap distance."""
 	if not rapid_output:
 		return "", 0.0
 
@@ -611,11 +606,13 @@ def _parse_and_filter_rapidocr_boxes(
 
 		box, text, conf = item[0], str(item[1]).strip(), float(item[2])
 
-		if not text or conf < 0.60:
+		# Retain low-confidence single digits/letters (e.g. '1') down to 0.20
+		if not text or conf < 0.20:
 			continue
 
 		box_points = np.array(box, dtype=np.float32)
 		min_x = float(np.min(box_points[:, 0]))
+		max_x = float(np.max(box_points[:, 0]))
 		min_y, max_y = float(np.min(box_points[:, 1])), float(np.max(box_points[:, 1]))
 		height = max_y - min_y
 		center_y = (min_y + max_y) / 2.0
@@ -624,6 +621,7 @@ def _parse_and_filter_rapidocr_boxes(
 			"text": text,
 			"conf": conf,
 			"min_x": min_x,
+			"max_x": max_x,
 			"center_y": center_y,
 			"height": height,
 		})
@@ -652,11 +650,24 @@ def _parse_and_filter_rapidocr_boxes(
 
 	for row in rows:
 		row.sort(key=lambda k: k["min_x"])
-		row_text = " ".join(item["text"] for item in row)
 		all_confidences.extend(item["conf"] for item in row)
 
-		if row_text.strip():
-			line_strings.append(row_text.strip())
+		row_str = ""
+		for idx, item in enumerate(row):
+			if idx == 0:
+				row_str = item["text"]
+			else:
+				prev_max_x = row[idx - 1]["max_x"]
+				gap = item["min_x"] - prev_max_x
+				avg_h = (row[idx - 1]["height"] + item["height"]) / 2.0
+				# Only insert space if horizontal gap exceeds 20% of text height
+				if gap > avg_h * 0.20:
+					row_str += " " + item["text"]
+				else:
+					row_str += item["text"]
+
+		if row_str.strip():
+			line_strings.append(row_str.strip())
 
 	full_text = " ".join(line_strings)
 	full_text = re.sub(r"\s+", " ", full_text).strip()
@@ -670,31 +681,24 @@ def _score_field_candidate(field_name: str, raw_text: str, value: Any, conf: flo
 	if value is None or (isinstance(value, str) and (value == "UNKNOWN" or not value)):
 		return -1.0
 
-	score = conf * 2.0
+	# Base validity score + model confidence score
+	score = 2.0 + (conf * 2.0)
 
 	if field_name == "temperature" and isinstance(value, int):
 		if 50 <= value <= 199:
-			score += 5.0
+			score += 3.0
 		else:
 			return -1.0
 	elif field_name == "mode" and isinstance(value, str) and value != "UNKNOWN":
-		if len(value) >= 3:
-			score += 4.0
-		else:
-			score += 1.0
-	elif field_name.startswith("dashboard_info_line"):
-		if isinstance(value, str) and len(value) >= 2:
-			score += 2.0
-			if len(value) >= 5:
-				score += 2.0
+		score += 2.0
 	elif field_name == "time_field":
 		if isinstance(value, str) and re.search(r"\d{1,2}:\d{2}", value):
-			score += 4.0
+			score += 3.0
 		else:
 			return -1.0
 	elif field_name == "date_field":
 		if isinstance(value, str) and re.search(r"\d{2}/\d{2}/\d{2}", value):
-			score += 4.0
+			score += 3.0
 
 	return score
 
@@ -887,7 +891,7 @@ def _load_icon_templates() -> dict[str, dict[str, np.ndarray]]:
 		},
 		"schedule_icon": {
 			"schedule_running": ["schedule_running.png", "schedule_running.jpg", "schedule_running.jpeg"],
-			"schedule_not_running": ["schedule_not_running.png", "schedule_not_running.jpeg", "schedule_not_running.jpeg"],
+			"schedule_not_running": ["schedule_not_running.png", "schedule_not_running.jpg", "schedule_not_running.jpeg"],
 		},
 	}
 
