@@ -594,7 +594,7 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 def _parse_and_filter_rapidocr_boxes(
 	rapid_output: Optional[list[Any]]
 ) -> tuple[str, float]:
-	"""Filter boxes and reconstruct lines using physical gap distance."""
+	"""Filter boxes and reconstruct lines using character-width adaptive spatial metrics."""
 	if not rapid_output:
 		return "", 0.0
 
@@ -606,7 +606,7 @@ def _parse_and_filter_rapidocr_boxes(
 
 		box, text, conf = item[0], str(item[1]).strip(), float(item[2])
 
-		# Retain low-confidence single digits/letters (e.g. '1') down to 0.20
+		# Retain low-confidence single digits/letters down to 0.20
 		if not text or conf < 0.20:
 			continue
 
@@ -657,14 +657,21 @@ def _parse_and_filter_rapidocr_boxes(
 			if idx == 0:
 				row_str = item["text"]
 			else:
-				prev_max_x = row[idx - 1]["max_x"]
-				gap = item["min_x"] - prev_max_x
-				avg_h = (row[idx - 1]["height"] + item["height"]) / 2.0
-				# Only insert space if horizontal gap exceeds 20% of text height
-				if gap > avg_h * 0.20:
-					row_str += " " + item["text"]
-				else:
+				prev_item = row[idx - 1]
+				
+				# Estimate average character width across the two adjacent boxes
+				char_w1 = (prev_item["max_x"] - prev_item["min_x"]) / max(1, len(prev_item["text"]))
+				char_w2 = (item["max_x"] - item["min_x"]) / max(1, len(item["text"]))
+				avg_char_w = (char_w1 + char_w2) / 2.0
+
+				gap = item["min_x"] - prev_item["max_x"]
+
+				# Separate boxes emitted by DBNet are distinct word tokens unless 
+				# they physically overlap horizontally by more than half a character's width.
+				if gap < -(avg_char_w * 0.5):
 					row_str += item["text"]
+				else:
+					row_str += " " + item["text"]
 
 		if row_str.strip():
 			line_strings.append(row_str.strip())
