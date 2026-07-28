@@ -1,7 +1,7 @@
 """
 Bradford White Corporation (BWC) Water Heater Vision Testing System
 Team 14 - Senior Project
-./src/vision/display_layouts.py - Display Layout Schema
+./src/vision/layouts.py - Display Layout Schema
 Defines the ordered menu tree and OCR regions of interest (ROIs) 
 for the LCD UI.
 """

@@ -1,7 +1,7 @@
 """
 Bradford White Corporation (BWC) Water Heater Vision Testing System
 Team 14 - Senior Project
-./src/motion/servo_driver.py - Servo Driver
+./src/motion/servos.py - Servo Driver
 Provides button mapping and servo control hooks for water heater UI actuation.
 """
 from __future__ import annotations

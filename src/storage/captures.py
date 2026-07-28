@@ -1,7 +1,7 @@
 """
 Bradford White Corporation (BWC) Water Heater Vision Testing System
 Team 14 - Senior Project
-./src/data_manager.py - Data Manager
+./src/storage/captures.py - Data Manager
 Centralizes capture naming, persistence, and retention cleanup for project data assets.
 """
 from __future__ import annotations

@@ -1,7 +1,7 @@
 """
 Bradford White Corporation (BWC) Water Heater Vision Testing System
 Team 14 - Senior Project
-./src/network/report_writer.py - Test Report CSV Generator
+./src/storage/reports.py - Test Report CSV Generator
 Handles dynamic schema resolution and creation of CSV test reports.
 """
 from __future__ import annotations
