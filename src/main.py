@@ -86,7 +86,8 @@ class SystemContext:
 
 def main() -> None:
 	"""Main system execution entry point."""
-	use_simulated = _prompt_for_command_mode()
+	# use_simulated = _prompt_for_command_mode()
+	use_simulated = False
 	ctx = SystemContext(use_simulated=use_simulated)
 	report_file, report_writer, report_path = reports.open_test_report()
 
