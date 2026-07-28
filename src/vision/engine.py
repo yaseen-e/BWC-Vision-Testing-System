@@ -289,7 +289,7 @@ def _get_rapid_ocr() -> Any:
 				"Det.use_dilation": False,
 				"Det.box_thresh": 0.45,
 				"Det.thresh": 0.25,
-				"Global.text_score": 0.50,
+				"Global.text_score": 0.30,
 			}
 		)
 	except Exception:
@@ -299,7 +299,7 @@ def _get_rapid_ocr() -> Any:
 				det_use_dilation=False,
 				det_box_thresh=0.45,
 				det_thresh=0.25,
-				text_score=0.50,
+				text_score=0.30,
 			)
 		except Exception:
 			_RAPID_OCR = RapidOCR()
