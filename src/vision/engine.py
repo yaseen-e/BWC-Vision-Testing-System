@@ -669,7 +669,7 @@ def _parse_field_value(field_name: str, raw_text: str) -> Any:
 		return _parse_temperature(raw_text)
 	if field_name == "time_field":
 		return _parse_time(raw_text)
-	if field_name.startswith("dashboard_info_line"):
+	if field_name.startswith("dashboard_info_line") or "schedule" in field_name:
 		return _parse_dashboard_info(raw_text)
 	return raw_text.strip()
 

@@ -53,7 +53,7 @@ def parse_labview_command(command: str) -> LabViewCommand | None:
 _SIMULATED_COMMANDS: collections.deque[str] = collections.deque(
 	[
 		# C1-C7: HS
-		"BACK", "RUN_OCR", "BACK", "RUN_OCR", "BACK", "RUN_OCR", "BACK", "RUN_OCR", "BACK", "RUN_OCR", "BACK", "RUN_OCR", "BACK", "RUN_OCR",
+		#"BACK", "RUN_OCR", "BACK", "RUN_OCR", "BACK", "RUN_OCR", "BACK", "RUN_OCR", "BACK", "RUN_OCR", "BACK", "RUN_OCR", "BACK", "RUN_OCR",
 		# C8: SST
 		# "MENU", "DOWN", "SELECT", "RUN_OCR",
 		# C9: SSB
