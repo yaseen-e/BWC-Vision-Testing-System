@@ -493,8 +493,8 @@ def _normalize_backlit_crop(crop: np.ndarray) -> np.ndarray:
 
 def _extract_digit_variants(roi_gray: np.ndarray) -> list[np.ndarray]:
 	"""
-	Isolate main digit contours, filter out small edge artifacts (° symbol, arrows),
-	tightly crop around the numbers, and format variants for RapidOCR.
+	Erases small edge artifacts (° symbols, arrows) while leaving clean 
+	digit shapes with adequate surrounding background for RapidOCR.
 	"""
 	_require_cv2()
 	if roi_gray is None or roi_gray.size == 0:
@@ -503,61 +503,48 @@ def _extract_digit_variants(roi_gray: np.ndarray) -> list[np.ndarray]:
 	if len(roi_gray.shape) == 3:
 		roi_gray = cv2.cvtColor(roi_gray, cv2.COLOR_BGR2GRAY)
 
-	# 1. Binarize bright digits against the dark background
+	# 1. Binarize to locate shapes
 	blurred = cv2.GaussianBlur(roi_gray, (3, 3), 0)
 	_, thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-	# 2. Find contours inside the ROI
+	# 2. Find contours
 	contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
 	roi_h = roi_gray.shape[0]
-	# Main digits are >35% of ROI height; degree symbol ° and edge noise are much smaller
-	min_digit_height = int(roi_h * 0.35)
+	min_digit_height = int(roi_h * 0.30)  # Main numbers are much taller than ° or noise
 
-	digit_boxes = []
+	# 3. Create a clean mask keeping ONLY tall digit contours
+	mask = np.zeros_like(roi_gray)
+	digit_found = False
 	for contour in contours:
-		x, y, w, h = cv2.boundingRect(contour)
-		# Ignore small artifacts on the edges
-		if h >= min_digit_height and w >= 4:
-			digit_boxes.append((x, y, w, h))
+		_, _, _, h = cv2.boundingRect(contour)
+		if h >= min_digit_height:
+			cv2.drawContours(mask, [contour], -1, 255, -1)
+			digit_found = True
 
-	# 3. Tightly crop around ONLY the matched digit contours (stripping the degree symbol)
-	if digit_boxes:
-		min_x = min(box[0] for box in digit_boxes)
-		min_y = min(box[1] for box in digit_boxes)
-		max_x = max(box[0] + box[2] for box in digit_boxes)
-		max_y = max(box[1] + box[3] for box in digit_boxes)
-		digit_crop = roi_gray[min_y:max_y, min_x:max_x]
-	else:
-		digit_crop = roi_gray
+	# If digits found, mask out edge noise; otherwise keep original ROI
+	cleaned_roi = cv2.bitwise_and(roi_gray, roi_gray, mask=mask) if digit_found else roi_gray
 
-	ch, cw = digit_crop.shape[:2]
-	if ch == 0 or cw == 0:
+	# 4. Standard scale & pad
+	h, w = cleaned_roi.shape[:2]
+	if h == 0 or w == 0:
 		return []
 
-	# 4. Scale tightly cropped digits to standard 48px OCR height
 	target_h = 48
-	scale = target_h / float(ch)
-	target_w = max(16, int(cw * scale))
-	scaled_digits = cv2.resize(digit_crop, (target_w, target_h), interpolation=cv2.INTER_CUBIC)
+	scale = target_h / float(h)
+	new_w = max(16, int(w * scale))
+	resized = cv2.resize(cleaned_roi, (new_w, target_h), interpolation=cv2.INTER_CUBIC)
 
-	variants = []
+	pad = 16
+	# Inverted Black-on-White (Optimal for RapidOCR / PP-OCR)
+	inverted = cv2.bitwise_not(resized)
+	v1 = cv2.copyMakeBorder(inverted, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=255)
 
-	# Variant 1: Inverted Black-on-White with clean margin
-	inverted = cv2.bitwise_not(scaled_digits)
-	v1 = cv2.copyMakeBorder(inverted, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=255)
-	variants.append(v1)
+	# Binary Inverted
+	_, bin_inv = cv2.threshold(resized, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+	v2 = cv2.copyMakeBorder(bin_inv, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=255)
 
-	# Variant 2: High-contrast Binary Inverted
-	_, bin_inv = cv2.threshold(scaled_digits, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-	v2 = cv2.copyMakeBorder(bin_inv, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=255)
-	variants.append(v2)
-
-	# Variant 3: Standard White-on-Black padded
-	v3 = cv2.copyMakeBorder(scaled_digits, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=0)
-	variants.append(v3)
-
-	return variants
+	return [v1, v2]
 
 
 def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np.ndarray]:
@@ -568,12 +555,9 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 	if roi is None or roi.size == 0:
 		return []
 
-	field_name = getattr(field, "name", "")
-
-	field_name = getattr(field, "name", "")
-
-	# Route temperature field through contour digit isolation
-	if field_name == "temperature":
+	# Check if this field is strictly numeric (e.g., whitelisted_chars == "0123456789")
+	whitelisted = getattr(field, "whitelisted_chars", None)
+	if whitelisted and whitelisted.isdigit():
 		return _extract_digit_variants(roi)
 	
 	h, w = roi.shape[:2]
