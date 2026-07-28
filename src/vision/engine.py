@@ -491,93 +491,46 @@ def _normalize_backlit_crop(crop: np.ndarray) -> np.ndarray:
 	return norm
 
 
-def _extract_digit_variants(roi_gray: np.ndarray) -> list[np.ndarray]:
-	"""
-	Erases small edge artifacts (° symbols, arrows) while leaving clean 
-	digit shapes with adequate surrounding background for RapidOCR.
-	"""
-	_require_cv2()
-	if roi_gray is None or roi_gray.size == 0:
-		return []
-
-	if len(roi_gray.shape) == 3:
-		roi_gray = cv2.cvtColor(roi_gray, cv2.COLOR_BGR2GRAY)
-
-	# 1. Binarize to locate shapes
-	blurred = cv2.GaussianBlur(roi_gray, (3, 3), 0)
-	_, thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-	# 2. Find contours
-	contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-	roi_h = roi_gray.shape[0]
-	min_digit_height = int(roi_h * 0.30)  # Main numbers are much taller than ° or noise
-
-	# 3. Create a clean mask keeping ONLY tall digit contours
-	mask = np.zeros_like(roi_gray)
-	digit_found = False
-	for contour in contours:
-		_, _, _, h = cv2.boundingRect(contour)
-		if h >= min_digit_height:
-			cv2.drawContours(mask, [contour], -1, 255, -1)
-			digit_found = True
-
-	# If digits found, mask out edge noise; otherwise keep original ROI
-	cleaned_roi = cv2.bitwise_and(roi_gray, roi_gray, mask=mask) if digit_found else roi_gray
-
-	# 4. Standard scale & pad
-	h, w = cleaned_roi.shape[:2]
-	if h == 0 or w == 0:
-		return []
-
-	target_h = 48
-	scale = target_h / float(h)
-	new_w = max(16, int(w * scale))
-	resized = cv2.resize(cleaned_roi, (new_w, target_h), interpolation=cv2.INTER_CUBIC)
-
-	pad = 16
-	# Inverted Black-on-White (Optimal for RapidOCR / PP-OCR)
-	inverted = cv2.bitwise_not(resized)
-	v1 = cv2.copyMakeBorder(inverted, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=255)
-
-	# Binary Inverted
-	_, bin_inv = cv2.threshold(resized, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-	v2 = cv2.copyMakeBorder(bin_inv, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=255)
-
-	return [v1, v2]
-
-
 def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np.ndarray]:
-	"""Extract clean grayscale variants scaled and softly padded."""
+	"""Extract clean grayscale variants scaled and softly padded using border replication."""
 	_require_cv2()
 	roi = _crop_roi(prepared, field)
 
 	if roi is None or roi.size == 0:
 		return []
-
-	# Check if this field is strictly numeric (e.g., whitelisted_chars == "0123456789")
-	whitelisted = getattr(field, "whitelisted_chars", None)
-	if whitelisted and whitelisted.isdigit():
-		return _extract_digit_variants(roi)
-
+	
 	h, w = roi.shape[:2]
 	if h == 0 or w == 0:
 		return []
 
-	# Standard text processing for non-digit fields...
+	# Target standard OCR height (~48px)
 	target_h = 48
 	scale = target_h / float(h)
 	new_w = max(16, int(w * scale))
 
 	interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_CUBIC
 	resized = cv2.resize(roi, (new_w, target_h), interpolation=interp)
+
 	norm_gray = _normalize_backlit_crop(resized)
 
+	# Use BORDER_REPLICATE rather than hard white, preventing fake contrast borders at edges
 	pad = 12
 	bg_color = int(np.median(norm_gray))
 	v1 = cv2.copyMakeBorder(norm_gray, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=bg_color)
 
-	return [v1]
+	# Variant 2: Simple contrast stretch
+	p2, p98 = np.percentile(resized, (2, 98))
+	if p98 > p2:
+		v2_base = np.clip((resized.astype(np.float32) - p2) * (255.0 / (p98 - p2)), 0, 255).astype(np.uint8)
+	else:
+		v2_base = resized.copy()
+	v2 = cv2.copyMakeBorder(v2_base, pad, pad, pad, pad, cv2.BORDER_REPLICATE)
+
+	# Variant 3: Bilateral filter to smooth LCD backlight pixel noise
+	v3_base = cv2.bilateralFilter(resized, d=5, sigmaColor=50, sigmaSpace=50)
+	v3 = cv2.copyMakeBorder(v3_base, pad, pad, pad, pad, cv2.BORDER_REPLICATE)
+
+	return [v1, v2, v3]
 
 
 # =============================================================================
