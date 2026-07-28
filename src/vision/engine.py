@@ -599,7 +599,7 @@ def _parse_and_filter_rapidocr_boxes(
 
 		box, text, conf = item[0], str(item[1]).strip(), float(item[2])
 
-		if not text or conf < 0.30:
+		if not text or conf < 0.40:
 			continue
 		if len(text) == 1 and conf < 0.45:
 			continue
