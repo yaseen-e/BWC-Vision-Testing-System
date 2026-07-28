@@ -611,7 +611,7 @@ def _parse_and_filter_rapidocr_boxes(
 
 		box, text, conf = item[0], str(item[1]).strip(), float(item[2])
 
-		if not text or conf < 0.50:
+		if not text or conf < 0.60:
 			continue
 
 		box_points = np.array(box, dtype=np.float32)
