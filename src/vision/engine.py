@@ -285,7 +285,7 @@ def _get_rapid_ocr() -> Any:
 	try:
 		_RAPID_OCR = RapidOCR(
 			params={
-				"Det.unclip_ratio": 1.1,  # Tightens box expansion to prevent word merging
+				"Det.unclip_ratio": 1.1,  # Lowered from default 1.5 to prevent word box merging
 				"Det.box_thresh": 0.30,
 				"Det.thresh": 0.20,
 				"Global.text_score": 0.20,
@@ -505,7 +505,11 @@ def _get_border_bg_color(img: np.ndarray) -> int:
 
 
 def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np.ndarray]:
-	"""Extract grayscale variants optimized for OCR word and space preservation."""
+	"""Extract grayscale variants optimized for PaddleOCR recognition.
+	
+	Combines clean border-sampled padding (preserving word spaces) with soft
+	grayscale gradients (preserving stroke geometry and uppercase fidelity).
+	"""
 	_require_cv2()
 	roi = _crop_roi(prepared, field)
 
@@ -526,16 +530,16 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 
 	pad = 16
 
-	# Variant 1: Soft Normalized Grayscale
+	# Variant 1: Soft Normalized Grayscale (Preserves character stroke geometry & casing)
 	norm_gray = _normalize_backlit_crop(resized)
 	bg1 = _get_border_bg_color(norm_gray)
 	v1 = cv2.copyMakeBorder(norm_gray, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=bg1)
 
-	# Variant 2: Clean Linear Rescale
+	# Variant 2: Clean Linear Rescale (Unmodified baseline preserving true camera gradients)
 	bg2 = _get_border_bg_color(resized)
 	v2 = cv2.copyMakeBorder(resized, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=bg2)
 
-	# Variant 3: Soft Denoised Grayscale
+	# Variant 3: Soft Denoised Grayscale (Suppresses camera noise without destroying character shape)
 	denoised = cv2.bilateralFilter(resized, d=5, sigmaColor=30, sigmaSpace=30)
 	bg3 = _get_border_bg_color(denoised)
 	v3 = cv2.copyMakeBorder(denoised, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=bg3)
@@ -544,7 +548,7 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 
 
 # =============================================================================
-# OCR PROCESSING & SPATIAL LINE RECONSTRUCTION (CHARACTER DETECTION ENGINE)
+# OCR PROCESSING & SPATIAL LINE RECONSTRUCTION
 # =============================================================================
 
 def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
@@ -564,13 +568,14 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 		if not raw:
 			continue
 
-		# Whitelist character filtering (spaces strictly preserved)
+		# Whitelist character filtering
 		if field.whitelisted_chars:
 			allowed = set(field.whitelisted_chars)
-			allowed.add(" ")
 			cleaned_chars = []
 			for char in raw:
-				if char in allowed or char.isspace():
+				if char.isspace():
+					cleaned_chars.append(" ")
+				elif char in allowed:
 					cleaned_chars.append(char)
 				elif char.upper() in allowed:
 					cleaned_chars.append(char.upper())
@@ -605,6 +610,7 @@ def _parse_and_filter_rapidocr_boxes(
 
 		box, text, conf = item[0], str(item[1]).strip(), float(item[2])
 
+		# Retain valid low-confidence single digits/letters
 		if not text or conf < 0.20:
 			continue
 
@@ -622,10 +628,10 @@ def _parse_and_filter_rapidocr_boxes(
 	if not items_to_keep:
 		return "", 0.0
 
-	# Sort top-to-bottom (using a 12px line tolerance), then left-to-right
+	# Sort top-to-bottom (12px line group tolerance), then left-to-right
 	items_to_keep.sort(key=lambda k: (round(k["min_y"] / 12.0), k["min_x"]))
 
-	# Join distinct detected text boxes with standard spaces
+	# Join distinct detected boxes with standard spaces and let RapidOCR output dictate text
 	full_text = " ".join(item["text"] for item in items_to_keep)
 	full_text = re.sub(r"\s+", " ", full_text).strip()
 	mean_conf = float(np.mean([item["conf"] for item in items_to_keep]))
