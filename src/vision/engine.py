@@ -2,8 +2,8 @@
 Bradford White Corporation (BWC) Water Heater Vision Testing System
 Team 14 - Senior Project
 ./src/vision/engine.py - Vision/OCR Engine
-Captures camera frames, isolates the display region via luminance processing,
-extracts text via RapidOCR, and classifies icon states via template matching.
+Captures camera frames, isolates the display region, extracts mode/temperature via RapidOCR,
+and classifies icon states via multi-metric shape/template matching.
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ _RAPID_OCR: Any = None
 
 @dataclass(frozen=True)
 class OCRReadout:
-	"""Single OCR result payload for upstream system logic."""
+	"""Single OCR result payload for upstream logic (main/network)."""
 
 	display_found: bool
 	current_menu_key: str
@@ -45,7 +45,7 @@ def capture_and_read_display(
 	current_menu_key: str,
 	menu_fields: tuple[OCRField, ...],
 ) -> OCRReadout:
-	"""One-call helper: captures camera frame and runs OCR display reading pipeline."""
+	"""One-call helper used by main: capture frame then run OCR pipeline."""
 	frame = capture_frame()
 	return read_display(
 		frame,
@@ -59,7 +59,7 @@ def read_display(
 	current_menu_key: str,
 	menu_fields: tuple[OCRField, ...],
 ) -> OCRReadout:
-	"""Read fields from the display in one frame based on current layout context."""
+	"""Read fields from the display in one frame based on current context using RapidOCR."""
 	_require_cv2()
 	_require_rapidocr()
 
@@ -96,6 +96,7 @@ def read_display(
 	fields_result: dict[str, dict[str, Any]] = {}
 	for field in menu_fields:
 		if field.name in ("wifi_icon", "schedule_icon") or field.name.endswith("_icon"):
+			# Pass clean crop directly to the icon classifier
 			unpadded_roi = _crop_roi(prepared_gray, field)
 			raw, val = _classify_icon_field(unpadded_roi, field.name)
 		else:
@@ -124,7 +125,7 @@ def get_warped_display(
 	current_menu_key: Optional[str] = None,
 	menu_fields: Optional[tuple[OCRField, ...]] = None,
 ) -> Optional[np.ndarray]:
-	"""Extract a front-facing warped view of the display from a frame."""
+	"""Extract a front-facing view of the display from a camera frame, or None if not found."""
 	_ = current_menu_key
 	if frame is None or frame.size == 0:
 		return None
@@ -146,7 +147,7 @@ def save_roi_ocr_overlay(
 	menu_fields: tuple[OCRField, ...],
 	current_menu_key: Optional[str] = None,
 ) -> Optional[Path]:
-	"""Persist a calibration image showing bounding display polygons and field ROIs."""
+	"""Persist a calibration image that shows every OCR ROI on the current frame."""
 	_require_cv2()
 	if frame is None or frame.size == 0:
 		return None
@@ -197,17 +198,18 @@ def save_roi_ocr_overlay(
 
 
 def warm_up() -> None:
-	"""Warm up camera and OCR singletons to flush initial cold-start delays."""
+	"""Hook for camera and OCR engine warmup work to fully flush hardware pipelines."""
 	_ = _get_camera()
 	_ = _get_rapid_ocr()
 
 
 def is_camera_available() -> bool:
+	"""Return True when the camera can be used."""
 	return True
 
 
 def shutdown() -> None:
-	"""Stop camera device cleanly."""
+	"""Stop the camera cleanly."""
 	global _CAMERA
 	if _CAMERA is None:
 		return
@@ -217,7 +219,7 @@ def shutdown() -> None:
 
 
 # =============================================================================
-# SINGLETONS & HARDWARE INITIALIZATION
+# SINGLETONS & SYSTEM REQUIREMENT CHECKS
 # =============================================================================
 
 def _require_cv2() -> None:
@@ -228,12 +230,13 @@ def _require_cv2() -> None:
 def _require_rapidocr() -> None:
 	if RapidOCR is None:
 		raise RuntimeError(
-			"rapidocr_onnxruntime is required for OCR text extraction."
+			"rapidocr_onnxruntime is required for OCR text extraction. "
+			"Run: pip install rapidocr_onnxruntime onnxruntime"
 		)
 
 
 def _get_camera() -> Any:
-	"""Initialize Picamera2 hardware controls and lock optical parameters."""
+	"""Initialize and return the camera object."""
 	global _CAMERA
 	if _CAMERA is not None:
 		return _CAMERA
@@ -243,23 +246,22 @@ def _get_camera() -> Any:
 	camera_info = Picamera2.global_camera_info()
 	camera_num = camera_info[0]["Num"]
 	camera = Picamera2(camera_num=camera_num)
-	config = camera.create_preview_configuration(main={"size": (1280, 720)})  # 1280x720 16:9 native frame resolution
+	config = camera.create_preview_configuration(main={"size": (1280, 720)})
 	camera.configure(config)
 	camera.start()
 	camera.set_controls({
-		"AfMode": 0,          # 0 = Manual AF mode (disables continuous auto-focus search jitter)
-		"LensPosition": 9.1,  # Diopters = 1 / distance_in_meters. Target distance = 0.11m (11cm) -> 1 / 0.11 = 9.09 ~ 9.1 dpt
+		"AfMode": 0,
+		"LensPosition": 9.1,
 	})
 
-	time.sleep(0.6)  # 0.6s delay allows hardware exposure & gain auto-convergence to settle
-	for _ in range(6):  # Read 6 frame buffers to clear stale/underexposed frames from libcamera queue
+	time.sleep(0.6)
+	for _ in range(6):
 		try:
 			camera.capture_array()
 		except Exception:
 			pass
 
 	try:
-		# Lock current converged AE/AWB settings to prevent illumination adaptation shifts
 		converged = camera.capture_metadata()
 		lock_controls: dict[str, Any] = {"AeEnable": False, "AwbEnable": False}
 		for key in ("ExposureTime", "AnalogueGain", "ColourGains"):
@@ -274,7 +276,7 @@ def _get_camera() -> Any:
 
 
 def _get_rapid_ocr() -> Any:
-	"""Initialize RapidOCR singleton tuned for tight text box bounding."""
+	"""Initialize RapidOCR singleton with tight unclip ratio to preserve word spaces."""
 	global _RAPID_OCR
 	if _RAPID_OCR is not None:
 		return _RAPID_OCR
@@ -283,10 +285,10 @@ def _get_rapid_ocr() -> Any:
 	try:
 		_RAPID_OCR = RapidOCR(
 			params={
-				"Det.unclip_ratio": 1.1,  # Unclip ratio = 1.1 (default 1.5); expanded_size = area * (1 + 1.1) to avoid merging adjacent words
-				"Det.box_thresh": 0.30,   # Minimum box score threshold (0.30) to filter out background noise
-				"Det.thresh": 0.20,       # Binarization threshold (0.20) for text detection segmentation map
-				"Global.text_score": 0.20, # Confidence threshold (0.20) to accept candidate recognized text string
+				"Det.unclip_ratio": 1.1,  # Lowered from default 1.5 to prevent word box merging
+				"Det.box_thresh": 0.30,
+				"Det.thresh": 0.20,
+				"Global.text_score": 0.20,
 			}
 		)
 	except Exception:
@@ -307,49 +309,54 @@ def _get_rapid_ocr() -> Any:
 # =============================================================================
 
 def _build_display_mask(frame: np.ndarray) -> np.ndarray:
-	"""Build clean mask for the backlit display using heavy luminance blurring."""
+	"""Build a mask for the emissive display window."""
 	_require_cv2()
 	if frame is None or frame.size == 0:
 		raise ValueError("frame must be a non-empty image")
 
-	# Convert to grayscale to isolate raw screen luminance (ignoring color saturation)
-	gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+	hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+	hue = hsv[:, :, 0]
+	saturation = hsv[:, :, 1]
+	value = hsv[:, :, 2]
 
-	# 19x19 Gaussian kernel blurs out text characters (typically 5-15px wide) into one continuous illuminated block
-	blurred = cv2.GaussianBlur(gray, (19, 19), 0)
+	# Boost blue hue brightness before thresholding
+	blue_hue_mask = (hue >= 90) & (hue <= 150)
+	boosted_value = value.astype(np.float32)
+	boosted_value[blue_hue_mask] = np.clip(boosted_value[blue_hue_mask] * 1.6, 0, 255)
+	value = boosted_value.astype(np.uint8)
 
-	# Otsu thresholding on luminance cleanly separates backlit LCD glass from dark bezel
-	_, mask = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+	_, saturated_mask = cv2.threshold(saturation, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+	_, bright_mask = cv2.threshold(value, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+	display_mask = cv2.bitwise_and(saturated_mask, bright_mask)
 
-	# 25x25 morphological closing bridges dark gaps (>20px) between title header and list items
-	kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 25))
-	mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel_close)
-	
-	# 5x5 morphological opening eliminates small specular reflections (<5px) on metal frame
-	kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-	mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel_open)
+	mask = cv2.morphologyEx(display_mask, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (15, 5)))
+	mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 15)))
+	mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)))
 
 	return mask
 
 
 def _find_display_contour(frame: np.ndarray, mask: np.ndarray, min_area: int = 3000) -> Optional[np.ndarray]:
-	"""Find primary display bounding rectangle from screen mask."""
+	"""Find the raw display rectangle."""
 	_require_cv2()
 	contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 	if not contours:
 		return None
 
 	frame_area = max(1, mask.shape[0] * mask.shape[1])
-	# Screen must occupy >= 5% of total frame area (1280x720 * 0.05 = 46,080 px^2)
 	min_area = max(min_area, int(frame_area * 0.05))
 
 	best_contour: Optional[np.ndarray] = None
 	best_score = float("-inf")
 
+	def _contour_box(candidate: np.ndarray) -> np.ndarray:
+		rotated = cv2.minAreaRect(candidate)
+		points = cv2.boxPoints(rotated)
+		return points.astype("float32")
+
 	for contour in contours:
 		area = cv2.contourArea(contour)
-		# Screen bounding box must fall within 5% to 98% of overall camera frame area
-		if area < min_area or area > frame_area * 0.98:
+		if area < min_area or area > frame_area * 0.99:
 			continue
 
 		hull = cv2.convexHull(contour)
@@ -358,20 +365,19 @@ def _find_display_contour(frame: np.ndarray, mask: np.ndarray, min_area: int = 3
 			continue
 
 		solidity = area / hull_area
-		# Rectangular screen regions typically have high solidity (>0.85); <0.60 indicates highly non-convex noise
-		if solidity < 0.60:
+		if solidity < 0.50:
 			continue
 
 		score = area * solidity
 		if score > best_score:
 			best_score = score
-			rotated = cv2.minAreaRect(contour)
-			best_contour = cv2.boxPoints(rotated).astype("float32")
+			best_contour = _contour_box(contour)
 
 	return best_contour
 
 
 def _should_use_extended_warp(menu_fields: Optional[tuple[OCRField, ...]]) -> bool:
+	"""Only extend when the current ContextNode includes status bar fields."""
 	if not menu_fields:
 		return False
 
@@ -382,21 +388,20 @@ def _should_use_extended_warp(menu_fields: Optional[tuple[OCRField, ...]]) -> bo
 
 def _process_display_contour_and_warp(
 	frame: np.ndarray,
-	display_contour: np.ndarray,
+	orange_contour: np.ndarray,
 	menu_fields: Optional[tuple[OCRField, ...]] = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-	"""Warp detected screen display contour into flat front-facing view."""
+	"""Warp display area into flat front-facing view."""
 	_require_cv2()
 	if not _should_use_extended_warp(menu_fields):
-		return display_contour, _warp_image(frame, display_contour)
+		return orange_contour, _warp_image(frame, orange_contour)
 
-	ordered = _order_points(display_contour)
+	ordered = _order_points(orange_contour)
 	top_left, top_right, bottom_right, bottom_left = ordered
 
 	v_left = bottom_left - top_left
 	v_right = bottom_right - top_right
 
-	# Extended status bar factor: Status bar height (10px) / Main screen height (90px) = 10/90 = 0.111
 	ext_factor = 10.0 / 90.0
 	extended_bottom_left = bottom_left + v_left * ext_factor
 	extended_bottom_right = bottom_right + v_right * ext_factor
@@ -407,7 +412,7 @@ def _process_display_contour_and_warp(
 
 
 def _warp_image(image: np.ndarray, points: np.ndarray) -> np.ndarray:
-	"""Perform 4-point perspective transform on bounding quad."""
+	"""Flatten angled display into front-facing view."""
 	_require_cv2()
 	rect = _order_points(points)
 	top_left, top_right, bottom_right, bottom_left = rect
@@ -435,7 +440,7 @@ def _warp_image(image: np.ndarray, points: np.ndarray) -> np.ndarray:
 
 
 def _order_points(points: np.ndarray) -> np.ndarray:
-	"""Order corners: [top-left, top-right, bottom-right, bottom-left]."""
+	"""Normalize corner order so perspective math stays stable."""
 	points = np.asarray(points, dtype="float32").reshape(4, 2)
 	ordered = np.zeros((4, 2), dtype="float32")
 	point_sums = points.sum(axis=1)
@@ -448,10 +453,11 @@ def _order_points(points: np.ndarray) -> np.ndarray:
 
 
 # =============================================================================
-# IMAGE PREPARATION & VARIANT GENERATION
+# HIGH-PRECISION IMAGE PREPARATION
 # =============================================================================
 
 def _prepare_ocr_grayscale(warped: np.ndarray) -> np.ndarray:
+	"""Convert warped image to grayscale."""
 	_require_cv2()
 	if len(warped.shape) == 3:
 		return cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
@@ -459,13 +465,14 @@ def _prepare_ocr_grayscale(warped: np.ndarray) -> np.ndarray:
 
 
 def _crop_roi(prepared: np.ndarray, field: Any) -> np.ndarray:
+	"""Crop field ROI from image array."""
 	if field is not None and hasattr(field, "ideal"):
 		return field.ideal.crop(prepared)
 	return prepared
 
 
 def _normalize_backlit_crop(crop: np.ndarray) -> np.ndarray:
-	"""Normalize uneven backlighting across ROI using background estimation division."""
+	"""Normalize backlit LCD illumination using soft background division while preserving original polarity."""
 	if len(crop.shape) == 3:
 		l_channel = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
 	else:
@@ -475,13 +482,11 @@ def _normalize_backlit_crop(crop: np.ndarray) -> np.ndarray:
 	if h < 5 or w < 5:
 		return l_channel
 
-	# Kernel size is forced to odd integer roughly half of min dimension (min 15px)
 	ksize = max(15, (min(h, w) // 2) | 1)
 	bg = cv2.GaussianBlur(l_channel, (ksize, ksize), 0)
 
 	norm = cv2.divide(l_channel, np.maximum(bg, 1), scale=255)
 
-	# Percentile contrast stretch (2nd to 98th percentile to discard outliers)
 	p2, p98 = np.percentile(norm, (2, 98))
 	if p98 > p2:
 		norm = np.clip((norm - p2) * (255.0 / (p98 - p2)), 0, 255).astype(np.uint8)
@@ -492,7 +497,7 @@ def _normalize_backlit_crop(crop: np.ndarray) -> np.ndarray:
 
 
 def _get_border_bg_color(img: np.ndarray) -> int:
-	"""Sample perimeter border pixels to identify ambient background color."""
+	"""Sample border pixels to calculate clean background padding color."""
 	if img is None or img.size == 0:
 		return 255
 	border = np.concatenate([img[0, :], img[-1, :], img[:, 0], img[:, -1]])
@@ -500,7 +505,11 @@ def _get_border_bg_color(img: np.ndarray) -> int:
 
 
 def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np.ndarray]:
-	"""Extract preprocessed grayscale variants for text recognition."""
+	"""Extract grayscale variants optimized for PaddleOCR recognition.
+	
+	Combines clean border-sampled padding (preserving word spaces) with soft
+	grayscale gradients (preserving stroke geometry and uppercase fidelity).
+	"""
 	_require_cv2()
 	roi = _crop_roi(prepared, field)
 
@@ -511,26 +520,26 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 	if h == 0 or w == 0:
 		return []
 
-	target_h = 48  # 48px is the fixed native input height expected by RapidOCR/CRNN model architecture
+	# Standard CRNN input height (48px)
+	target_h = 48
 	scale = target_h / float(h)
 	new_w = max(16, int(w * scale))
 
 	interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_CUBIC
 	resized = cv2.resize(roi, (new_w, target_h), interpolation=interp)
 
-	pad = 16  # 16px constant background border prevents CRNN character clipping during convolution
+	pad = 16
 
-	# Variant 1: Soft Normalized Grayscale
+	# Variant 1: Soft Normalized Grayscale (Preserves character stroke geometry & casing)
 	norm_gray = _normalize_backlit_crop(resized)
 	bg1 = _get_border_bg_color(norm_gray)
 	v1 = cv2.copyMakeBorder(norm_gray, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=bg1)
 
-	# Variant 2: Clean Linear Rescale
+	# Variant 2: Clean Linear Rescale (Unmodified baseline preserving true camera gradients)
 	bg2 = _get_border_bg_color(resized)
 	v2 = cv2.copyMakeBorder(resized, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=bg2)
 
-	# Variant 3: Soft Edge-Preserving Denoised Grayscale
-	# d=5, sigma=30 suppresses sensor noise while retaining sharp 1-2px character strokes
+	# Variant 3: Soft Denoised Grayscale (Suppresses camera noise without destroying character shape)
 	denoised = cv2.bilateralFilter(resized, d=5, sigmaColor=30, sigmaSpace=30)
 	bg3 = _get_border_bg_color(denoised)
 	v3 = cv2.copyMakeBorder(denoised, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=bg3)
@@ -539,11 +548,11 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 
 
 # =============================================================================
-# OCR PROCESSING & TEXT RECONSTRUCTION
+# OCR PROCESSING & SPATIAL LINE RECONSTRUCTION
 # =============================================================================
 
 def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
-	"""Evaluate field candidates across image variants."""
+	"""Extract text using RapidOCR across all variants with candidate evaluation."""
 	field_name = field.name
 	_require_rapidocr()
 	ocr_engine = _get_rapid_ocr()
@@ -559,6 +568,7 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 		if not raw:
 			continue
 
+		# Whitelist character filtering
 		if field.whitelisted_chars:
 			allowed = set(field.whitelisted_chars)
 			cleaned_chars = []
@@ -588,7 +598,7 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 def _parse_and_filter_rapidocr_boxes(
 	rapid_output: Optional[list[Any]]
 ) -> tuple[str, float]:
-	"""Sort and join detected text bounding boxes in reading order."""
+	"""Filter boxes and reconstruct text by joining detected tokens in reading order."""
 	if not rapid_output:
 		return "", 0.0
 
@@ -600,7 +610,7 @@ def _parse_and_filter_rapidocr_boxes(
 
 		box, text, conf = item[0], str(item[1]).strip(), float(item[2])
 
-		# Retain valid text tokens meeting minimum 0.20 confidence
+		# Retain valid low-confidence single digits/letters
 		if not text or conf < 0.20:
 			continue
 
@@ -618,9 +628,10 @@ def _parse_and_filter_rapidocr_boxes(
 	if not items_to_keep:
 		return "", 0.0
 
-	# Group bounding boxes into horizontal lines within a 12px vertical tolerance band (round(y / 12.0))
+	# Sort top-to-bottom (12px line group tolerance), then left-to-right
 	items_to_keep.sort(key=lambda k: (round(k["min_y"] / 12.0), k["min_x"]))
 
+	# Join distinct detected boxes with standard spaces and let RapidOCR output dictate text
 	full_text = " ".join(item["text"] for item in items_to_keep)
 	full_text = re.sub(r"\s+", " ", full_text).strip()
 	mean_conf = float(np.mean([item["conf"] for item in items_to_keep]))
@@ -636,7 +647,6 @@ def _score_field_candidate(field_name: str, raw_text: str, value: Any, conf: flo
 	score = 2.0 + (conf * 2.0)
 
 	if field_name == "temperature" and isinstance(value, int):
-		# Valid water heater temperature setpoint bounds in Fahrenheit (50°F min to 199°F max)
 		if 50 <= value <= 199:
 			score += 3.0
 		else:
@@ -651,6 +661,10 @@ def _score_field_candidate(field_name: str, raw_text: str, value: Any, conf: flo
 	elif field_name == "date_field":
 		if isinstance(value, str) and re.search(r"\d{2}/\d{2}/\d{2}", value):
 			score += 3.0
+	elif "schedule" in field_name or "dashboard" in field_name:
+		# Reward candidates that preserve clean spacing between words and standalone digits
+		if isinstance(value, str) and re.search(r"[A-Za-z]\s+\d", value):
+			score += 0.5
 
 	return score
 
@@ -672,6 +686,7 @@ def _parse_field_value(field_name: str, raw_text: str) -> Any:
 
 
 def _parse_mode(raw_text: str) -> str:
+	"""Extract mode by stripping leading 'MODE:' label prefix cleanly."""
 	if not raw_text:
 		return "UNKNOWN"
 
@@ -685,6 +700,7 @@ def _parse_mode(raw_text: str) -> str:
 
 
 def _parse_temperature(raw_text: str) -> Optional[int]:
+	"""Extract integer temperature value from raw OCR string."""
 	if not raw_text:
 		return None
 
@@ -698,6 +714,7 @@ def _parse_temperature(raw_text: str) -> Optional[int]:
 
 
 def _parse_time(raw_text: str) -> str:
+	"""Extract and normalize time string (e.g., '10:27 AM', '12:45 PM')."""
 	if not raw_text:
 		return ""
 
@@ -716,6 +733,7 @@ def _parse_time(raw_text: str) -> str:
 
 
 def _parse_dashboard_info(raw_text: str) -> str:
+	"""Clean dashboard info line strings by removing border artifacts."""
 	if not raw_text:
 		return ""
 
@@ -734,7 +752,7 @@ def _field_empty_value(field_name: str) -> Any:
 
 
 # =============================================================================
-# MULTI-METRIC ICON CLASSIFICATION
+# GENERALIZED MULTI-METRIC ICON CLASSIFIER
 # =============================================================================
 
 _ICON_TEMPLATES: dict[str, dict[str, np.ndarray]] = {}
@@ -752,7 +770,7 @@ ICON_STATE_MAPPINGS = {
 
 
 def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, str]:
-	"""Classify icon ROI state using composite shape and correlation distance."""
+	"""Classify icon via shape/template matching."""
 	_require_cv2()
 	templates_dict = _load_icon_templates().get(field_name, {})
 
@@ -762,11 +780,9 @@ def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, st
 	if len(roi_gray.shape) == 3:
 		roi_gray = cv2.cvtColor(roi_gray, cv2.COLOR_BGR2GRAY)
 
-	# 3x3 Gaussian blur smooths sharp edges prior to Otsu thresholding
 	blurred = cv2.GaussianBlur(roi_gray, (3, 3), 0)
 	_, roi_thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-	# Invert polarity if image background is light (>127 mean border luminance)
 	perimeter = np.concatenate([
 		roi_thresh[0, :], roi_thresh[-1, :],
 		roi_thresh[:, 0], roi_thresh[:, -1]
@@ -778,7 +794,6 @@ def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, st
 	if not contours:
 		return "UNKNOWN", "UNKNOWN"
 
-	# Discard small speckle noise contours (<5px area)
 	valid_contours = [c for c in contours if cv2.contourArea(c) > 5]
 	if not valid_contours:
 		return "UNKNOWN", "UNKNOWN"
@@ -790,7 +805,6 @@ def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, st
 
 	crop = roi_thresh[y : y + h, x : x + w]
 
-	# Pad ROI crop into 1:1 aspect square canvas
 	max_dim = max(w, h)
 	pad_top = (max_dim - h) // 2
 	pad_bottom = max_dim - h - pad_top
@@ -800,7 +814,6 @@ def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, st
 		crop, pad_top, pad_bottom, pad_left, pad_right, cv2.BORDER_CONSTANT, value=0
 	)
 
-	# Normalize template canvas size to 64x64 pixels (64x64 = 4096 px array)
 	roi_norm = cv2.resize(squared_crop, (64, 64), interpolation=cv2.INTER_AREA)
 	_, roi_norm = cv2.threshold(roi_norm, 127, 255, cv2.THRESH_BINARY)
 
@@ -811,19 +824,14 @@ def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, st
 			scores[state_key] = float("inf")
 			continue
 
-		# Hu Moment shape distance (CONTOURS_MATCH_I1)
 		shape_diff = cv2.matchShapes(roi_norm, template_norm, cv2.CONTOURS_MATCH_I1, 0.0)
-		
-		# Normalized cross-correlation score
 		corr_matrix = cv2.matchTemplate(roi_norm, template_norm, cv2.TM_CCOEFF_NORMED)
 		max_corr = float(np.max(corr_matrix)) if corr_matrix is not None else 0.0
 		corr_dist = 1.0 - max(0.0, max_corr)
 
-		# Hamming pixel XOR difference ratio
 		xor_diff = cv2.bitwise_xor(roi_norm, template_norm)
 		xor_dist = np.sum(xor_diff == 255) / (64.0 * 64.0)
 
-		# Weighted Match Score = 0.45 * Shape + 0.35 * Correlation + 0.20 * XOR
 		composite = (0.45 * shape_diff) + (0.35 * corr_dist) + (0.20 * xor_dist)
 		scores[state_key] = float(composite)
 
@@ -833,7 +841,7 @@ def _classify_icon_field(roi_gray: np.ndarray, field_name: str) -> tuple[str, st
 
 
 def _load_icon_templates() -> dict[str, dict[str, np.ndarray]]:
-	"""Lazy-load reference icon templates into memory cache."""
+	"""Lazy load icon templates into memory cache."""
 	global _ICON_TEMPLATES
 	if _ICON_TEMPLATES:
 		return _ICON_TEMPLATES
@@ -911,6 +919,7 @@ def _load_icon_templates() -> dict[str, dict[str, np.ndarray]]:
 # =============================================================================
 
 def _draw_roi_overlay(image: np.ndarray, fields: tuple[OCRField, ...], use_fallback_rois: bool) -> np.ndarray:
+	"""Draw every OCR ROI on a frame for calibration and debugging."""
 	_require_cv2()
 	overlay = image.copy()
 	height, width = overlay.shape[:2]
@@ -921,20 +930,44 @@ def _draw_roi_overlay(image: np.ndarray, fields: tuple[OCRField, ...], use_fallb
 		bottom = int(height * box.bottom)
 		left = int(width * box.left)
 		right = int(width * box.right)
+		color = (255, 255, 255)
+		label_color = (255, 255, 255)
 
 		cv2.rectangle(overlay, (left, top), (right, bottom), (0, 0, 0), 3, cv2.LINE_AA)
-		cv2.rectangle(overlay, (left, top), (right, bottom), (255, 255, 255), 1, cv2.LINE_AA)
+		cv2.rectangle(overlay, (left, top), (right, bottom), color, 1, cv2.LINE_AA)
 
 		label_top = max(12, top - 6)
 		label_origin = (left + 4, label_top)
 		label = field.name.upper()
-		cv2.putText(overlay, label, label_origin, cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 3, cv2.LINE_AA)
-		cv2.putText(overlay, label, label_origin, cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
+		cv2.putText(
+			overlay,
+			label,
+			label_origin,
+			cv2.FONT_HERSHEY_SIMPLEX,
+			0.45,
+			(0, 0, 0),
+			3,
+			cv2.LINE_AA,
+		)
+		cv2.putText(
+			overlay,
+			label,
+			label_origin,
+			cv2.FONT_HERSHEY_SIMPLEX,
+			0.45,
+			label_color,
+			1,
+			cv2.LINE_AA,
+		)
+
+		if index > 0:
+			cv2.line(overlay, (left, top), (left + 12, top), color, 1, cv2.LINE_AA)
 
 	return overlay
 
 
 def _draw_polygon_outline(image: np.ndarray, points: np.ndarray, label: str) -> None:
+	"""Draw a high-contrast polygon outline with a readable label."""
 	_require_cv2()
 	polygon = points.astype("int32")
 	cv2.polylines(image, [polygon], True, (0, 0, 0), 3, cv2.LINE_AA)
@@ -943,11 +976,30 @@ def _draw_polygon_outline(image: np.ndarray, points: np.ndarray, label: str) -> 
 	anchor_x = int(polygon[:, 0].min()) + 4
 	anchor_y = max(18, int(polygon[:, 1].min()) - 8)
 	anchor = (anchor_x, anchor_y)
-	cv2.putText(image, label, anchor, cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 3, cv2.LINE_AA)
-	cv2.putText(image, label, anchor, cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
+	cv2.putText(
+		image,
+		label,
+		anchor,
+		cv2.FONT_HERSHEY_SIMPLEX,
+		0.45,
+		(0, 0, 0),
+		3,
+		cv2.LINE_AA,
+	)
+	cv2.putText(
+		image,
+		label,
+		anchor,
+		cv2.FONT_HERSHEY_SIMPLEX,
+		0.45,
+		(255, 255, 255),
+		1,
+		cv2.LINE_AA,
+	)
 
 
 def _project_roi_box(box: ROIBox, inverse_transform: np.ndarray, warped_width: int, warped_height: int) -> np.ndarray:
+	"""Project a normalized warped ROI back into source-frame coordinates."""
 	_require_cv2()
 	warped_points = np.array(
 		[
@@ -963,6 +1015,7 @@ def _project_roi_box(box: ROIBox, inverse_transform: np.ndarray, warped_width: i
 
 
 def _safe_capture_stem(capture_id: Optional[str]) -> str:
+	"""Normalize optional IDs into filename-safe stems."""
 	if not capture_id:
 		return "roi_ocr"
 
