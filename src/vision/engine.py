@@ -276,7 +276,7 @@ def _get_camera() -> Any:
 
 
 def _get_rapid_ocr() -> Any:
-	"""Initialize RapidOCR singleton using standard detection thresholds."""
+	"""Initialize RapidOCR singleton with tight unclip ratio to preserve word spaces."""
 	global _RAPID_OCR
 	if _RAPID_OCR is not None:
 		return _RAPID_OCR
@@ -285,17 +285,19 @@ def _get_rapid_ocr() -> Any:
 	try:
 		_RAPID_OCR = RapidOCR(
 			params={
-				"Det.box_thresh": 0.45,
-				"Det.thresh": 0.25,
-				"Global.text_score": 0.25,
+				"Det.unclip_ratio": 1.1,  # Lowered from default 1.5 to prevent word box merging
+				"Det.box_thresh": 0.30,
+				"Det.thresh": 0.20,
+				"Global.text_score": 0.20,
 			}
 		)
 	except Exception:
 		try:
 			_RAPID_OCR = RapidOCR(
-				det_box_thresh=0.45,
-				det_thresh=0.25,
-				text_score=0.25,
+				det_unclip_ratio=1.1,
+				det_box_thresh=0.30,
+				det_thresh=0.20,
+				text_score=0.20,
 			)
 		except Exception:
 			_RAPID_OCR = RapidOCR()
@@ -503,7 +505,7 @@ def _get_border_bg_color(img: np.ndarray) -> int:
 
 
 def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np.ndarray]:
-	"""Extract grayscale variants scaled and padded with clean border-sampled background colors."""
+	"""Extract grayscale variants at clean native scale without artificial dimension warping."""
 	_require_cv2()
 	roi = _crop_roi(prepared, field)
 
@@ -514,28 +516,19 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 	if h == 0 or w == 0:
 		return []
 
-	target_h = 48
-	scale = target_h / float(h)
-	new_w = max(16, int(w * scale))
+	pad = 12
 
-	interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_CUBIC
-	resized = cv2.resize(roi, (new_w, target_h), interpolation=interp)
+	# Variant 1: Original Native Resolution Crop (Padded)
+	bg1 = _get_border_bg_color(roi)
+	v1 = cv2.copyMakeBorder(roi, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=bg1)
 
-	pad = 16
+	# Variant 2: Clean 2x Uniform Scale (Preserves exact aspect ratio for low-res LCD text)
+	scaled_2x = cv2.resize(roi, (w * 2, h * 2), interpolation=cv2.INTER_CUBIC)
+	bg2 = _get_border_bg_color(scaled_2x)
+	v2 = cv2.copyMakeBorder(scaled_2x, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=bg2)
 
-	# Variant 1: Raw Grayscale Crop with Border Padding (Unmodified Baseline)
-	bg1 = _get_border_bg_color(resized)
-	v1 = cv2.copyMakeBorder(resized, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=bg1)
-
-	# Variant 2: Horizontally Stretched (1.35x width)
-	# Opens up feature-map gaps around narrow digits like '1' for CTC space prediction
-	stretched_w = int(new_w * 1.35)
-	stretched = cv2.resize(roi, (stretched_w, target_h), interpolation=cv2.INTER_CUBIC)
-	bg2 = _get_border_bg_color(stretched)
-	v2 = cv2.copyMakeBorder(stretched, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=bg2)
-
-	# Variant 3: Soft Backlit Normalized with Border Padding
-	norm_gray = _normalize_backlit_crop(resized)
+	# Variant 3: Backlit Normalized Crop (Clean uniform scaling)
+	norm_gray = _normalize_backlit_crop(scaled_2x)
 	bg3 = _get_border_bg_color(norm_gray)
 	v3 = cv2.copyMakeBorder(norm_gray, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=bg3)
 
