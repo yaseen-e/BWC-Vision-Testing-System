@@ -491,27 +491,37 @@ def _normalize_backlit_crop(crop: np.ndarray) -> np.ndarray:
 	return norm
 
 
-def _generate_digit_variants(roi_gray: np.ndarray) -> list[np.ndarray]:
+def _extract_digit_variants(roi_gray: np.ndarray) -> list[np.ndarray]:
 	"""
-	Locate digit contours, crop tightly, and scale down to standard OCR height (48px).
-	Guarantees DBNet detection on giant LCD numbers.
+	Isolate main digit contours, filter out small edge artifacts (° symbol, arrows),
+	tightly crop around the numbers, and format variants for RapidOCR.
 	"""
 	_require_cv2()
-	variants: list[np.ndarray] = []
+	if roi_gray is None or roi_gray.size == 0:
+		return []
 
-	# Isolate bright digits on dark background
-	_, thresh = cv2.threshold(roi_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+	if len(roi_gray.shape) == 3:
+		roi_gray = cv2.cvtColor(roi_gray, cv2.COLOR_BGR2GRAY)
+
+	# 1. Binarize bright digits against the dark background
+	blurred = cv2.GaussianBlur(roi_gray, (3, 3), 0)
+	_, thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+	# 2. Find contours inside the ROI
 	contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-	digit_boxes = []
 	roi_h = roi_gray.shape[0]
-	min_digit_height = int(roi_h * 0.25)
+	# Main digits are >35% of ROI height; degree symbol ° and edge noise are much smaller
+	min_digit_height = int(roi_h * 0.35)
 
+	digit_boxes = []
 	for contour in contours:
 		x, y, w, h = cv2.boundingRect(contour)
-		if h >= min_digit_height and w >= 5:
+		# Ignore small artifacts on the edges
+		if h >= min_digit_height and w >= 4:
 			digit_boxes.append((x, y, w, h))
 
+	# 3. Tightly crop around ONLY the matched digit contours (stripping the degree symbol)
 	if digit_boxes:
 		min_x = min(box[0] for box in digit_boxes)
 		min_y = min(box[1] for box in digit_boxes)
@@ -521,27 +531,31 @@ def _generate_digit_variants(roi_gray: np.ndarray) -> list[np.ndarray]:
 	else:
 		digit_crop = roi_gray
 
-	# Scale tight digit crop to standard 48px OCR height
 	ch, cw = digit_crop.shape[:2]
-	if ch > 0 and cw > 0:
-		target_h = 48
-		scale = target_h / float(ch)
-		target_w = max(10, int(cw * scale))
-		scaled_digits = cv2.resize(digit_crop, (target_w, target_h), interpolation=cv2.INTER_AREA)
+	if ch == 0 or cw == 0:
+		return []
 
-		# Variant 1: Inverted Black-on-White with padding
-		inverted = cv2.bitwise_not(scaled_digits)
-		v1 = cv2.copyMakeBorder(inverted, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=255)
-		variants.append(v1)
+	# 4. Scale tightly cropped digits to standard 48px OCR height
+	target_h = 48
+	scale = target_h / float(ch)
+	target_w = max(16, int(cw * scale))
+	scaled_digits = cv2.resize(digit_crop, (target_w, target_h), interpolation=cv2.INTER_CUBIC)
 
-		# Variant 2: Binary Inverted
-		_, bin_inv = cv2.threshold(scaled_digits, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-		v2 = cv2.copyMakeBorder(bin_inv, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=255)
-		variants.append(v2)
+	variants = []
 
-		# Variant 3: Standard White-on-Black
-		v3 = cv2.copyMakeBorder(scaled_digits, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=0)
-		variants.append(v3)
+	# Variant 1: Inverted Black-on-White with clean margin
+	inverted = cv2.bitwise_not(scaled_digits)
+	v1 = cv2.copyMakeBorder(inverted, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=255)
+	variants.append(v1)
+
+	# Variant 2: High-contrast Binary Inverted
+	_, bin_inv = cv2.threshold(scaled_digits, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+	v2 = cv2.copyMakeBorder(bin_inv, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=255)
+	variants.append(v2)
+
+	# Variant 3: Standard White-on-Black padded
+	v3 = cv2.copyMakeBorder(scaled_digits, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=0)
+	variants.append(v3)
 
 	return variants
 
@@ -556,11 +570,11 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 
 	field_name = getattr(field, "name", "")
 
-	# Check for giant temperature digits
+	field_name = getattr(field, "name", "")
+
+	# Route temperature field through contour digit isolation
 	if field_name == "temperature":
-		if len(roi.shape) == 3:
-			roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-		return _generate_digit_variants(roi)
+		return _extract_digit_variants(roi)
 	
 	h, w = roi.shape[:2]
 	if h == 0 or w == 0:
