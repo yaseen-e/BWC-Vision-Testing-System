@@ -71,7 +71,7 @@ _SIMULATED_COMMANDS: collections.deque[str] = collections.deque(
 		# "LEFT", "SELECT", "DOWN", "DOWN", "DOWN", "SELECT", "RUN_OCR",
 		# "BACK", "BACK", "BACK", "BACK",
 		# C14, C15: SL
-		"MENU", "RIGHT", "RIGHT", "SELECT", "SELECT", "SELECT", # "RUN_OCR", "DOWN", "RUN_OCR",
+		"MENU", "RIGHT", "RIGHT", "SELECT", "SELECT", "SELECT", "RUN_OCR", # "DOWN", "RUN_OCR",
 		# C15: SDL
 		# "SELECT", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "SELECT", "SELECT", "RUN_OCR", "SELECT",
 		"BACK", "BACK", "BACK", "BACK",
