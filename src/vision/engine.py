@@ -276,31 +276,16 @@ def _get_camera() -> Any:
 
 
 def _get_rapid_ocr() -> Any:
-	"""Initialize RapidOCR singleton with tight unclip ratio to preserve word spaces."""
+	"""Initialize RapidOCR singleton with default parameters to preserve natural word bounding."""
 	global _RAPID_OCR
 	if _RAPID_OCR is not None:
 		return _RAPID_OCR
 
 	_require_rapidocr()
 	try:
-		_RAPID_OCR = RapidOCR(
-			params={
-				"Det.unclip_ratio": 1.1,  # Lowered from default 1.5 to prevent word box merging
-				"Det.box_thresh": 0.30,
-				"Det.thresh": 0.20,
-				"Global.text_score": 0.20,
-			}
-		)
+		_RAPID_OCR = RapidOCR()
 	except Exception:
-		try:
-			_RAPID_OCR = RapidOCR(
-				det_unclip_ratio=1.1,
-				det_box_thresh=0.30,
-				det_thresh=0.20,
-				text_score=0.20,
-			)
-		except Exception:
-			_RAPID_OCR = RapidOCR()
+		_RAPID_OCR = RapidOCR()
 	return _RAPID_OCR
 
 
@@ -548,11 +533,7 @@ def _get_border_bg_color(img: np.ndarray) -> int:
 
 
 def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np.ndarray]:
-	"""Extract grayscale variants optimized for PaddleOCR recognition.
-	
-	Combines clean border-sampled padding (preserving word spaces) with soft
-	grayscale gradients (preserving stroke geometry and uppercase fidelity).
-	"""
+	"""Extract grayscale variants optimized for OCR word and space preservation."""
 	_require_cv2()
 	roi = _crop_roi(prepared, field)
 
@@ -573,16 +554,16 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 
 	pad = 16
 
-	# Variant 1: Soft Normalized Grayscale (Preserves character stroke geometry & casing)
+	# Variant 1: Soft Normalized Grayscale
 	norm_gray = _normalize_backlit_crop(resized)
 	bg1 = _get_border_bg_color(norm_gray)
 	v1 = cv2.copyMakeBorder(norm_gray, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=bg1)
 
-	# Variant 2: Clean Linear Rescale (Unmodified baseline preserving true camera gradients)
+	# Variant 2: Clean Linear Rescale
 	bg2 = _get_border_bg_color(resized)
 	v2 = cv2.copyMakeBorder(resized, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=bg2)
 
-	# Variant 3: Soft Denoised Grayscale (Suppresses camera noise without destroying character shape)
+	# Variant 3: Soft Denoised Grayscale
 	denoised = cv2.bilateralFilter(resized, d=5, sigmaColor=30, sigmaSpace=30)
 	bg3 = _get_border_bg_color(denoised)
 	v3 = cv2.copyMakeBorder(denoised, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=bg3)
@@ -611,14 +592,13 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 		if not raw:
 			continue
 
-		# Whitelist character filtering
+		# Whitelist character filtering (spaces strictly preserved)
 		if field.whitelisted_chars:
 			allowed = set(field.whitelisted_chars)
+			allowed.add(" ")
 			cleaned_chars = []
 			for char in raw:
-				if char.isspace():
-					cleaned_chars.append(" ")
-				elif char in allowed:
+				if char in allowed or char.isspace():
 					cleaned_chars.append(char)
 				elif char.upper() in allowed:
 					cleaned_chars.append(char.upper())
@@ -641,11 +621,11 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 def _parse_and_filter_rapidocr_boxes(
 	rapid_output: Optional[list[Any]]
 ) -> tuple[str, float]:
-	"""Filter boxes and reconstruct text by joining detected tokens in reading order."""
+	"""Filter boxes and reconstruct text, inserting spaces only across true horizontal word gaps."""
 	if not rapid_output:
 		return "", 0.0
 
-	items_to_keep: list[dict[str, Any]] = []
+	items: list[dict[str, Any]] = []
 
 	for item in rapid_output:
 		if not item or len(item) < 3:
@@ -653,31 +633,78 @@ def _parse_and_filter_rapidocr_boxes(
 
 		box, text, conf = item[0], str(item[1]).strip(), float(item[2])
 
-		# Retain valid low-confidence single digits/letters
 		if not text or conf < 0.20:
 			continue
 
 		box_points = np.array(box, dtype=np.float32)
 		min_x = float(np.min(box_points[:, 0]))
+		max_x = float(np.max(box_points[:, 0]))
 		min_y = float(np.min(box_points[:, 1]))
+		max_y = float(np.max(box_points[:, 1]))
+		height = max(1.0, max_y - min_y)
 
-		items_to_keep.append({
+		items.append({
 			"text": text,
 			"conf": conf,
 			"min_x": min_x,
+			"max_x": max_x,
 			"min_y": min_y,
+			"max_y": max_y,
+			"center_y": (min_y + max_y) / 2.0,
+			"height": height,
 		})
 
-	if not items_to_keep:
+	if not items:
 		return "", 0.0
 
-	# Sort top-to-bottom (12px line group tolerance), then left-to-right
-	items_to_keep.sort(key=lambda k: (round(k["min_y"] / 12.0), k["min_x"]))
+	# Sort primarily by vertical position
+	items.sort(key=lambda k: k["center_y"])
 
-	# Join distinct detected boxes with standard spaces and let RapidOCR output dictate text
-	full_text = " ".join(item["text"] for item in items_to_keep)
+	# Group text items into lines based on vertical center overlap
+	lines: list[list[dict[str, Any]]] = []
+	for item in items:
+		placed = False
+		for line in lines:
+			avg_h = np.mean([it["height"] for it in line])
+			line_center_y = np.mean([it["center_y"] for it in line])
+			if abs(item["center_y"] - line_center_y) < (avg_h * 0.5):
+				line.append(item)
+				placed = True
+				break
+		if not placed:
+			lines.append([item])
+
+	# Sort lines top-to-bottom
+	lines.sort(key=lambda line: np.mean([it["center_y"] for it in line]))
+
+	line_strings = []
+	all_confs = []
+
+	for line in lines:
+		# Sort items in line left-to-right
+		line.sort(key=lambda k: k["min_x"])
+
+		line_text = ""
+		for i, item in enumerate(line):
+			all_confs.append(item["conf"])
+			if i == 0:
+				line_text += item["text"]
+			else:
+				prev_item = line[i - 1]
+				gap = item["min_x"] - prev_item["max_x"]
+				avg_char_h = (item["height"] + prev_item["height"]) / 2.0
+
+				# Insert space if horizontal gap exceeds ~25% of character height
+				if gap > (avg_char_h * 0.25) and not line_text.endswith(" ") and not item["text"].startswith(" "):
+					line_text += " " + item["text"]
+				else:
+					line_text += item["text"]
+
+		line_strings.append(line_text.strip())
+
+	full_text = " ".join(line_strings)
 	full_text = re.sub(r"\s+", " ", full_text).strip()
-	mean_conf = float(np.mean([item["conf"] for item in items_to_keep]))
+	mean_conf = float(np.mean(all_confs)) if all_confs else 0.0
 
 	return full_text, mean_conf
 
@@ -1032,6 +1059,7 @@ def _draw_polygon_outline(image: np.ndarray, points: np.ndarray, label: str) -> 
 	cv2.putText(
 		image,
 		label,
+		anchor,
 		anchor,
 		cv2.FONT_HERSHEY_SIMPLEX,
 		0.45,
