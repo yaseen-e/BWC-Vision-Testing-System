@@ -497,7 +497,7 @@ def _normalize_backlit_crop(crop: np.ndarray) -> np.ndarray:
 
 
 def _get_border_bg_color(img: np.ndarray) -> int:
-	"""Sample edge ring pixels to calculate true background color for BORDER_CONSTANT."""
+	"""Sample border pixels to calculate clean background padding color."""
 	if img is None or img.size == 0:
 		return 255
 	border = np.concatenate([img[0, :], img[-1, :], img[:, 0], img[:, -1]])
@@ -505,7 +505,11 @@ def _get_border_bg_color(img: np.ndarray) -> int:
 
 
 def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np.ndarray]:
-	"""Extract clean grayscale & binarized variants without contrast smearing or hardcoded rules."""
+	"""Extract grayscale variants optimized for PaddleOCR recognition.
+	
+	Combines clean border-sampled padding (preserving word spaces) with soft
+	grayscale gradients (preserving stroke geometry and uppercase fidelity).
+	"""
 	_require_cv2()
 	roi = _crop_roi(prepared, field)
 
@@ -516,35 +520,29 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 	if h == 0 or w == 0:
 		return []
 
-	# Scale to 64px height using Lanczos interpolation to preserve true subpixel gaps
-	target_h = 64
+	# Standard CRNN input height (48px)
+	target_h = 48
 	scale = target_h / float(h)
 	new_w = max(16, int(w * scale))
 
-	interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LANCZOS4
+	interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_CUBIC
 	resized = cv2.resize(roi, (new_w, target_h), interpolation=interp)
 
 	pad = 16
-	border_bg = _get_border_bg_color(resized)
 
-	# Ensure consistent polarity (dark text on light background) for RapidOCR
-	if border_bg < 127:
-		resized = cv2.bitwise_not(resized)
-		border_bg = 255 - border_bg
+	# Variant 1: Soft Normalized Grayscale (Preserves character stroke geometry & casing)
+	norm_gray = _normalize_backlit_crop(resized)
+	bg1 = _get_border_bg_color(norm_gray)
+	v1 = cv2.copyMakeBorder(norm_gray, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=bg1)
 
-	# Variant 1: Clean Linear Rescaled (No non-linear contrast stretching)
-	v1 = cv2.copyMakeBorder(resized, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=border_bg)
+	# Variant 2: Clean Linear Rescale (Unmodified baseline preserving true camera gradients)
+	bg2 = _get_border_bg_color(resized)
+	v2 = cv2.copyMakeBorder(resized, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=bg2)
 
-	# Variant 2: Otsu Binarized (Collapses anti-aliased gray valleys into crisp background gaps)
-	blurred = cv2.GaussianBlur(resized, (3, 3), 0)
-	_, otsu = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-	v2 = cv2.copyMakeBorder(otsu, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=255)
-
-	# Variant 3: Adaptive Thresholded (Handles non-uniform LCD backlight gradients cleanly)
-	adaptive = cv2.adaptiveThreshold(
-		resized, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 15, 4
-	)
-	v3 = cv2.copyMakeBorder(adaptive, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=255)
+	# Variant 3: Soft Denoised Grayscale (Suppresses camera noise without destroying character shape)
+	denoised = cv2.bilateralFilter(resized, d=5, sigmaColor=30, sigmaSpace=30)
+	bg3 = _get_border_bg_color(denoised)
+	v3 = cv2.copyMakeBorder(denoised, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=bg3)
 
 	return [v1, v2, v3]
 
