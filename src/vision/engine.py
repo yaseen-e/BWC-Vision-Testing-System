@@ -276,7 +276,7 @@ def _get_camera() -> Any:
 
 
 def _get_rapid_ocr() -> Any:
-	"""Initialize RapidOCR singleton with low score threshold to retain single-character digits."""
+	"""Initialize RapidOCR singleton using standard detection thresholds."""
 	global _RAPID_OCR
 	if _RAPID_OCR is not None:
 		return _RAPID_OCR
@@ -285,8 +285,6 @@ def _get_rapid_ocr() -> Any:
 	try:
 		_RAPID_OCR = RapidOCR(
 			params={
-				"Det.unclip_ratio": 1.5,
-				"Det.use_dilation": False,
 				"Det.box_thresh": 0.45,
 				"Det.thresh": 0.25,
 				"Global.text_score": 0.25,
@@ -295,8 +293,6 @@ def _get_rapid_ocr() -> Any:
 	except Exception:
 		try:
 			_RAPID_OCR = RapidOCR(
-				det_unclip_ratio=1.5,
-				det_use_dilation=False,
 				det_box_thresh=0.45,
 				det_thresh=0.25,
 				text_score=0.25,
@@ -594,7 +590,7 @@ def _ocr_field(field: OCRField, variants: list[np.ndarray]) -> tuple[str, Any]:
 def _parse_and_filter_rapidocr_boxes(
 	rapid_output: Optional[list[Any]]
 ) -> tuple[str, float]:
-	"""Filter boxes and reconstruct lines using character-width adaptive spatial metrics."""
+	"""Filter boxes and reconstruct text by joining detected tokens in reading order."""
 	if not rapid_output:
 		return "", 0.0
 
@@ -606,79 +602,31 @@ def _parse_and_filter_rapidocr_boxes(
 
 		box, text, conf = item[0], str(item[1]).strip(), float(item[2])
 
-		# Retain low-confidence single digits/letters down to 0.20
+		# Retain valid low-confidence single digits/letters
 		if not text or conf < 0.20:
 			continue
 
 		box_points = np.array(box, dtype=np.float32)
 		min_x = float(np.min(box_points[:, 0]))
-		max_x = float(np.max(box_points[:, 0]))
-		min_y, max_y = float(np.min(box_points[:, 1])), float(np.max(box_points[:, 1]))
-		height = max_y - min_y
-		center_y = (min_y + max_y) / 2.0
+		min_y = float(np.min(box_points[:, 1]))
 
 		items_to_keep.append({
 			"text": text,
 			"conf": conf,
 			"min_x": min_x,
-			"max_x": max_x,
-			"center_y": center_y,
-			"height": height,
+			"min_y": min_y,
 		})
 
 	if not items_to_keep:
 		return "", 0.0
 
-	# Group items into visual rows by Y-center
-	items_to_keep.sort(key=lambda k: k["center_y"])
+	# Sort top-to-bottom (12px line group tolerance), then left-to-right
+	items_to_keep.sort(key=lambda k: (round(k["min_y"] / 12.0), k["min_x"]))
 
-	rows: list[list[dict[str, Any]]] = []
-	for item in items_to_keep:
-		placed = False
-		for row in rows:
-			avg_cy = sum(r["center_y"] for r in row) / len(row)
-			avg_h = sum(r["height"] for r in row) / len(row)
-			if abs(item["center_y"] - avg_cy) < max(8.0, avg_h * 0.6):
-				row.append(item)
-				placed = True
-				break
-		if not placed:
-			rows.append([item])
-
-	line_strings: list[str] = []
-	all_confidences: list[float] = []
-
-	for row in rows:
-		row.sort(key=lambda k: k["min_x"])
-		all_confidences.extend(item["conf"] for item in row)
-
-		row_str = ""
-		for idx, item in enumerate(row):
-			if idx == 0:
-				row_str = item["text"]
-			else:
-				prev_item = row[idx - 1]
-				
-				# Estimate average character width across the two adjacent boxes
-				char_w1 = (prev_item["max_x"] - prev_item["min_x"]) / max(1, len(prev_item["text"]))
-				char_w2 = (item["max_x"] - item["min_x"]) / max(1, len(item["text"]))
-				avg_char_w = (char_w1 + char_w2) / 2.0
-
-				gap = item["min_x"] - prev_item["max_x"]
-
-				# Separate boxes emitted by DBNet are distinct word tokens unless 
-				# they physically overlap horizontally by more than half a character's width.
-				if gap < -(avg_char_w * 0.5):
-					row_str += item["text"]
-				else:
-					row_str += " " + item["text"]
-
-		if row_str.strip():
-			line_strings.append(row_str.strip())
-
-	full_text = " ".join(line_strings)
+	# Join distinct detected boxes with standard spaces and let RapidOCR output dictate text
+	full_text = " ".join(item["text"] for item in items_to_keep)
 	full_text = re.sub(r"\s+", " ", full_text).strip()
-	mean_conf = float(np.mean(all_confidences)) if all_confidences else 0.0
+	mean_conf = float(np.mean([item["conf"] for item in items_to_keep]))
 
 	return full_text, mean_conf
 
