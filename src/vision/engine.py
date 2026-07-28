@@ -494,8 +494,16 @@ def _normalize_backlit_crop(crop: np.ndarray) -> np.ndarray:
 	return norm
 
 
+def _get_border_bg_color(img: np.ndarray) -> int:
+	"""Sample border pixels to determine true background color for BORDER_CONSTANT padding."""
+	if img is None or img.size == 0:
+		return 255
+	border = np.concatenate([img[0, :], img[-1, :], img[:, 0], img[:, -1]])
+	return int(np.median(border))
+
+
 def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np.ndarray]:
-	"""Extract clean grayscale variants scaled and padded using constant background colors (NO BORDER_REPLICATE)."""
+	"""Extract grayscale variants scaled and padded with clean border-sampled background colors."""
 	_require_cv2()
 	roi = _crop_roi(prepared, field)
 
@@ -506,7 +514,6 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 	if h == 0 or w == 0:
 		return []
 
-	# Target standard OCR height (~48px)
 	target_h = 48
 	scale = target_h / float(h)
 	new_w = max(16, int(w * scale))
@@ -514,27 +521,23 @@ def _extract_warped_variants(prepared: np.ndarray, field: Any = None) -> list[np
 	interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_CUBIC
 	resized = cv2.resize(roi, (new_w, target_h), interpolation=interp)
 
+	pad = 16
+
+	# Variant 1: Raw Grayscale Crop with Border Padding (Unmodified Baseline)
+	bg1 = _get_border_bg_color(resized)
+	v1 = cv2.copyMakeBorder(resized, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=bg1)
+
+	# Variant 2: Horizontally Stretched (1.35x width)
+	# Opens up feature-map gaps around narrow digits like '1' for CTC space prediction
+	stretched_w = int(new_w * 1.35)
+	stretched = cv2.resize(roi, (stretched_w, target_h), interpolation=cv2.INTER_CUBIC)
+	bg2 = _get_border_bg_color(stretched)
+	v2 = cv2.copyMakeBorder(stretched, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=bg2)
+
+	# Variant 3: Soft Backlit Normalized with Border Padding
 	norm_gray = _normalize_backlit_crop(resized)
-
-	pad = 12
-
-	# Variant 1: Normalized grayscale padded with crop background median
-	v1_bg = int(np.median(norm_gray))
-	v1 = cv2.copyMakeBorder(norm_gray, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=v1_bg)
-
-	# Variant 2: Contrast stretched padded with crop background median (NO BORDER_REPLICATE)
-	p2, p98 = np.percentile(resized, (2, 98))
-	if p98 > p2:
-		v2_base = np.clip((resized.astype(np.float32) - p2) * (255.0 / (p98 - p2)), 0, 255).astype(np.uint8)
-	else:
-		v2_base = resized.copy()
-	v2_bg = int(np.median(v2_base))
-	v2 = cv2.copyMakeBorder(v2_base, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=v2_bg)
-
-	# Variant 3: Bilateral filter padded with crop background median (NO BORDER_REPLICATE)
-	v3_base = cv2.bilateralFilter(resized, d=5, sigmaColor=50, sigmaSpace=50)
-	v3_bg = int(np.median(v3_base))
-	v3 = cv2.copyMakeBorder(v3_base, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=v3_bg)
+	bg3 = _get_border_bg_color(norm_gray)
+	v3 = cv2.copyMakeBorder(norm_gray, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=bg3)
 
 	return [v1, v2, v3]
 
@@ -636,7 +639,6 @@ def _score_field_candidate(field_name: str, raw_text: str, value: Any, conf: flo
 	if value is None or (isinstance(value, str) and (value == "UNKNOWN" or not value)):
 		return -1.0
 
-	# Base validity score + model confidence score
 	score = 2.0 + (conf * 2.0)
 
 	if field_name == "temperature" and isinstance(value, int):
@@ -654,6 +656,10 @@ def _score_field_candidate(field_name: str, raw_text: str, value: Any, conf: flo
 	elif field_name == "date_field":
 		if isinstance(value, str) and re.search(r"\d{2}/\d{2}/\d{2}", value):
 			score += 3.0
+	elif "schedule" in field_name or "dashboard" in field_name:
+		# Reward candidates that preserve clean spacing between words and standalone digits
+		if isinstance(value, str) and re.search(r"[A-Za-z]\s+\d", value):
+			score += 0.5
 
 	return score
 
