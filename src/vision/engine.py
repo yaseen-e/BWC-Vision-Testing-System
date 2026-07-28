@@ -320,7 +320,7 @@ def _build_display_mask(frame: np.ndarray) -> np.ndarray:
 	value = hsv[:, :, 2]
 
 	# Boost blue hue brightness before thresholding
-	blue_hue_mask = (hue >= 90) & (hue <= 130)
+	blue_hue_mask = (hue >= 90) & (hue <= 150)
 	boosted_value = value.astype(np.float32)
 	boosted_value[blue_hue_mask] = np.clip(boosted_value[blue_hue_mask] * 1.6, 0, 255)
 	value = boosted_value.astype(np.uint8)
