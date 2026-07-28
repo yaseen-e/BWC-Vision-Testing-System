@@ -317,8 +317,21 @@ def _build_display_mask(frame: np.ndarray) -> np.ndarray:
 		raise ValueError("frame must be a non-empty image")
 
 	hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+	hue = hsv[:, :, 0]
 	saturation = hsv[:, :, 1]
 	value = hsv[:, :, 2]
+
+	# -------------------------------------------------------------------------
+	# BOOST BLUE HUE BRIGHTNESS BEFORE THRESHOLDING
+	# -------------------------------------------------------------------------
+	# Identify blue pixels (OpenCV Hue range for blue: ~90 to 130)
+	blue_hue_mask = (hue >= 90) & (hue <= 130)
+
+	# Multiply value (brightness) for blue pixels to raise overall screen luminance
+	boosted_value = value.astype(np.float32)
+	boosted_value[blue_hue_mask] = np.clip(boosted_value[blue_hue_mask] * 1.6, 0, 255)
+	value = boosted_value.astype(np.uint8)
+	# -------------------------------------------------------------------------
 
 	_, saturated_mask = cv2.threshold(saturation, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 	_, bright_mask = cv2.threshold(value, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
@@ -329,7 +342,6 @@ def _build_display_mask(frame: np.ndarray) -> np.ndarray:
 	mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)))
 
 	return mask
-
 
 def _find_display_contour(frame: np.ndarray, mask: np.ndarray, min_area: int = 3000) -> Optional[np.ndarray]:
 	"""Find the raw display rectangle."""
