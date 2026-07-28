@@ -682,7 +682,7 @@ def _score_field_candidate(field_name: str, raw_text: str, value: Any, conf: flo
 			score += 4.0
 		else:
 			score += 1.0
-	elif field_name.startswith("dashboard_info_line") or "schedule" in field_name:
+	elif field_name.startswith("dashboard_info_line"):
 		if isinstance(value, str) and len(value) >= 2:
 			score += 2.0
 			if len(value) >= 5:
