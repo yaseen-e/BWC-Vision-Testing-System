@@ -2,13 +2,15 @@ from pathlib import Path
 import sys
 import json
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SRC_ROOT = PROJECT_ROOT / "src"
 
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
+for path in (PROJECT_ROOT, SRC_ROOT):
+    path_str = str(path)
+    if path_str not in sys.path:
+        sys.path.insert(0, path_str)
 
-from motion import servo_driver
+from src.motion import servos as servo_driver
 
 CAL_FILE = Path(__file__).parent / "servo_calibration.json"
 
