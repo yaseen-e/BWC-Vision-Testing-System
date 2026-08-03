@@ -193,8 +193,8 @@ def send_report(ocr_result: str, simulated: bool = False) -> None:
 		return
 
 	try:
-		response = f"OCR ready\n{ocr_result}\n"
-		_CONN.sendall(response.encode())
+#		response = f"OCR ready\n{ocr_result}\n"
+#		_CONN.sendall(response.encode())
 		print("[NETWORK] Sent OCR report to LabVIEW.")
 	except Exception as exc:
 		print(f"[WARNING] Failed to send OCR report: {exc}")
