@@ -26,7 +26,7 @@ except Exception:  # Hardware/environment dependent
 BUS_NUM = 1
 MIN_PULSE = 500
 MAX_PULSE = 2500
-STROKE_LENGTH = 55.0
+STROKE_LENGTH = 35.0
 
 CAL_FILE = Path(__file__).resolve().parents[1] / "utilities" / "servo_calibration.json"
 
